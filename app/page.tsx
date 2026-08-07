@@ -8,7 +8,7 @@ export default function Home() {
         Turn Notes into Knowledge
       </p>
       <p className="max-w-md text-sm text-zinc-500 dark:text-zinc-500">
-        Lumora is coming soon. Check back for updates.
+        Lumora is under active development. Check back soon.
       </p>
     </main>
   );
