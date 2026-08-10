@@ -1,15 +1,17 @@
+import ChatInterface from "./ChatInterface";
+
 export default function GeneratePage() {
   return (
-    <main className="flex flex-1 flex-col items-center justify-center gap-4 px-6 py-24 text-center">
-      <h1 className="text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
-        Generate
-      </h1>
-      <p className="max-w-md text-lg text-zinc-600 dark:text-zinc-400">
-        Turn your raw notes into structured knowledge with a single click.
-      </p>
-      <span className="rounded-full border border-zinc-300 px-4 py-1 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-500">
-        Coming Soon
-      </span>
+    <main className="flex flex-1 flex-col items-center gap-4 px-4 py-8 sm:px-6">
+      <div className="flex flex-col items-center gap-2 text-center">
+        <h1 className="text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
+          Generate
+        </h1>
+        <p className="max-w-md text-sm text-zinc-600 dark:text-zinc-400">
+          Chat with Lumora to explore and understand your topics.
+        </p>
+      </div>
+      <ChatInterface />
     </main>
   );
 }
