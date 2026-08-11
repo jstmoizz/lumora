@@ -5,14 +5,14 @@ export async function POST(req: Request) {
   // Fail fast with an actionable message instead of letting the request
   // reach Anthropic and fail deep inside streamText, where the client only
   // ever sees the AI SDK's generic "An error occurred." stream error.
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.GROQ_API_KEY) {
     console.error(
-      "[api/chat] ANTHROPIC_API_KEY is not set. Add it to .env.local at the project root.",
+      "[api/chat] GROQ_API_KEY is not set. Add it to .env.local at the project root.",
     );
     return Response.json(
       {
         error:
-          "Server is not configured: ANTHROPIC_API_KEY is missing. Add it to .env.local and restart the dev server.",
+          "Server is not configured: GROQ_API_KEY is missing. Add it to .env.local and restart the dev server.",
       },
       { status: 500 },
     );

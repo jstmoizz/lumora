@@ -3,26 +3,29 @@
  *
  * The API route (`app/api/chat/route.ts`) imports the model, system prompt,
  * and generation settings from here rather than defining them inline, so
- * every place that talks to Claude stays in sync when this changes.
+ * every place that talks to the model stays in sync when this changes.
  */
 
-import { anthropic } from "@ai-sdk/anthropic";
+import { groq } from "@ai-sdk/groq";
 
 /**
- * The Claude model Lumora's chat feature uses.
+ * The Groq model Lumora's chat feature uses.
  *
- * `claude-sonnet-5` is Anthropic's current balanced model: strong reasoning
- * and writing quality with lower cost/latency than the Opus tier, which
- * suits a conversational study assistant better than a heavier model.
+ * `llama-3.3-70b-versatile` is a production-tier (not preview) Groq model
+ * built for broad instruction-following and general reasoning, which suits
+ * a conversational study assistant. Unlike Groq's reasoning-focused models
+ * (e.g. `qwen/qwen3-32b`, `openai/gpt-oss-*`), it returns plain chat text
+ * without a separate reasoning-token stream, so it drops into the existing
+ * streaming setup without any provider-option changes.
  *
- * The `anthropic()` provider reads the API key from the `ANTHROPIC_API_KEY`
+ * The `groq()` provider reads the API key from the `GROQ_API_KEY`
  * environment variable automatically — the key is never read, stored, or
  * hardcoded in this file, and this module must only ever be imported by
  * server-side code (route handlers, server components).
  */
-export const CHAT_MODEL_ID = "claude-sonnet-5";
+export const CHAT_MODEL_ID = "llama-3.3-70b-versatile";
 
-export const chatModel = anthropic(CHAT_MODEL_ID);
+export const chatModel = groq(CHAT_MODEL_ID);
 
 /**
  * System prompt establishing Lumora's assistant persona.
