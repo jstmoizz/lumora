@@ -11,10 +11,11 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, isTextUIPart } from "ai";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import { ArrowDownIcon } from "lucide-react";
+import { ArrowDownIcon, CircleAlertIcon, RotateCcwIcon } from "lucide-react";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { LumoraUIMessage } from "@/lib/ai/tools";
 import QuizToolPart from "./QuizToolPart";
 
@@ -37,9 +38,75 @@ function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
+// The AI SDK surfaces every chat failure as a plain `Error`, whether it's a
+// network drop, an HTTP/API error, or a mid-stream failure — there's no
+// discriminated error type to switch on. We only special-case the one kind
+// we can safely detect client-side (a fetch that never reached the server,
+// which the SDK itself throws as a TypeError) so we can point the user at
+// their connection; everything else — HTTP failures, rate limits, mid-stream
+// errors — collapses into one generic message. `error.message` itself is
+// never rendered: it may contain provider/internal detail we don't want to
+// expose.
+function getChatErrorCopy(error: Error | undefined) {
+  const isNetworkError =
+    error instanceof TypeError && /fetch|network/i.test(error.message);
+
+  return isNetworkError
+    ? {
+        title: "Couldn't reach Lumora",
+        description: "Check your connection, then retry.",
+      }
+    : {
+        title: "Couldn't finish that response",
+        description: "Your message wasn't lost — you can retry it.",
+      };
+}
+
+function ChatErrorCard({
+  error,
+  retrying,
+  onRetry,
+}: {
+  error: Error | undefined;
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  const { title, description } = getChatErrorCopy(error);
+
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-red-500/20 bg-red-500/5 p-4 dark:border-red-500/25 dark:bg-red-500/10">
+      <div className="flex items-center gap-2.5">
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-red-500/10 text-red-600 dark:bg-red-500/15 dark:text-red-400">
+          <CircleAlertIcon aria-hidden="true" className="size-4" />
+        </div>
+        <div className="flex flex-col">
+          <p className="text-sm font-semibold text-foreground">{title}</p>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            {description}
+          </p>
+        </div>
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={onRetry}
+        disabled={retrying}
+        className="w-fit gap-1.5 rounded-xl transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03] disabled:hover:translate-y-0 disabled:hover:scale-100"
+      >
+        <RotateCcwIcon
+          aria-hidden="true"
+          className={cn("size-3.5", retrying && "motion-safe:animate-spin")}
+        />
+        {retrying ? "Retrying…" : "Retry"}
+      </Button>
+    </div>
+  );
+}
+
 export default function ChatInterface() {
   const [input, setInput] = useState("");
-  const { messages, sendMessage, status, stop, error } =
+  const { messages, sendMessage, regenerate, status, stop, error } =
     useChat<LumoraUIMessage>({
       transport: new DefaultChatTransport({ api: "/api/chat" }),
     });
@@ -47,6 +114,14 @@ export default function ChatInterface() {
   const isGenerating = status === "submitted" || status === "streaming";
   const canSend = input.trim().length > 0 && status === "ready";
   const isEmpty = messages.length === 0;
+  const hasError = status === "error";
+
+  // A ref (not just the mirrored `isRetrying` state below) so the guard is
+  // effective the instant a second click happens — state updates only take
+  // effect on the next render, which is too late to stop a synchronous
+  // double-click from firing `regenerate()` twice.
+  const isRetryingRef = useRef(false);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   // Mirrors "is the user currently near the bottom", read on every scroll
@@ -222,6 +297,25 @@ export default function ChatInterface() {
     sendMessage({ text: prompt });
   }
 
+  // Re-requests the failed turn via the SDK's own `regenerate` — it drops
+  // the failed (possibly partial) assistant message and resends from the
+  // last user message already in `messages`, so this never appends a
+  // duplicate user message. The ref guard makes rapid double-clicks a
+  // no-op; `regenerate` resolves rather than throws even if the retry
+  // itself fails, since AbstractChat routes retry failures into `status`
+  // instead.
+  async function handleRetry() {
+    if (isRetryingRef.current || status !== "error") return;
+    isRetryingRef.current = true;
+    setIsRetrying(true);
+    try {
+      await regenerate();
+    } finally {
+      isRetryingRef.current = false;
+      setIsRetrying(false);
+    }
+  }
+
   // No assistant message exists yet for this turn (the API hasn't sent the
   // message-start event). Once it does, the per-message "pending" branch
   // below takes over with the same "Thinking..." text, so there is no
@@ -229,6 +323,14 @@ export default function ChatInterface() {
   const lastMessage = messages[messages.length - 1];
   const awaitingAssistantMessage =
     status === "submitted" && (!lastMessage || lastMessage.role === "user");
+  // A failure that happened before any assistant content ever appeared for
+  // this turn — network failure, or an HTTP/API error returned before the
+  // stream started. The failed turn has no assistant message to attach an
+  // inline error to, so it renders as its own row instead (mirrors
+  // `awaitingAssistantMessage` above, which handles the same "no assistant
+  // message yet" gap for the pending case).
+  const erroredBeforeAssistantMessage =
+    hasError && (!lastMessage || lastMessage.role === "user");
 
   const composer = (
     <form
@@ -265,12 +367,6 @@ export default function ChatInterface() {
       )}
     </form>
   );
-
-  const errorBanner = error ? (
-    <p className="text-sm text-red-600 dark:text-red-400">
-      Something went wrong: {error.message}
-    </p>
-  ) : null;
 
   return (
     <div className="flex w-full min-h-0 max-w-2xl flex-1 flex-col gap-4">
@@ -314,8 +410,6 @@ export default function ChatInterface() {
               </Button>
             ))}
           </div>
-
-          {errorBanner}
 
           <div ref={emptyComposerRef} className="w-full">
             {composer}
@@ -362,6 +456,12 @@ export default function ChatInterface() {
                     isLastMessage &&
                     !hasRenderableContent &&
                     isGenerating;
+                  // This message is the one the current failed turn was
+                  // streaming into (possibly with no content at all yet) —
+                  // render whatever it managed to produce, followed by the
+                  // error card, instead of a "Thinking..." indicator that
+                  // will now never resolve.
+                  const isErroredMessage = !isUser && isLastMessage && hasError;
 
                   return (
                     <div
@@ -405,6 +505,13 @@ export default function ChatInterface() {
                                 }
                                 return null;
                               })}
+                              {isErroredMessage && (
+                                <ChatErrorCard
+                                  error={error}
+                                  retrying={isRetrying}
+                                  onRetry={handleRetry}
+                                />
+                              )}
                             </div>
                           )}
                         </div>
@@ -418,6 +525,18 @@ export default function ChatInterface() {
                     <span className="text-[15px] text-zinc-500 motion-safe:animate-pulse dark:text-zinc-500">
                       Thinking&hellip;
                     </span>
+                  </div>
+                )}
+
+                {erroredBeforeAssistantMessage && (
+                  <div className="flex justify-start">
+                    <div className="w-full max-w-sm">
+                      <ChatErrorCard
+                        error={error}
+                        retrying={isRetrying}
+                        onRetry={handleRetry}
+                      />
+                    </div>
                   </div>
                 )}
               </div>
@@ -441,8 +560,6 @@ export default function ChatInterface() {
               </div>
             )}
           </div>
-
-          {errorBanner}
 
           {composer}
         </>
