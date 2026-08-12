@@ -1,5 +1,11 @@
-import { convertToModelMessages, streamText, type UIMessage } from "ai";
+import {
+  convertToModelMessages,
+  stepCountIs,
+  streamText,
+  type UIMessage,
+} from "ai";
 import { chatModel, GENERATION_CONFIG, SYSTEM_PROMPT } from "@/lib/ai/config";
+import { lumoraTools } from "@/lib/ai/tools";
 
 export async function POST(req: Request) {
   // Fail fast with an actionable message instead of letting the request
@@ -39,6 +45,11 @@ export async function POST(req: Request) {
     model: chatModel,
     instructions: SYSTEM_PROMPT,
     messages: modelMessages,
+    tools: lumoraTools,
+    // Default is a single step, which would end the turn right after a
+    // tool call with no room for the model to respond to its result.
+    // Two steps lets it call `createQuiz` and then comment on the result.
+    stopWhen: stepCountIs(2),
     ...GENERATION_CONFIG,
   });
 

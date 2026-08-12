@@ -15,6 +15,8 @@ import { ArrowDownIcon } from "lucide-react";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { Button } from "@/components/ui/button";
+import type { LumoraUIMessage } from "@/lib/ai/tools";
+import QuizToolPart from "./QuizToolPart";
 
 // How close to the bottom (in pixels) counts as "at the bottom" for the
 // purpose of re-engaging auto-scroll. A small tolerance, not an exact 0,
@@ -37,9 +39,10 @@ function prefersReducedMotion() {
 
 export default function ChatInterface() {
   const [input, setInput] = useState("");
-  const { messages, sendMessage, status, stop, error } = useChat({
-    transport: new DefaultChatTransport({ api: "/api/chat" }),
-  });
+  const { messages, sendMessage, status, stop, error } =
+    useChat<LumoraUIMessage>({
+      transport: new DefaultChatTransport({ api: "/api/chat" }),
+    });
 
   const isGenerating = status === "submitted" || status === "streaming";
   const canSend = input.trim().length > 0 && status === "ready";
@@ -344,8 +347,21 @@ export default function ChatInterface() {
                     .map((part) => part.text)
                     .join("");
                   const isLastMessage = index === messages.length - 1;
+                  // Whether this message already has anything worth
+                  // rendering — text content or a tool call that's at
+                  // least started. A tool part existing (even still in
+                  // input-streaming) counts, since QuizToolPart renders
+                  // its own "preparing" state instead of leaving a gap.
+                  const hasRenderableContent = message.parts.some(
+                    (part) =>
+                      (part.type === "text" && part.text.length > 0) ||
+                      part.type === "tool-createQuiz",
+                  );
                   const isPending =
-                    !isUser && isLastMessage && text.length === 0 && isGenerating;
+                    !isUser &&
+                    isLastMessage &&
+                    !hasRenderableContent &&
+                    isGenerating;
 
                   return (
                     <div
@@ -364,7 +380,32 @@ export default function ChatInterface() {
                               Thinking&hellip;
                             </span>
                           ) : (
-                            <Streamdown>{text}</Streamdown>
+                            // Walk parts in the order the model produced
+                            // them — text parts render through Streamdown
+                            // as before; a `createQuiz` tool part renders
+                            // via QuizToolPart, keyed by toolCallId so it
+                            // stays mounted across its own state changes.
+                            <div className="flex flex-col gap-3">
+                              {message.parts.map((part, partIndex) => {
+                                if (part.type === "text") {
+                                  if (!part.text) return null;
+                                  return (
+                                    <Streamdown key={partIndex}>
+                                      {part.text}
+                                    </Streamdown>
+                                  );
+                                }
+                                if (part.type === "tool-createQuiz") {
+                                  return (
+                                    <QuizToolPart
+                                      key={part.toolCallId}
+                                      part={part}
+                                    />
+                                  );
+                                }
+                                return null;
+                              })}
+                            </div>
                           )}
                         </div>
                       )}
