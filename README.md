@@ -4,7 +4,12 @@
 
 Lumora is a Next.js study assistant application. The currently implemented feature is the **central AI chat/generation interface**: a streaming conversational assistant, available at [`/generate`](app/generate), that lets a user ask questions and receive answers from an LLM in real time.
 
-Other routes in the app (`/about`, `/history`, `/settings`) are placeholder pages for future work and are not part of this implementation.
+Other product routes in the app (`/about`, `/history`, `/settings`) are placeholder pages for future work and are not part of this implementation.
+
+Two auxiliary routes exist outside the main nav ([`NavBar.tsx`](app/components/NavBar.tsx) links only Home/Generate/History/About/Settings):
+
+- [`/health`](app/health/page.tsx) — a server-rendered status page that pings an external API and reports operational/unavailable.
+- [`/playground`](app/playground) — a dev-only area for coursework exercises (hand-built ARIA patterns and a state-driven animated button); see [§6](#6-playground).
 
 ## 2. Key implemented features
 
@@ -22,6 +27,7 @@ Other routes in the app (`/about`, `/history`, `/settings`) are placeholder page
 - **Jump-to-latest button** — appears once the user has scrolled away from the bottom, and returns to the latest message without stealing focus from the input.
 - **Responsive/mobile-friendly layout** — the chat UI and page shell use responsive Tailwind classes and remain usable at phone width.
 - **Server-side API key handling** — the Groq API key is read only on the server and is never sent to or accessible from the client.
+- **Route-level error boundary** — [`app/generate/error.tsx`](app/generate/error.tsx) catches rendering errors under `/generate` (e.g. from `ChatInterface`, GSAP, or Streamdown) and shows a recoverable "Try again" card instead of crashing the whole app; the root layout's nav keeps rendering above it.
 
 ## 3. Tech stack
 
@@ -33,7 +39,9 @@ Other routes in the app (`/about`, `/history`, `/settings`) are placeholder page
 - [Groq](https://groq.com) (`@ai-sdk/groq`) — the model provider used for chat generation
 - [Zod](https://zod.dev) — schema validation for the `createQuiz` tool's input
 - [Streamdown](https://github.com/vercel/streamdown) — streaming-safe Markdown rendering
-- [Radix UI](https://www.radix-ui.com) / [shadcn](https://ui.shadcn.com) — the `Button` component used in the chat UI (`components/ui/`)
+- [Radix UI](https://www.radix-ui.com) / [shadcn](https://ui.shadcn.com) — `components/ui/` (`Button`, and the generated `Dialog`/`Tabs` wrappers used for comparison in [§6](#6-playground))
+- [GSAP](https://gsap.com) (`gsap`, `@gsap/react`) — entrance/transition animations across pages (Home, About, History, Settings, the `/generate` error card, `AnimatedSendButton`), skipped when `prefers-reduced-motion` is set
+- [lucide-react](https://lucide.dev) — icon set used throughout the UI
 
 ## 4. Architecture
 
@@ -109,7 +117,27 @@ z.object({
 
 The chat route also sets `stopWhen: stepCountIs(2)`, so the model gets a turn to comment on the quiz after calling the tool instead of the AI SDK's single-step default ending the turn immediately after the tool call.
 
-## 6. Local setup
+## 6. Playground
+
+[`/playground`](app/playground/page.tsx) is a dev-only area (not linked from the main nav, not part of the product) that hosts two coursework exercises. It links out to three sub-pages and embeds a live demo directly on the page itself.
+
+### Hand-built ARIA patterns vs. shadcn/ui
+
+Three interaction patterns from the W3C ARIA Authoring Practices Guide were built by hand, then compared against the equivalent shadcn/ui-generated components:
+
+| Exercise | Handmade | shadcn/Radix equivalent |
+|---|---|---|
+| Disclosure | [`app/playground/disclosure/Disclosure.tsx`](app/playground/disclosure/Disclosure.tsx) | — |
+| Tabs | [`app/playground/tabs/Tabs.tsx`](app/playground/tabs/Tabs.tsx) | [`components/ui/tabs.tsx`](components/ui/tabs.tsx) |
+| Modal | [`app/playground/modal/Modal.tsx`](app/playground/modal/Modal.tsx) | [`components/ui/dialog.tsx`](components/ui/dialog.tsx) |
+
+The handmade components implement their own focus trapping, focus restoration, and keyboard handling (arrow keys/Home/End with roving `tabIndex` for Tabs; Escape + manual Tab-wrapping for Modal) and were confirmed correct by manual keyboard testing. The detailed behavioral diff against Radix's primitives (focusability detection, inert background isolation, portal rendering, RTL/orientation support, outside-click dismissal) is written up in [`NOTES.md`](NOTES.md).
+
+### `AnimatedSendButton` ("Buttons with a Brain")
+
+[`app/components/playground/AnimatedSendButton.tsx`](app/components/playground/AnimatedSendButton.tsx) is a reusable Send button driven by an explicit `idle → loading → success/error` state machine (`useReducer`), demoed live on the Playground page with toggles for a simulated success/error outcome and a disabled state. GSAP only ever reacts to the current state — it never decides it. Motion specifics (hover lift, a 220ms GSAP crossfade between states, a one-shot error shake, `animate-spin` for loading) are documented inline as `MOTION_DECISIONS` on the playground page, and all GSAP movement is skipped under `prefers-reduced-motion` while state/label/icon/color changes still happen immediately. This component is a standalone demo — it is not wired into the real `/generate` chat flow.
+
+## 7. Local setup
 
 ```bash
 npm install
@@ -129,13 +157,13 @@ npm run dev
 
 The chat interface is available at `/generate`.
 
-## 7. Environment & security notes
+## 8. Environment & security notes
 
 - `.env.local` must never be committed. It is excluded via `.gitignore` (`.env*`, with `.env.example` explicitly excepted).
 - `.env.example` contains only a placeholder value (`GROQ_API_KEY=your_api_key_here`) and is safe to commit.
 - The API key is only ever read server-side (inside `lib/ai/config.ts`); no client code imports it.
 
-## 8. Verification
+## 9. Verification
 
 The following checks have been run successfully against the current implementation:
 
