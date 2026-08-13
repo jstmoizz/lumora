@@ -129,13 +129,51 @@
   html {
     @apply font-sans;
   }
+
+  /*
+   * Site-wide scrollbar baseline (document scroll + any incidental
+   * overflow container, e.g. the health page's <pre>). `scrollbar-width`/
+   * `scrollbar-color` are inherited, so setting them once on `html` covers
+   * every descendant in Firefox. The bare `::-webkit-scrollbar` selector
+   * (no compound before it) is equivalent to `*::-webkit-scrollbar`, so it
+   * reaches the same set of elements in Chromium/WebKit. Same color-mix
+   * recipe as `.chat-scrollbar` below, which sits in `@layer utilities`
+   * and therefore still wins there by layer order alone.
+   */
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--foreground) 20%, transparent)
+      transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--foreground) 20%, transparent);
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklch, var(--foreground) 35%, transparent);
+  }
 }
 
 /*
  * Thin, low-contrast scrollbar for the Generate chat history only. Scoped
  * to this single class (applied to `scrollContainerRef` in
  * ChatInterface.tsx) rather than styled globally, so no other scrollable
- * element in the app is affected.
+ * element in the app is affected. Values match the site-wide baseline
+ * above (`@layer base`) for visual consistency — kept as its own rule
+ * because Tailwind's layer order (base < utilities) guarantees it stays
+ * in effect regardless of selector specificity, and because Generate's
+ * behavior must remain untouched.
  */
 @layer utilities {
   .chat-scrollbar {
