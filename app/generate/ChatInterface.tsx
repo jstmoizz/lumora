@@ -4,6 +4,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
@@ -24,14 +25,63 @@ import QuizToolPart from "./QuizToolPart";
 // so sub-pixel/rounding scroll positions don't falsely look "scrolled up".
 const NEAR_BOTTOM_THRESHOLD_PX = 64;
 
-// Suggestions shown in the empty state to demonstrate what Lumora can help
-// with. Purely illustrative copy — clicking one sends it as-is via the same
-// `sendMessage` path as the composer, no separate submission logic.
-const EXAMPLE_PROMPTS = [
+// Curated pool of study-related suggestions shown in the empty state.
+// Spans multiple subjects (not just CS) and mixes plain "explain" prompts
+// with "quiz me" prompts that exercise the `createQuiz` tool — a fresh,
+// random subset of these is picked per page mount (see `pickRandomPrompts`
+// below). Purely illustrative copy — clicking one sends it as-is via the
+// same `sendMessage` path as the composer, no separate submission logic.
+const EXAMPLE_PROMPT_POOL = [
   "Explain photosynthesis",
   "Quiz me on data structures",
   "Explain binary search",
-];
+  "Quiz me on world history",
+  "Help me understand Newton's laws of motion",
+  "Explain how neural networks work",
+  "Quiz me on the periodic table",
+  "Break down Big-O notation for me",
+  "Explain the water cycle",
+  "Quiz me on grammar rules",
+  "Help me understand supply and demand",
+  "Explain recursion like I'm a beginner",
+  "Quiz me on the solar system",
+] as const;
+
+// Number of suggestions shown at once — unchanged from the original UI.
+const VISIBLE_EXAMPLE_COUNT = 3;
+
+// Fisher-Yates shuffle + slice: picks `count` distinct prompts from `pool`
+// with no duplicates, in random order.
+function pickRandomPrompts(
+  pool: readonly string[],
+  count: number,
+): string[] {
+  const shuffled = [...pool];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled.slice(0, count);
+}
+
+// Deterministic fallback used only for the server-rendered/pre-hydration
+// snapshot below, so the very first client render matches the server's
+// markup exactly (Math.random() would otherwise diverge between the two
+// and trigger a hydration mismatch).
+const SERVER_EXAMPLE_PROMPTS = EXAMPLE_PROMPT_POOL.slice(
+  0,
+  VISIBLE_EXAMPLE_COUNT,
+);
+function getServerExamplePrompts(): string[] {
+  return SERVER_EXAMPLE_PROMPTS;
+}
+
+// This "store" never changes/emits, so there's nothing to subscribe to —
+// `useSyncExternalStore` still requires a subscribe function, and an inert
+// one is the correct shape when the snapshot is only ever read once.
+function subscribeToNothing() {
+  return () => {};
+}
 
 function prefersReducedMotion() {
   if (typeof window === "undefined") return true;
@@ -110,6 +160,29 @@ export default function ChatInterface() {
     useChat<LumoraUIMessage>({
       transport: new DefaultChatTransport({ api: "/api/chat" }),
     });
+
+  // Randomized once per mount (cached in the ref, computed lazily on first
+  // read) and never recomputed afterward — a fresh visit remounts this
+  // component and gets a new subset. `useSyncExternalStore`'s server
+  // snapshot keeps this hydration-safe: React renders the deterministic
+  // `getServerExamplePrompts()` value through hydration to match the
+  // server-rendered HTML, then swaps to the real random snapshot right
+  // after — no `Math.random()` call ever runs during render itself, so
+  // there's nothing for React to mismatch against.
+  const randomExamplePromptsRef = useRef<string[] | null>(null);
+  const examplePrompts = useSyncExternalStore(
+    subscribeToNothing,
+    () => {
+      if (randomExamplePromptsRef.current === null) {
+        randomExamplePromptsRef.current = pickRandomPrompts(
+          EXAMPLE_PROMPT_POOL,
+          VISIBLE_EXAMPLE_COUNT,
+        );
+      }
+      return randomExamplePromptsRef.current;
+    },
+    getServerExamplePrompts,
+  );
 
   const isGenerating = status === "submitted" || status === "streaming";
   const canSend = input.trim().length > 0 && status === "ready";
@@ -397,12 +470,13 @@ export default function ChatInterface() {
             aria-label="Example prompts"
             className="flex max-w-md flex-wrap items-center justify-center gap-2"
           >
-            {EXAMPLE_PROMPTS.map((prompt) => (
+            {examplePrompts.map((prompt, index) => (
               <Button
-                key={prompt}
+                key={index}
                 type="button"
                 variant="outline"
                 size="sm"
+                disabled={status !== "ready"}
                 onClick={() => handleExampleClick(prompt)}
                 className="rounded-full border-zinc-300 font-normal text-zinc-600 transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03] dark:border-zinc-700 dark:text-zinc-400"
               >
