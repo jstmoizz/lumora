@@ -4,7 +4,7 @@
 
 Lumora is a Next.js study assistant application. The currently implemented feature is the **central AI chat/generation interface**: a streaming conversational assistant, available at [`/generate`](app/generate), that lets a user ask questions and receive answers from an LLM in real time.
 
-Other product routes in the app (`/about`, `/history`, `/settings`) are placeholder pages for future work and are not part of this implementation.
+Other product routes in the app (`/about`, `/history`, `/settings`) are placeholder pages for future work and are not part of this implementation. [`/explore`](app/explore) is a second implemented feature — an abstract 3D visualization of how study topics relate to each other; see [§10](#10-lumora-knowledge-space-explore).
 
 Two auxiliary routes exist outside the main nav ([`NavBar.tsx`](app/components/NavBar.tsx) links only Home/Generate/History/About/Settings):
 
@@ -42,6 +42,7 @@ Two auxiliary routes exist outside the main nav ([`NavBar.tsx`](app/components/N
 - [Radix UI](https://www.radix-ui.com) / [shadcn](https://ui.shadcn.com) — `components/ui/` (`Button`, and the generated `Dialog`/`Tabs` wrappers used for comparison in [§6](#6-playground))
 - [GSAP](https://gsap.com) (`gsap`, `@gsap/react`) — entrance/transition animations across pages (Home, About, History, Settings, the `/generate` error card, `AnimatedSendButton`), skipped when `prefers-reduced-motion` is set
 - [lucide-react](https://lucide.dev) — icon set used throughout the UI
+- [three.js](https://threejs.org) / [React Three Fiber](https://r3f.docs.pmnd.rs) (`three`, `@react-three/fiber`) / [drei](https://github.com/pmndrs/drei) (`@react-three/drei`) — the `/explore` 3D knowledge space (see [§10](#10-lumora-knowledge-space-explore)); not used anywhere else in the app
 
 ## 4. Architecture
 
@@ -173,3 +174,22 @@ The following checks have been run successfully against the current implementati
 - Manual testing of streaming responses, Stop generation, multi-turn conversation, Markdown rendering, and scrolling behavior (auto-scroll, scroll lock, jump-to-latest)
 - Manual testing of the `createQuiz` tool end-to-end (a "quiz me on..." prompt) and confirmation that a normal, non-quiz prompt still streams plain text exactly as before
 - Direct testing of `createQuizTool`'s `execute` with deliberately invalid input (duplicate answer options) to confirm the `output-error` path
+- `/explore`: topic selection (both the accessible topic-button list and the 3D/fallback nodes drive the same state), the topic panel's content and "Back to overview," keyboard-only activation of a topic button, `prefers-reduced-motion` emulation (Playwright's `page.emulateMedia`), manual mobile/touch verification (pinch-zoom, one-finger orbit, tap-to-select at phone width), and manual verification that forcing `canvas.getContext` to return `null` falls back to the static knowledge-space map instead of a blank area — see [§10](#10-lumora-knowledge-space-explore)
+
+## 10. Lumora Knowledge Space (`/explore`)
+
+An abstract 3D visualization of how the topics you study relate to each other — a central Lumora element with a handful of knowledge nodes (Artificial Intelligence, Algorithms, Data Structures, Databases, Networks, Software Engineering, Mathematics) connected by thin, low-opacity lines. It exists to make "knowledge relationships" feel like a real, explorable space rather than a list, while staying restrained: dark background, muted indigo/violet, low-poly procedural geometry (no imported 3D models), no physics, no postprocessing, no particle effects.
+
+**Meaningful interaction — hover → select → focus → context:** hovering a node in the 3D scene gives it a subtle scale/emissive response; clicking one sets it as the selected topic, which smoothly moves the camera to focus on it (a gentle position/target lerp over ~700ms via [`CameraRig.tsx`](app/explore/components/CameraRig.tsx), coordinated with drei's `OrbitControls` rather than fighting it), dims the unselected nodes, and opens an HTML [`TopicPanel`](app/explore/TopicPanel.tsx) with the topic's title, a short summary, and its related topics. "Back to overview" clears the selection and returns the camera. Orbit/zoom (`OrbitControls`, panning disabled, clamped distance/polar angle) is supplemental, not the primary interaction.
+
+**Accessible HTML controls:** canvas objects aren't keyboard- or screen-reader-reachable, so [`TopicControls.tsx`](app/explore/TopicControls.tsx) renders a real `<button>` per topic below the scene, driving the exact same `onSelect(id)` handler as the 3D nodes and the static fallback's own nodes — there's one selection state, three ways to reach it. `TopicPanel` moves focus to its heading when it opens and returns focus to the triggering button when "Back to overview" is used.
+
+**Reduced-motion and WebGL fallback:** [`useReducedMotion.ts`](app/explore/useReducedMotion.ts) and [`webgl.ts`](app/explore/webgl.ts) each expose a `useSyncExternalStore`-backed hook (reactive to the OS setting changing mid-session; SSR-safe with no hydration mismatch). If reduced motion is on or WebGL is unavailable, [`StaticFallback.tsx`](app/explore/StaticFallback.tsx) renders instead of the Canvas — a real 2D map of the same nodes/edges (HTML + SVG lines), not an error message, and selecting a topic there still opens `TopicPanel` exactly as in 3D.
+
+**Mobile/touch:** the canvas is a responsive `65–70vh` panel (not `100vh`, to avoid fighting mobile browser toolbars); `OrbitControls` support one-finger rotate and pinch-zoom out of the box with panning disabled; node taps and the HTML topic buttons both work at phone width; device pixel ratio is capped lower (`[1, 1.5]` vs. `[1, 2]`) on coarse-pointer devices via `matchMedia("(pointer: coarse)")`.
+
+**Performance:** 7 knowledge nodes + 1 central node, low-poly procedural geometry (`icosahedronGeometry`/`octahedronGeometry`), no shadows, no postprocessing, no physics, capped DPR — see [`Scene.tsx`](app/explore/components/Scene.tsx).
+
+**Lazy loading:** `app/explore/page.tsx` is a Server Component with no `three`/`@react-three/*` imports; [`ExploreClient.tsx`](app/explore/ExploreClient.tsx) loads [`Scene.tsx`](app/explore/components/Scene.tsx) via `next/dynamic` with `ssr: false`, so the 3D bundle (confirmed via the build's per-route client-reference manifest to be excluded from every other route, including `/explore`'s own initial HTML) is only fetched by browsers that actually render the Canvas.
+
+**Known non-issue:** the browser console logs a `THREE.Clock: This module has been deprecated` warning during scene interaction. This comes from `@react-three/fiber`'s own internal clock (`state.clock`, the framework-standard way to read elapsed time in `useFrame`), not from application code — an upstream `three`/`@react-three/fiber` version-pairing issue, not something this feature works around.

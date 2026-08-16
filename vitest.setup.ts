@@ -30,3 +30,12 @@ Object.defineProperty(window, "matchMedia", {
     dispatchEvent: () => false,
   }),
 });
+
+// jsdom does not implement canvas.getContext and logs a console warning
+// every time it's called. ExploreClient's WebGL capability check calls it
+// on every render, so stub it to return null quietly — this keeps
+// `useWebglSupported()` false in tests (routing to StaticFallback), which
+// jsdom's real behavior already implies, just without the log noise.
+HTMLCanvasElement.prototype.getContext = vi.fn(
+  () => null,
+) as unknown as typeof HTMLCanvasElement.prototype.getContext;
