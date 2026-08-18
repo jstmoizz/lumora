@@ -45,10 +45,17 @@ export default function TopicPanel({ node, onBack }: TopicPanelProps) {
         must stay fixed-light too rather than flipping to near-black in
         light mode.
       */}
+      {/*
+        This heading takes programmatic focus on every selection change (see
+        the effect above), so it needs its own visible focus style — the
+        default outline is suppressed because it doesn't read well against
+        this panel's fixed-dark background, not because focus should be
+        invisible here.
+      */}
       <h2
         ref={headingRef}
         tabIndex={-1}
-        className="text-sm font-semibold text-zinc-100 outline-none"
+        className="rounded-sm text-sm font-semibold text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-400/80"
       >
         {node.label}
       </h2>

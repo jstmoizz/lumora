@@ -266,7 +266,7 @@ export default function Home() {
         >
           <Link href="/generate">
             Start studying
-            <ArrowRightIcon className="size-4" />
+            <ArrowRightIcon aria-hidden="true" className="size-4" />
           </Link>
         </Button>
       </section>

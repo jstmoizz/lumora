@@ -81,6 +81,15 @@ export default function StaticFallback({
         {CENTRAL_NODE.label}
       </div>
 
+      {/*
+        Pointer-operable only: `TopicControls` below renders this exact same
+        set of topics as real, labeled, keyboard-focusable buttons (the
+        app's designated accessibility surface, per its own comment), so
+        these overlay buttons would otherwise be a second, redundant set of
+        tab stops with the same accessible names. `tabIndex={-1}` +
+        `aria-hidden` keep them clickable for mouse/touch while removing
+        that duplication for keyboard and screen-reader users.
+      */}
       {KNOWLEDGE_NODES.map((node) => {
         const pos = LAYOUT[node.id];
         const isSelected = node.id === selectedNodeId;
@@ -88,7 +97,8 @@ export default function StaticFallback({
           <button
             key={node.id}
             type="button"
-            aria-pressed={isSelected}
+            tabIndex={-1}
+            aria-hidden="true"
             onClick={(event) => onSelect(node.id, event.currentTarget)}
             style={{ top: pos.top, left: pos.left }}
             className={

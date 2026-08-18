@@ -11,19 +11,20 @@ import { groq } from "@ai-sdk/groq";
 /**
  * The Groq model Lumora's chat feature uses.
  *
- * `llama-3.3-70b-versatile` is a production-tier (not preview) Groq model
- * built for broad instruction-following and general reasoning, which suits
- * a conversational study assistant. Unlike Groq's reasoning-focused models
- * (e.g. `qwen/qwen3-32b`, `openai/gpt-oss-*`), it returns plain chat text
- * without a separate reasoning-token stream, so it drops into the existing
- * streaming setup without any provider-option changes.
+ * `llama-3.3-70b-versatile` was deprecated by Groq for free/developer-tier
+ * usage (see console.groq.com/docs/deprecations), which broke this route
+ * with a 404 `model_not_found` error. `openai/gpt-oss-120b` is Groq's
+ * recommended replacement. It's a reasoning model, so responses may
+ * include a separate reasoning stream alongside the chat text; the AI SDK
+ * surfaces that as its own message part, and the existing streaming setup
+ * here doesn't need any changes to keep working.
  *
  * The `groq()` provider reads the API key from the `GROQ_API_KEY`
  * environment variable automatically — the key is never read, stored, or
  * hardcoded in this file, and this module must only ever be imported by
  * server-side code (route handlers, server components).
  */
-export const CHAT_MODEL_ID = "llama-3.3-70b-versatile";
+export const CHAT_MODEL_ID = "openai/gpt-oss-120b";
 
 export const chatModel = groq(CHAT_MODEL_ID);
 

@@ -146,9 +146,15 @@ function QuizCard({ quiz }: { quiz: CreateQuizOutput }) {
           <p className="text-xs font-medium tracking-wide text-zinc-500 uppercase dark:text-zinc-500">
             Quiz
           </p>
-          <h3 className="text-sm font-semibold text-foreground">
+          {/*
+            h2, not h3: once a conversation has started, Generate's empty-
+            state h2 ("What are you studying today?") is unmounted, so this
+            is the first heading after the page's h1 — using h3 here would
+            skip a level.
+          */}
+          <h2 className="text-sm font-semibold text-foreground">
             {quiz.topic}
-          </h3>
+          </h2>
         </div>
       </div>
 

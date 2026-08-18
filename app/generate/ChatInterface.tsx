@@ -125,7 +125,12 @@ function ChatErrorCard({
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-red-500/20 bg-red-500/5 p-4 dark:border-red-500/25 dark:bg-red-500/10">
-      <div className="flex items-center gap-2.5">
+      {/*
+        This card appears mid-conversation with no navigation to cue a
+        screen reader user that something changed — `role="alert"` announces
+        it the moment it mounts, same as it would be seen appear visually.
+      */}
+      <div role="alert" className="flex items-center gap-2.5">
         <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-red-500/10 text-red-600 dark:bg-red-500/15 dark:text-red-400">
           <CircleAlertIcon aria-hidden="true" className="size-4" />
         </div>
@@ -464,6 +469,15 @@ export default function ChatInterface() {
             </p>
           </div>
 
+          {/*
+            DOM order intentionally puts the composer before the example
+            prompts so Tab reaches the primary input first; `order-last`
+            keeps it rendered visually below the prompts as before.
+          */}
+          <div ref={emptyComposerRef} className="order-last w-full">
+            {composer}
+          </div>
+
           <div
             ref={emptyExamplesRef}
             role="group"
@@ -483,10 +497,6 @@ export default function ChatInterface() {
                 {prompt}
               </Button>
             ))}
-          </div>
-
-          <div ref={emptyComposerRef} className="w-full">
-            {composer}
           </div>
         </div>
       ) : (
@@ -550,7 +560,10 @@ export default function ChatInterface() {
                       ) : (
                         <div className="min-w-0 w-full text-[15px] leading-relaxed whitespace-pre-wrap break-words text-foreground">
                           {isPending ? (
-                            <span className="text-zinc-500 motion-safe:animate-pulse dark:text-zinc-500">
+                            <span
+                              role="status"
+                              className="text-zinc-500 motion-safe:animate-pulse dark:text-zinc-500"
+                            >
                               Thinking&hellip;
                             </span>
                           ) : (
@@ -596,7 +609,10 @@ export default function ChatInterface() {
 
                 {awaitingAssistantMessage && (
                   <div className="flex justify-start">
-                    <span className="text-[15px] text-zinc-500 motion-safe:animate-pulse dark:text-zinc-500">
+                    <span
+                      role="status"
+                      className="text-[15px] text-zinc-500 motion-safe:animate-pulse dark:text-zinc-500"
+                    >
                       Thinking&hellip;
                     </span>
                   </div>
@@ -628,7 +644,7 @@ export default function ChatInterface() {
                   onClick={handleJumpToLatest}
                   className="pointer-events-auto gap-1 rounded-full border border-zinc-200 shadow-md transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03] dark:border-zinc-700"
                 >
-                  <ArrowDownIcon className="size-3.5" />
+                  <ArrowDownIcon aria-hidden="true" className="size-3.5" />
                   Jump to latest
                 </Button>
               </div>

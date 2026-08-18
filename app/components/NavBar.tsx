@@ -16,7 +16,10 @@ export default function NavBar() {
   const pathname = usePathname();
 
   return (
-    <nav className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
+    <nav
+      aria-label="Main"
+      className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2"
+    >
       {links.map(({ href, label }) => {
         const isActive = pathname === href;
         return (

@@ -54,13 +54,20 @@ export default function GenerateError({
         <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-red-500/10 text-red-600 dark:bg-red-500/15 dark:text-red-400">
           <CircleAlertIcon aria-hidden="true" className="size-5" />
         </div>
-        <h1 className="text-lg font-semibold tracking-tight text-foreground">
-          Something went wrong
-        </h1>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          We couldn&apos;t load this part of Lumora. Try again, or refresh
-          the page if it keeps happening.
-        </p>
+        {/*
+          This boundary replaces the page's content with no navigation to
+          cue a screen reader user that something changed — `role="alert"`
+          announces it the moment it mounts.
+        */}
+        <div role="alert" className="flex flex-col items-center gap-3">
+          <h1 className="text-lg font-semibold tracking-tight text-foreground">
+            Something went wrong
+          </h1>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            We couldn&apos;t load this part of Lumora. Try again, or refresh
+            the page if it keeps happening.
+          </p>
+        </div>
         <Button
           type="button"
           onClick={reset}
