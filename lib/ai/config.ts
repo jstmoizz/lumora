@@ -7,14 +7,14 @@
  */
 
 import { groq } from "@ai-sdk/groq";
+import { CHAT_MODEL_ID } from "./model";
+
+export { CHAT_MODEL_ID };
 
 /**
- * The Groq model Lumora's chat feature uses.
- *
- * `llama-3.3-70b-versatile` was deprecated by Groq for free/developer-tier
- * usage (see console.groq.com/docs/deprecations), which broke this route
- * with a 404 `model_not_found` error. `openai/gpt-oss-120b` is Groq's
- * recommended replacement. It's a reasoning model, so responses may
+ * The Groq model Lumora's chat feature uses, instantiated from
+ * `CHAT_MODEL_ID` (see `lib/ai/model.ts` for the identifier itself and why
+ * it lives in its own module). It's a reasoning model, so responses may
  * include a separate reasoning stream alongside the chat text; the AI SDK
  * surfaces that as its own message part, and the existing streaming setup
  * here doesn't need any changes to keep working.
@@ -24,8 +24,6 @@ import { groq } from "@ai-sdk/groq";
  * hardcoded in this file, and this module must only ever be imported by
  * server-side code (route handlers, server components).
  */
-export const CHAT_MODEL_ID = "openai/gpt-oss-120b";
-
 export const chatModel = groq(CHAT_MODEL_ID);
 
 /**
