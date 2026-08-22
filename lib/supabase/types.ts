@@ -6,6 +6,13 @@
  * should replace this file with a generated one so it can't drift from the
  * real schema. Until then, keep this in sync by hand whenever
  * `supabase/schema.sql` changes.
+ *
+ * Every table includes `Relationships: []` and the schema includes empty
+ * `Views`/`Functions` — required to satisfy `@supabase/postgrest-js`'s
+ * `GenericTable`/`GenericSchema` constraints (a table type missing
+ * `Relationships`, or a schema missing `Views`/`Functions`, silently falls
+ * back to untyped/`never` query results instead of a compile error, which
+ * is exactly the trap this comment exists to flag).
  */
 
 import type { LumoraUIMessage } from "@/lib/ai/tools";
@@ -38,6 +45,7 @@ export interface Database {
           role?: Role;
           created_at?: string;
         };
+        Relationships: [];
       };
       conversations: {
         Row: {
@@ -61,6 +69,7 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       messages: {
         Row: {
@@ -87,6 +96,7 @@ export interface Database {
           parts?: LumoraUIMessage["parts"];
           created_at?: string;
         };
+        Relationships: [];
       };
       user_settings: {
         Row: {
@@ -113,6 +123,7 @@ export interface Database {
           learning_focus?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       topic_progress: {
         Row: {
@@ -133,7 +144,10 @@ export interface Database {
           last_studied_at?: string | null;
           study_count?: number;
         };
+        Relationships: [];
       };
     };
+    Views: Record<string, never>;
+    Functions: Record<string, never>;
   };
 }

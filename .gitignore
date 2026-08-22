@@ -15,6 +15,9 @@
 /test-results
 /playwright-report
 /blob-report
+# saved Playwright session state (e2e/global-setup.ts) — contains a real
+# (test-account) auth cookie, never commit it
+/e2e/.auth
 
 # next.js
 /.next/

@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import { MathUtils, type Mesh } from "three";
 import { NODE_ACCENTS, type KnowledgeNode as KnowledgeNodeData } from "../data";
+import { familiarityFor, type Familiarity } from "../progress";
 import Glow from "./Glow";
 
 interface KnowledgeNodeProps {
@@ -15,7 +16,32 @@ interface KnowledgeNodeProps {
   isRelated: boolean;
   isDimmed: boolean;
   onSelect: (id: string, trigger?: HTMLElement | null) => void;
+  // The signed-in user's topic_progress.study_count for this node, or
+  // undefined if it's never been studied. Only ever nudges the *baseline*
+  // presence (see FAMILIARITY_* below) — selection/hover feedback stays the
+  // dominant signal regardless of study history.
+  studyCount?: number;
 }
+
+// Restrained, capped bumps layered on top of the existing baseline —
+// personal familiarity should read as "a little more present," never as a
+// second competing visual system. Central Lumora is never touched by these,
+// so it stays dominant regardless of anyone's progress.
+const FAMILIARITY_SCALE_BUMP: Record<Familiarity, number> = {
+  0: 0,
+  1: 0.06,
+  2: 0.12,
+};
+const FAMILIARITY_GLOW_BUMP: Record<Familiarity, number> = {
+  0: 0,
+  1: 0.04,
+  2: 0.08,
+};
+const FAMILIARITY_EMISSIVE_BUMP: Record<Familiarity, number> = {
+  0: 0,
+  1: 0.03,
+  2: 0.06,
+};
 
 // Interactive scale is a multiplier on top of the tier's geometry radius
 // (see CORE_RADIUS/SECONDARY_RADIUS below), so hover/selection read the same
@@ -27,10 +53,12 @@ const SCALE_LERP = 0.15;
 
 // Two-shape vocabulary: core topics get the rounder icosahedron (closer in
 // spirit to CentralNode's smoother form), secondary topics keep the
-// sharper-faceted octahedron. Radii give core nodes a modest, not dramatic,
-// size edge.
-const CORE_RADIUS = 0.62;
-const SECONDARY_RADIUS = 0.46;
+// sharper-faceted octahedron. Kept deliberately small — a star-point, not a
+// UI sphere — with the Glow below doing the work of making each one read as
+// a soft source of light rather than a small solid shape. Radii still give
+// core nodes a modest, not dramatic, size edge over secondary ones.
+const CORE_RADIUS = 0.34;
+const SECONDARY_RADIUS = 0.24;
 
 // One topic node. Position comes from the parent <group> (static, from
 // data.ts); only local offsets (bob, scale, rotation) are driven imperatively
@@ -41,10 +69,13 @@ export default function KnowledgeNode({
   isRelated,
   isDimmed,
   onSelect,
+  studyCount,
 }: KnowledgeNodeProps) {
   const meshRef = useRef<Mesh>(null);
   const [hovered, setHovered] = useState(false);
   const currentScale = useRef(BASE_SCALE);
+  const familiarity = familiarityFor(studyCount);
+  const scaleBump = FAMILIARITY_SCALE_BUMP[familiarity];
   // Randomized once per node (lazy initializer, so the impure call only
   // ever runs on mount) so the ~7 nodes don't bob in lockstep.
   const [bobOffset] = useState(() => Math.random() * Math.PI * 2);
@@ -53,11 +84,9 @@ export default function KnowledgeNode({
     const mesh = meshRef.current;
     if (!mesh) return;
 
-    const targetScale = isSelected
-      ? SELECTED_SCALE
-      : hovered
-        ? HOVER_SCALE
-        : BASE_SCALE;
+    const targetScale =
+      (isSelected ? SELECTED_SCALE : hovered ? HOVER_SCALE : BASE_SCALE) +
+      scaleBump;
     currentScale.current = MathUtils.lerp(
       currentScale.current,
       targetScale,
@@ -88,13 +117,14 @@ export default function KnowledgeNode({
   }
 
   const opacity = isSelected ? 1 : isDimmed ? (isRelated ? 0.75 : 0.32) : 1;
+  const emissiveBump = FAMILIARITY_EMISSIVE_BUMP[familiarity];
   const emissiveIntensity = isSelected
     ? 0.5
     : hovered
       ? 0.35
       : isRelated && isDimmed
-        ? 0.22
-        : 0.15;
+        ? 0.22 + emissiveBump
+        : 0.15 + emissiveBump;
 
   // Restrained per-node color identity (see NODE_ACCENTS); selection still
   // converges every node toward the same shared Lumora violet, so "selected"
@@ -107,15 +137,14 @@ export default function KnowledgeNode({
   // neighborhood, quietly present normally, and nearly gone for unrelated
   // nodes once something else is selected. Core topics sit a touch stronger
   // than secondary even at rest, echoing their slightly larger geometry.
+  const glowBump = FAMILIARITY_GLOW_BUMP[familiarity];
   const glowOpacity = isSelected
-    ? 0.22
+    ? 0.3
     : isDimmed
       ? isRelated
-        ? 0.1
-        : 0.03
-      : node.tier === "core"
-        ? 0.08
-        : 0.05;
+        ? 0.14 + glowBump
+        : 0.04
+      : (node.tier === "core" ? 0.12 : 0.08) + glowBump;
   const radius = node.tier === "core" ? CORE_RADIUS : SECONDARY_RADIUS;
 
   return (
@@ -148,6 +177,7 @@ export default function KnowledgeNode({
           radius={radius}
           color={emissiveColor}
           opacity={glowOpacity}
+          haloScale={2.2}
         />
       </mesh>
     </group>

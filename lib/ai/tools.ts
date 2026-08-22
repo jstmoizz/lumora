@@ -131,6 +131,18 @@ export const lumoraTools = {
 };
 
 /**
+ * Per-message metadata `app/api/chat/route.ts` attaches to the assistant's
+ * response so the client can learn which conversation it's part of.
+ * `conversationId` is set once, on the stream's `start` event, for a
+ * message that was just created (a brand-new conversation) — see the
+ * route's `messageMetadata` callback. It's never present on a user message,
+ * only ever on the assistant message the server generates.
+ */
+export interface LumoraMessageMetadata {
+  conversationId?: string;
+}
+
+/**
  * The chat message type shared by client and server, parameterized with
  * Lumora's registered tools (via `InferUITools`, which converts each raw
  * `Tool` into the `{ input, output }` shape `UIMessage` expects) so
@@ -139,7 +151,7 @@ export const lumoraTools = {
  * casts at the render boundary.
  */
 export type LumoraUIMessage = UIMessage<
-  unknown,
+  LumoraMessageMetadata,
   UIDataTypes,
   InferUITools<typeof lumoraTools>
 >;

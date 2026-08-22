@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import NavBar from "./components/NavBar";
+import { getServerUser } from "@/lib/supabase/server";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -19,7 +20,14 @@ export const metadata: Metadata = {
   description: "Turn Notes into Knowledge",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // Runs on every request (the whole app renders under this layout), so
+  // this is the one place the nav's auth-state needs it fetched. Middleware
+  // separately calls `getUser()` too, for the redirect decision — some
+  // duplication between the two is the standard, documented pattern for
+  // Supabase + Next.js App Router, not an oversight.
+  const user = await getServerUser();
+
   return (
     <html
       lang="en"
@@ -33,7 +41,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           >
             Lumora
           </Link>
-          <NavBar />
+          <NavBar userEmail={user?.email ?? null} />
         </header>
         {children}
         <footer className="flex items-center justify-center border-t border-zinc-200 px-6 py-4 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-500">

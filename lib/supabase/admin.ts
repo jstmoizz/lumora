@@ -41,3 +41,48 @@ export function createAdminClient() {
     },
   });
 }
+
+/**
+ * The one and only place in the codebase that writes `public.users.role`.
+ * Keeping every role-write behind this single function is what makes the
+ * security audit tractable: there is exactly one thing to check.
+ *
+ * Promotes `userId` to `role = "admin"` if — and only if — `email` matches
+ * the server-only `ADMIN_EMAIL` env var (case-insensitive, trimmed). Both
+ * `userId` and `email` must come from a Supabase auth response you already
+ * trust (e.g. `verifyOtp`'s or `signInWithPassword`'s returned `user`),
+ * never from client-submitted form data — this function does not and must
+ * not accept a client-chosen role. No-ops quietly if `ADMIN_EMAIL` isn't
+ * configured or doesn't match, and is safe to call on every sign-in/email
+ * confirmation: it only ever issues an UPDATE when the row isn't already
+ * `admin`, so calling it repeatedly for the same user is harmless.
+ *
+ * Called from two places, deliberately: `app/auth/confirm/route.ts` (right
+ * after a signup email is verified) and the `signIn` action in
+ * `lib/supabase/actions.ts` (in case "Confirm email" is turned off for the
+ * project, so signup never goes through the confirm route at all). Either
+ * touchpoint is enough on its own; having both just means the one admin
+ * account gets promoted whichever path it happens to take.
+ */
+export async function promoteIfConfiguredAdmin(
+  userId: string,
+  email: string,
+): Promise<void> {
+  const adminEmail = process.env.ADMIN_EMAIL;
+  if (!adminEmail) return;
+  if (email.trim().toLowerCase() !== adminEmail.trim().toLowerCase()) return;
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("users")
+    .update({ role: "admin" })
+    .eq("id", userId)
+    .neq("role", "admin");
+
+  if (error) {
+    console.error(
+      "[promoteIfConfiguredAdmin] failed to promote configured admin:",
+      error.message,
+    );
+  }
+}

@@ -67,6 +67,41 @@ describe("composer send gating", () => {
   });
 });
 
+describe("resuming a conversation from History", () => {
+  test("seeds useChat with the messages loaded for that conversation", () => {
+    mockUseChat.mockReturnValue(makeUseChatReturn());
+    const initialMessages = [userMessage("Explain osmosis", "msg-1")];
+
+    render(
+      <ChatInterface
+        initialConversationId="conv-1"
+        initialMessages={initialMessages}
+      />,
+    );
+
+    expect(mockUseChat).toHaveBeenCalledWith(
+      expect.objectContaining({ messages: initialMessages }),
+    );
+  });
+
+  test("a new message sent in a resumed conversation carries its conversationId immediately, without waiting on message metadata", () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
+
+    render(<ChatInterface initialConversationId="conv-1" />);
+
+    fireEvent.change(screen.getByLabelText("Message"), {
+      target: { value: "Continue please" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      { text: "Continue please" },
+      { body: { conversationId: "conv-1" } },
+    );
+  });
+});
+
 describe("empty-state example prompts", () => {
   test("clicking a suggestion sends it as-is", () => {
     const sendMessage = vi.fn();

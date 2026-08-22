@@ -1,13 +1,63 @@
 import {
   convertToModelMessages,
+  isTextUIPart,
   stepCountIs,
   streamText,
-  type UIMessage,
 } from "ai";
 import { chatModel, GENERATION_CONFIG, SYSTEM_PROMPT } from "@/lib/ai/config";
-import { lumoraTools } from "@/lib/ai/tools";
+import { lumoraTools, type LumoraUIMessage } from "@/lib/ai/tools";
+import { requireUser } from "@/lib/supabase/authorization";
+import { createClient } from "@/lib/supabase/server";
+
+const TITLE_MAX_LENGTH = 60;
+
+// A deterministic title from the first user message — no separate model
+// call just to summarize it. Whitespace-normalized and hard-capped so a
+// long prompt can never turn into a huge stored title.
+function titleFromMessage(message: LumoraUIMessage): string {
+  const text = message.parts
+    .filter(isTextUIPart)
+    .map((part) => part.text)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!text) return "New conversation";
+  if (text.length <= TITLE_MAX_LENGTH) return text;
+  return `${text.slice(0, TITLE_MAX_LENGTH).trimEnd()}…`;
+}
+
+// The plain-text `content` column is a display/search convenience derived
+// from `parts` (which remains the source of truth) — null when a message
+// has no text part at all (e.g. a quiz-only assistant turn).
+function extractText(message: LumoraUIMessage): string | null {
+  const text = message.parts
+    .filter(isTextUIPart)
+    .map((part) => part.text)
+    .join("");
+  return text || null;
+}
+
+interface ChatRequestBody {
+  messages: LumoraUIMessage[];
+  conversationId?: string;
+  trigger?: string;
+}
 
 export async function POST(req: Request) {
+  // Every request must belong to a signed-in user — `/generate` being a
+  // protected page is not enough on its own, since this route can be hit
+  // directly. Identity comes only from the session Supabase already
+  // validated (`getServerUser`, via `requireUser`), never from anything the
+  // client sends in the body.
+  let userId: string;
+  try {
+    const user = await requireUser();
+    userId = user.id;
+  } catch {
+    return Response.json({ error: "Authentication required." }, { status: 401 });
+  }
+
   // Fail fast with an actionable message instead of letting the request
   // reach Anthropic and fail deep inside streamText, where the client only
   // ever sees the AI SDK's generic "An error occurred." stream error.
@@ -24,19 +74,85 @@ export async function POST(req: Request) {
     );
   }
 
-  let messages: UIMessage[];
+  let messages: LumoraUIMessage[];
+  let requestedConversationId: string | null;
+  let trigger: string | null;
 
   try {
-    const body = await req.json();
-    if (!Array.isArray(body?.messages)) {
+    const body: unknown = await req.json();
+    const { messages: bodyMessages, conversationId, trigger: bodyTrigger } =
+      (body ?? {}) as Partial<ChatRequestBody>;
+    if (!Array.isArray(bodyMessages)) {
       throw new Error("`messages` must be an array");
     }
-    messages = body.messages;
+    messages = bodyMessages;
+    requestedConversationId =
+      typeof conversationId === "string" && conversationId ? conversationId : null;
+    trigger = typeof bodyTrigger === "string" ? bodyTrigger : null;
   } catch {
     return Response.json(
       { error: "Request body must be JSON with a `messages` array." },
       { status: 400 },
     );
+  }
+
+  const supabase = await createClient();
+
+  let conversationId: string;
+
+  if (requestedConversationId) {
+    // The server client is RLS-scoped to the signed-in user, so a
+    // conversation that exists but belongs to someone else simply won't be
+    // returned here — the same query doubles as the existence check and
+    // the ownership check, and a stranger's conversation ID can't be
+    // distinguished from a nonexistent one from the response alone.
+    const { data: conversation } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("id", requestedConversationId)
+      .single();
+
+    if (!conversation) {
+      return Response.json({ error: "Conversation not found." }, { status: 404 });
+    }
+    conversationId = conversation.id;
+  } else {
+    const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
+    const title = lastUserMessage ? titleFromMessage(lastUserMessage) : "New conversation";
+
+    const { data: created, error } = await supabase
+      .from("conversations")
+      .insert({ user_id: userId, title })
+      .select("id")
+      .single();
+
+    if (error || !created) {
+      console.error("[api/chat] failed to create conversation:", error?.message);
+      return Response.json(
+        { error: "Could not start a new conversation." },
+        { status: 500 },
+      );
+    }
+    conversationId = created.id;
+  }
+
+  // Persist the user's turn as soon as it's accepted, independent of
+  // whether the assistant's response below succeeds. Skipped on a retry
+  // (`trigger: "regenerate-message"`), since that resends the same
+  // already-persisted user message rather than a new one — the AI SDK sets
+  // this field itself, not something the client crafts by hand.
+  const newUserMessage = messages[messages.length - 1];
+  if (trigger !== "regenerate-message" && newUserMessage?.role === "user") {
+    const { error } = await supabase.from("messages").insert({
+      conversation_id: conversationId,
+      role: "user",
+      content: extractText(newUserMessage),
+      parts: newUserMessage.parts,
+    });
+    if (error) {
+      console.error("[api/chat] failed to persist user message:", error.message);
+      return Response.json({ error: "Could not save your message." }, { status: 500 });
+    }
   }
 
   const modelMessages = await convertToModelMessages(messages);
@@ -53,7 +169,51 @@ export async function POST(req: Request) {
     ...GENERATION_CONFIG,
   });
 
-  return result.toUIMessageStreamResponse({
+  return result.toUIMessageStreamResponse<LumoraUIMessage>({
+    // Attaches the (new-or-existing) conversation id to the assistant
+    // message the instant it starts, so the client can pick it up from
+    // `message.metadata` even while the response is still streaming.
+    // Metadata set on `start` is merged into anything set on `finish`
+    // (never replaced), so this doesn't need repeating below.
+    messageMetadata: ({ part }) =>
+      part.type === "start" ? { conversationId } : undefined,
+    // Runs once the assistant's turn is done — success, error, or abort.
+    // (`onEnd`, not the deprecated `onFinish` alias.) Persistence
+    // deliberately happens around the existing stream rather than
+    // replacing it, so the client keeps seeing tokens the moment they're
+    // generated; only once nothing more will change do we write the
+    // finished message to the database.
+    onEnd: async ({ responseMessage, isAborted, finishReason }) => {
+      // No `finish` event ever arrived (the model call itself failed) or
+      // the user hit Stop — either way, there's no complete assistant turn
+      // to persist. Never write a partial/fake assistant message.
+      if (isAborted || finishReason == null) return;
+
+      const { error: messageError } = await supabase.from("messages").insert({
+        conversation_id: conversationId,
+        role: "assistant",
+        content: extractText(responseMessage),
+        parts: responseMessage.parts,
+      });
+      if (messageError) {
+        console.error(
+          "[api/chat] failed to persist assistant message:",
+          messageError.message,
+        );
+        return;
+      }
+
+      const { error: updateError } = await supabase
+        .from("conversations")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", conversationId);
+      if (updateError) {
+        console.error(
+          "[api/chat] failed to update conversation timestamp:",
+          updateError.message,
+        );
+      }
+    },
     onError(error) {
       // Logged server-side only, for local diagnosis. The AI SDK already
       // keeps the client-facing message generic by default; we keep that

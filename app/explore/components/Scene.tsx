@@ -7,10 +7,12 @@ import AmbientField from "./AmbientField";
 import CameraRig from "./CameraRig";
 import KnowledgeGraph from "./KnowledgeGraph";
 import { KNOWLEDGE_NODES } from "../data";
+import type { TopicProgress } from "@/lib/supabase/topic-progress";
 
 interface SceneProps {
   selectedNodeId: string | null;
   onSelect: (id: string, trigger?: HTMLElement | null) => void;
+  progress: Record<string, TopicProgress>;
 }
 
 function isCoarsePointer(): boolean {
@@ -32,7 +34,7 @@ function getAmbientCount(): number {
 // reduced motion is off. Restrained lighting, no shadows, no
 // postprocessing — orbit/zoom is supplemental, click-to-focus (CameraRig) is
 // the primary interaction.
-export default function Scene({ selectedNodeId, onSelect }: SceneProps) {
+export default function Scene({ selectedNodeId, onSelect, progress }: SceneProps) {
   return (
     <Canvas
       dpr={getDpr()}
@@ -59,7 +61,11 @@ export default function Scene({ selectedNodeId, onSelect }: SceneProps) {
       />
       <AmbientField count={getAmbientCount()} />
       <Suspense fallback={null}>
-        <KnowledgeGraph selectedNodeId={selectedNodeId} onSelect={onSelect} />
+        <KnowledgeGraph
+          selectedNodeId={selectedNodeId}
+          onSelect={onSelect}
+          progress={progress}
+        />
       </Suspense>
       <CameraRig selectedNodeId={selectedNodeId} nodes={KNOWLEDGE_NODES} />
       <OrbitControls

@@ -4,10 +4,12 @@ import CentralNode from "./CentralNode";
 import Connections from "./Connections";
 import KnowledgeNode from "./KnowledgeNode";
 import { KNOWLEDGE_EDGES, KNOWLEDGE_NODES } from "../data";
+import type { TopicProgress } from "@/lib/supabase/topic-progress";
 
 interface KnowledgeGraphProps {
   selectedNodeId: string | null;
   onSelect: (id: string, trigger?: HTMLElement | null) => void;
+  progress: Record<string, TopicProgress>;
 }
 
 function relatedIdsOf(nodeId: string): Set<string> {
@@ -22,6 +24,7 @@ function relatedIdsOf(nodeId: string): Set<string> {
 export default function KnowledgeGraph({
   selectedNodeId,
   onSelect,
+  progress,
 }: KnowledgeGraphProps) {
   const relatedIds = selectedNodeId
     ? relatedIdsOf(selectedNodeId)
@@ -29,7 +32,7 @@ export default function KnowledgeGraph({
 
   return (
     <group>
-      <Connections selectedNodeId={selectedNodeId} />
+      <Connections selectedNodeId={selectedNodeId} progress={progress} />
       <CentralNode dimmed={selectedNodeId !== null} />
       {KNOWLEDGE_NODES.map((node) => (
         <KnowledgeNode
@@ -39,6 +42,7 @@ export default function KnowledgeGraph({
           isRelated={relatedIds.has(node.id)}
           isDimmed={selectedNodeId !== null && node.id !== selectedNodeId}
           onSelect={onSelect}
+          studyCount={progress[node.id]?.studyCount}
         />
       ))}
     </group>

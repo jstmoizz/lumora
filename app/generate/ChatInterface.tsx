@@ -159,12 +159,46 @@ function ChatErrorCard({
   );
 }
 
-export default function ChatInterface() {
+export default function ChatInterface({
+  initialConversationId,
+  initialMessages,
+}: {
+  /** Set when arriving from History via /generate?conversationId=... */
+  initialConversationId?: string;
+  initialMessages?: LumoraUIMessage[];
+}) {
   const [input, setInput] = useState("");
   const { messages, sendMessage, regenerate, status, stop, error } =
     useChat<LumoraUIMessage>({
+      messages: initialMessages,
       transport: new DefaultChatTransport({ api: "/api/chat" }),
     });
+
+  // Two ways this becomes known, covering the two ways a chat starts:
+  // resuming from History arrives already knowing it (`initialConversationId`,
+  // read server-side from the URL); starting fresh only learns it once the
+  // server creates a conversation and reports it back via the assistant
+  // message's metadata (see `messageMetadata` in app/api/chat/route.ts) —
+  // never generated or chosen client-side either way. Once known, every
+  // later request in this session (a new send, or a retry) includes it as
+  // `body.conversationId` so the server continues the same conversation
+  // instead of starting another one.
+  const conversationId =
+    initialConversationId ??
+    messages.find((message) => message.metadata?.conversationId)?.metadata
+      ?.conversationId;
+
+  // Only passes a second argument at all once there's a conversation to
+  // continue — omitting it (rather than passing `body: undefined`) keeps
+  // the very first request in a session identical to before this feature
+  // existed.
+  function sendChatMessage(message: { text: string }) {
+    if (conversationId) {
+      sendMessage(message, { body: { conversationId } });
+    } else {
+      sendMessage(message);
+    }
+  }
 
   // Randomized once per mount (cached in the ref, computed lazily on first
   // read) and never recomputed afterward — a fresh visit remounts this
@@ -359,7 +393,7 @@ export default function ChatInterface() {
   function handleSubmit(event?: FormEvent) {
     event?.preventDefault();
     if (!canSend) return;
-    sendMessage({ text: input });
+    sendChatMessage({ text: input });
     setInput("");
   }
 
@@ -372,7 +406,7 @@ export default function ChatInterface() {
 
   function handleExampleClick(prompt: string) {
     if (status !== "ready") return;
-    sendMessage({ text: prompt });
+    sendChatMessage({ text: prompt });
   }
 
   // Re-requests the failed turn via the SDK's own `regenerate` — it drops
@@ -387,7 +421,9 @@ export default function ChatInterface() {
     isRetryingRef.current = true;
     setIsRetrying(true);
     try {
-      await regenerate();
+      await (conversationId
+        ? regenerate({ body: { conversationId } })
+        : regenerate());
     } finally {
       isRetryingRef.current = false;
       setIsRetrying(false);
