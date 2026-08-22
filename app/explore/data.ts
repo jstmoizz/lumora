@@ -128,3 +128,181 @@ export const KNOWLEDGE_EDGES: KnowledgeEdge[] = [
   { from: "ai", to: "mathematics" },
   { from: "databases", to: "software-engineering" },
 ];
+
+// ============================================================================
+// Expanded concepts (Phase 4.3) — a second, smaller layer nested under a
+// core topic rather than a peer of it. Kept structurally distinct from
+// KnowledgeNode (own type, own id namespace, no `tier`/`accent`) so the
+// application can always tell "core topic" and "expanded concept" apart by
+// type rather than by convention or a presentation-only flag. Visibility is
+// derived at render time from the viewer's own topic_progress (see
+// `expansionStateFor` in `./progress.ts`) — this array itself holds no
+// per-user state.
+// ============================================================================
+
+export interface ExpandedConcept {
+  id: string;
+  // The core topic this concept belongs to — always a KNOWLEDGE_NODES id.
+  parentId: string;
+  label: string;
+  summary: string;
+  // Deterministic, hand-authored offset from the parent's own `position`
+  // (not an absolute world position) — see `conceptPosition` below. Kept
+  // small and asymmetric per pair, the same authoring approach as
+  // KNOWLEDGE_NODES' own positions, so concepts read as clustered around
+  // their parent rather than placed at random.
+  offset: [number, number, number];
+  // A short, human-readable description of how this concept relates to its
+  // parent — shown in TopicPanel, not used for any graph traversal.
+  relationship: string;
+}
+
+// Deliberately small and curated: two concepts per core topic, not an
+// open-ended or generated set. This is the seed of the "expanded" layer,
+// not a final exhaustive one.
+export const EXPANDED_CONCEPTS: ExpandedConcept[] = [
+  {
+    id: "sorting",
+    parentId: "algorithms",
+    label: "Sorting",
+    summary:
+      "Algorithms that arrange data into a defined order — one of the first problems most algorithmic thinking is built on.",
+    offset: [0.75, 0.35, 0.45],
+    relationship: "A foundational technique within Algorithms.",
+  },
+  {
+    id: "graph-algorithms",
+    parentId: "algorithms",
+    label: "Graph Algorithms",
+    summary:
+      "Techniques for traversing and analyzing networks of connected nodes — from shortest paths to reachability.",
+    offset: [-0.55, -0.5, 0.65],
+    relationship: "A more advanced branch of Algorithms.",
+  },
+  {
+    id: "trees",
+    parentId: "data-structures",
+    label: "Trees",
+    summary:
+      "Hierarchical structures where each element connects to a small set of children — the shape behind file systems, parsers, and more.",
+    offset: [0.6, 0.55, -0.4],
+    relationship: "A core structure within Data Structures.",
+  },
+  {
+    id: "hash-tables",
+    parentId: "data-structures",
+    label: "Hash Tables",
+    summary:
+      "Structures that map keys to values for near-constant-time lookup, using a function that spreads keys across storage.",
+    offset: [-0.7, -0.3, 0.5],
+    relationship: "Another core structure within Data Structures.",
+  },
+  {
+    id: "sql",
+    parentId: "databases",
+    label: "SQL",
+    summary:
+      "The standard language for querying and manipulating structured, relational data.",
+    offset: [0.65, 0.4, 0.5],
+    relationship: "The primary interface to Databases.",
+  },
+  {
+    id: "indexing",
+    parentId: "databases",
+    label: "Indexing",
+    summary:
+      "Auxiliary structures that let a database find rows quickly instead of scanning every one.",
+    offset: [-0.5, -0.55, -0.45],
+    relationship: "A performance technique within Databases.",
+  },
+  {
+    id: "machine-learning",
+    parentId: "ai",
+    label: "Machine Learning",
+    summary:
+      "Systems that improve at a task by learning patterns from data rather than following explicit rules.",
+    offset: [0.7, -0.4, 0.5],
+    relationship: "The dominant modern approach within AI.",
+  },
+  {
+    id: "neural-networks",
+    parentId: "ai",
+    label: "Neural Networks",
+    summary:
+      "Layered, trainable models loosely inspired by biological neurons — the basis of most current machine learning.",
+    offset: [-0.6, 0.5, -0.55],
+    relationship: "A specific family of models within AI.",
+  },
+  {
+    id: "tcp-ip",
+    parentId: "networks",
+    label: "TCP/IP",
+    summary:
+      "The core protocol suite that lets independent networks address, route, and reliably deliver data to each other.",
+    offset: [0.6, 0.5, 0.4],
+    relationship: "The foundational protocol suite within Networks.",
+  },
+  {
+    id: "routing",
+    parentId: "networks",
+    label: "Routing",
+    summary:
+      "How data finds a path across many interconnected networks to reach its destination.",
+    offset: [-0.7, -0.35, -0.5],
+    relationship: "A core mechanism within Networks.",
+  },
+  {
+    id: "testing",
+    parentId: "software-engineering",
+    label: "Testing",
+    summary:
+      "Practices for verifying that software behaves as intended, before and after it changes.",
+    offset: [0.65, 0.45, 0.4],
+    relationship: "A core discipline within Software Engineering.",
+  },
+  {
+    id: "design-patterns",
+    parentId: "software-engineering",
+    label: "Design Patterns",
+    summary:
+      "Reusable, named solutions to recurring problems in software design.",
+    offset: [-0.55, -0.5, -0.55],
+    relationship: "A shared vocabulary within Software Engineering.",
+  },
+  {
+    id: "probability",
+    parentId: "mathematics",
+    label: "Probability",
+    summary:
+      "The mathematics of uncertainty — the language most of machine learning and statistics is written in.",
+    offset: [0.7, -0.4, 0.4],
+    relationship: "A core branch of Mathematics.",
+  },
+  {
+    id: "linear-algebra",
+    parentId: "mathematics",
+    label: "Linear Algebra",
+    summary:
+      "The study of vectors, matrices, and linear transformations — the computational backbone behind graphics and machine learning alike.",
+    offset: [-0.6, 0.45, -0.5],
+    relationship: "Another core branch of Mathematics.",
+  },
+];
+
+/**
+ * A concept's absolute 3D position: its parent's own (hand-authored,
+ * unchanged) position plus the concept's own small offset. Computed rather
+ * than stored, so a concept always stays spatially attached to its parent —
+ * there's exactly one source of truth for where a topic sits.
+ */
+export function conceptPosition(
+  concept: ExpandedConcept,
+): [number, number, number] {
+  const parent = KNOWLEDGE_NODES.find((node) => node.id === concept.parentId);
+  if (!parent) return concept.offset;
+  return [
+    parent.position[0] + concept.offset[0],
+    parent.position[1] + concept.offset[1],
+    parent.position[2] + concept.offset[2],
+  ];
+}

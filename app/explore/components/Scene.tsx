@@ -6,8 +6,22 @@ import { OrbitControls } from "@react-three/drei";
 import AmbientField from "./AmbientField";
 import CameraRig from "./CameraRig";
 import KnowledgeGraph from "./KnowledgeGraph";
-import { KNOWLEDGE_NODES } from "../data";
+import { EXPANDED_CONCEPTS, KNOWLEDGE_NODES, conceptPosition } from "../data";
 import type { TopicProgress } from "@/lib/supabase/topic-progress";
+
+// Every id CameraRig can focus on — core topics and expanded concepts
+// alike — mapped to its absolute position. Static and deterministic (no
+// props involved), so this is computed once at module scope rather than
+// per render; concepts still hidden/hinted simply never become
+// `selectedNodeId` in the first place (they aren't interactive yet — see
+// ExpandedConceptNode), so including all of them here unconditionally is
+// harmless.
+const FOCUS_POSITIONS: Record<string, [number, number, number]> = {
+  ...Object.fromEntries(KNOWLEDGE_NODES.map((node) => [node.id, node.position])),
+  ...Object.fromEntries(
+    EXPANDED_CONCEPTS.map((concept) => [concept.id, conceptPosition(concept)]),
+  ),
+};
 
 interface SceneProps {
   selectedNodeId: string | null;
@@ -67,7 +81,7 @@ export default function Scene({ selectedNodeId, onSelect, progress }: SceneProps
           progress={progress}
         />
       </Suspense>
-      <CameraRig selectedNodeId={selectedNodeId} nodes={KNOWLEDGE_NODES} />
+      <CameraRig selectedNodeId={selectedNodeId} focusPositions={FOCUS_POSITIONS} />
       <OrbitControls
         makeDefault
         enablePan={false}

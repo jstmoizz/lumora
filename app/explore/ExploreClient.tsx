@@ -6,7 +6,8 @@ import ScenePlaceholder from "./ScenePlaceholder";
 import StaticFallback from "./StaticFallback";
 import TopicControls from "./TopicControls";
 import TopicPanel from "./TopicPanel";
-import { KNOWLEDGE_NODES } from "./data";
+import { EXPANDED_CONCEPTS, KNOWLEDGE_NODES } from "./data";
+import { expansionStateFor } from "./progress";
 import { useReducedMotion } from "./useReducedMotion";
 import { useWebglSupported } from "./webgl";
 import { recordTopicStudied } from "@/lib/supabase/topic-progress-actions";
@@ -35,9 +36,10 @@ export default function ExploreClient({ progress }: ExploreClientProps) {
   // has none) so "Back to overview" can return focus to it.
   const lastTriggerRef = useRef<HTMLElement | null>(null);
 
-  // Mirrors selectedNodeId so handleSelect can tell "a genuinely new topic
-  // was chosen" apart from "the already-selected topic was clicked again" —
-  // only the former should record study progress. A ref rather than reading
+  // Mirrors the last core topic id study progress was recorded for, so
+  // handleSelect can tell "a genuinely new core topic was chosen" apart
+  // from "the already-recorded topic is still in context" — only the
+  // former should record study progress. A ref rather than reading
   // `selectedNodeId` directly keeps handleSelect's identity stable and
   // avoids any dependency on React's render timing.
   const recordedNodeIdRef = useRef<string | null>(null);
@@ -47,14 +49,19 @@ export default function ExploreClient({ progress }: ExploreClientProps) {
       lastTriggerRef.current = trigger ?? null;
       setSelectedNodeId(id);
 
-      // Only fires from a real click/keyboard-activation event (never from
-      // a re-render or effect), and only once per genuine transition into a
-      // topic — re-clicking the already-selected topic is a no-op here, so
-      // this can never turn into a render-loop or rapid-double-count of
-      // study progress. Fire-and-forget: Explore's own UI never waits on
-      // this, and a failed write is swallowed quietly rather than shown to
-      // the user (see recordTopicStudied's own error handling).
-      if (id !== recordedNodeIdRef.current) {
+      // Only ever records a *core* topic (Phase 4.2 behavior, unchanged) —
+      // selecting an expanded concept (Phase 4.3) is interaction-only and
+      // never touches topic_progress; see the Phase 4.3 report for why.
+      // Only fires from a real click/keyboard-activation event (never a
+      // re-render or effect), and only once per genuine transition into a
+      // topic — re-clicking the already-recorded topic, or browsing one of
+      // its concepts and coming back to it, is a no-op here, so this can
+      // never turn into a render-loop or rapid-double-count. Fire-and-
+      // forget: Explore's own UI never waits on this, and a failed write is
+      // swallowed quietly rather than shown to the user (see
+      // recordTopicStudied's own error handling).
+      const isCoreTopic = KNOWLEDGE_NODES.some((node) => node.id === id);
+      if (isCoreTopic && id !== recordedNodeIdRef.current) {
         recordedNodeIdRef.current = id;
         recordTopicStudied(id).catch(() => {});
       }
@@ -69,9 +76,27 @@ export default function ExploreClient({ progress }: ExploreClientProps) {
     lastTriggerRef.current = null;
   }, []);
 
-  const selectedNode = selectedNodeId
-    ? (KNOWLEDGE_NODES.find((node) => node.id === selectedNodeId) ?? null)
+  // The core topic currently in context for TopicPanel — either the one
+  // literally selected, or the parent of a selected expanded concept, so
+  // the panel always has a topic to anchor to.
+  const selectedConcept = selectedNodeId
+    ? (EXPANDED_CONCEPTS.find((concept) => concept.id === selectedNodeId) ??
+      null)
     : null;
+  const contextCoreId = selectedConcept
+    ? selectedConcept.parentId
+    : selectedNodeId;
+  const contextCoreNode = contextCoreId
+    ? (KNOWLEDGE_NODES.find((node) => node.id === contextCoreId) ?? null)
+    : null;
+  const topicExpansionState = expansionStateFor(
+    contextCoreNode ? progress[contextCoreNode.id]?.studyCount : undefined,
+  );
+  const relatedConcepts = contextCoreNode
+    ? EXPANDED_CONCEPTS.filter(
+        (concept) => concept.parentId === contextCoreNode.id,
+      )
+    : [];
 
   const showScene = !reducedMotion && webglSupported;
 
@@ -94,7 +119,16 @@ export default function ExploreClient({ progress }: ExploreClientProps) {
           />
         )}
 
-        {selectedNode && <TopicPanel node={selectedNode} onBack={handleBack} />}
+        {contextCoreNode && (
+          <TopicPanel
+            node={contextCoreNode}
+            concept={selectedConcept}
+            expansionState={topicExpansionState}
+            relatedConcepts={relatedConcepts}
+            onBack={handleBack}
+            onSelect={handleSelect}
+          />
+        )}
       </div>
 
       <TopicControls selectedNodeId={selectedNodeId} onSelect={handleSelect} />

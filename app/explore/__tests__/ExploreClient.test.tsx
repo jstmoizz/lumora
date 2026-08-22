@@ -2,6 +2,14 @@ import { beforeEach, describe, test, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import ExploreClient from "../ExploreClient";
 import { KNOWLEDGE_NODES } from "../data";
+import type { TopicProgress } from "@/lib/supabase/topic-progress";
+
+function progressWithStudyCount(
+  topicId: string,
+  studyCount: number,
+): Record<string, TopicProgress> {
+  return { [topicId]: { topicId, studyCount, lastStudiedAt: null } };
+}
 
 vi.mock("@/lib/supabase/topic-progress-actions", () => ({
   recordTopicStudied: vi.fn(() => Promise.resolve({ ok: true })),
@@ -141,5 +149,65 @@ describe("ExploreClient", () => {
         screen.getByRole("heading", { name: node.label }),
       ).toBeInTheDocument();
     });
+  });
+
+  describe("expanded concepts (Phase 4.3)", () => {
+    test("an unstudied topic's panel makes no mention of related concepts", () => {
+      render(<ExploreClient progress={{}} />);
+      fireEvent.click(screen.getAllByRole("button", { name: "Algorithms" })[0]);
+
+      expect(screen.queryByText(/related concept/i)).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Sorting" }),
+      ).not.toBeInTheDocument();
+    });
+
+    test("a topic studied once shows a quiet hint, with no clickable concepts yet", () => {
+      render(<ExploreClient progress={progressWithStudyCount("algorithms", 1)} />);
+      fireEvent.click(screen.getAllByRole("button", { name: "Algorithms" })[0]);
+
+      expect(screen.getByText(/2 related concepts/i)).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Sorting" }),
+      ).not.toBeInTheDocument();
+    });
+
+    test("a topic studied repeatedly reveals its concepts as selectable buttons", () => {
+      render(<ExploreClient progress={progressWithStudyCount("algorithms", 2)} />);
+      fireEvent.click(screen.getAllByRole("button", { name: "Algorithms" })[0]);
+
+      expect(screen.getByRole("button", { name: "Sorting" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Graph Algorithms" }),
+      ).toBeInTheDocument();
+    });
+
+    test("selecting a revealed concept opens its own panel and does not record topic progress for it", () => {
+      render(<ExploreClient progress={progressWithStudyCount("algorithms", 2)} />);
+      fireEvent.click(screen.getAllByRole("button", { name: "Algorithms" })[0]);
+      fireEvent.click(screen.getByRole("button", { name: "Sorting" }));
+
+      expect(screen.getByRole("heading", { name: "Sorting" })).toBeInTheDocument();
+      expect(screen.getByText("Part of Algorithms")).toBeInTheDocument();
+      // Only the core topic selection (Algorithms) should have recorded
+      // progress — selecting the concept itself is interaction-only.
+      expect(recordTopicStudied).toHaveBeenCalledTimes(1);
+      expect(recordTopicStudied).toHaveBeenCalledWith("algorithms");
+    });
+
+    test("Back to overview from a concept's panel clears the selection entirely", () => {
+      render(<ExploreClient progress={progressWithStudyCount("algorithms", 2)} />);
+      fireEvent.click(screen.getAllByRole("button", { name: "Algorithms" })[0]);
+      fireEvent.click(screen.getByRole("button", { name: "Sorting" }));
+      fireEvent.click(screen.getByRole("button", { name: "Back to overview" }));
+
+      expect(
+        screen.queryByRole("heading", { name: "Sorting" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("heading", { name: "Algorithms" }),
+      ).not.toBeInTheDocument();
+    });
+
   });
 });

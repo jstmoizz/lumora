@@ -3,7 +3,6 @@
 import { useEffect, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Vector3 } from "three";
-import type { KnowledgeNode } from "../data";
 
 // `state.controls` is typed generically (`THREE.EventDispatcher | null`) so
 // it can hold any controls implementation; drei's OrbitControls (with
@@ -41,10 +40,14 @@ const LERP_SPEED = 3.2;
 
 interface CameraRigProps {
   selectedNodeId: string | null;
-  nodes: KnowledgeNode[];
+  // Every focusable id's absolute 3D position — core topics and (Phase 4.3)
+  // revealed expanded concepts alike. A plain position lookup rather than
+  // typed node objects, since this rig only ever needs a place to look at,
+  // not anything else about what's selected.
+  focusPositions: Record<string, [number, number, number]>;
 }
 
-export default function CameraRig({ selectedNodeId, nodes }: CameraRigProps) {
+export default function CameraRig({ selectedNodeId, focusPositions }: CameraRigProps) {
   const camera = useThree((state) => state.camera);
   const controls = useThree(
     (state) => state.controls,
@@ -55,21 +58,21 @@ export default function CameraRig({ selectedNodeId, nodes }: CameraRigProps) {
   const scratchNode = useRef(new Vector3());
   const scratchDir = useRef(new Vector3());
   const scratchRight = useRef(new Vector3());
-  const selectedNodeRef = useRef<KnowledgeNode | undefined>(undefined);
+  const selectedPositionRef = useRef<[number, number, number] | undefined>(undefined);
 
   useEffect(() => {
-    selectedNodeRef.current = selectedNodeId
-      ? nodes.find((node) => node.id === selectedNodeId)
+    selectedPositionRef.current = selectedNodeId
+      ? focusPositions[selectedNodeId]
       : undefined;
-  }, [selectedNodeId, nodes]);
+  }, [selectedNodeId, focusPositions]);
 
   useFrame((_, delta) => {
     if (!controls) return;
 
-    const selectedNode = selectedNodeRef.current;
+    const selectedPosition = selectedPositionRef.current;
 
-    if (selectedNode) {
-      const [x, y, z] = selectedNode.position;
+    if (selectedPosition) {
+      const [x, y, z] = selectedPosition;
       scratchNode.current.set(x, y, z);
 
       desiredTarget.current

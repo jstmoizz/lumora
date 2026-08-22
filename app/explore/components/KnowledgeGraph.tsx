@@ -1,9 +1,17 @@
 "use client";
 
 import CentralNode from "./CentralNode";
+import ConceptConnections from "./ConceptConnections";
 import Connections from "./Connections";
+import ExpandedConceptNode from "./ExpandedConceptNode";
 import KnowledgeNode from "./KnowledgeNode";
-import { KNOWLEDGE_EDGES, KNOWLEDGE_NODES } from "../data";
+import {
+  EXPANDED_CONCEPTS,
+  KNOWLEDGE_EDGES,
+  KNOWLEDGE_NODES,
+  conceptPosition,
+} from "../data";
+import { expansionStateFor } from "../progress";
 import type { TopicProgress } from "@/lib/supabase/topic-progress";
 
 interface KnowledgeGraphProps {
@@ -26,13 +34,26 @@ export default function KnowledgeGraph({
   onSelect,
   progress,
 }: KnowledgeGraphProps) {
-  const relatedIds = selectedNodeId
-    ? relatedIdsOf(selectedNodeId)
-    : new Set<string>();
+  // The core topic that should read as "in focus" for the existing
+  // core-dimming scheme — either the literally selected core topic, or the
+  // parent of a selected expanded concept, so opening a concept highlights
+  // its topic instead of dimming it into oblivion. When nothing (or a core
+  // topic) is selected this is exactly `selectedNodeId`, so every existing
+  // core-topic interaction is unaffected.
+  const selectedConcept = selectedNodeId
+    ? (EXPANDED_CONCEPTS.find((concept) => concept.id === selectedNodeId) ??
+      null)
+    : null;
+  const focusedCoreId = selectedConcept
+    ? selectedConcept.parentId
+    : selectedNodeId;
+
+  const relatedIds = focusedCoreId ? relatedIdsOf(focusedCoreId) : new Set<string>();
 
   return (
     <group>
-      <Connections selectedNodeId={selectedNodeId} progress={progress} />
+      <Connections selectedNodeId={focusedCoreId} progress={progress} />
+      <ConceptConnections progress={progress} />
       <CentralNode dimmed={selectedNodeId !== null} />
       {KNOWLEDGE_NODES.map((node) => (
         <KnowledgeNode
@@ -40,9 +61,19 @@ export default function KnowledgeGraph({
           node={node}
           isSelected={node.id === selectedNodeId}
           isRelated={relatedIds.has(node.id)}
-          isDimmed={selectedNodeId !== null && node.id !== selectedNodeId}
+          isDimmed={focusedCoreId !== null && node.id !== focusedCoreId && !relatedIds.has(node.id)}
           onSelect={onSelect}
           studyCount={progress[node.id]?.studyCount}
+        />
+      ))}
+      {EXPANDED_CONCEPTS.map((concept) => (
+        <ExpandedConceptNode
+          key={concept.id}
+          concept={concept}
+          position={conceptPosition(concept)}
+          expansionState={expansionStateFor(progress[concept.parentId]?.studyCount)}
+          isSelected={concept.id === selectedNodeId}
+          onSelect={onSelect}
         />
       ))}
     </group>

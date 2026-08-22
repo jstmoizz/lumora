@@ -11,3 +11,22 @@ export function familiarityFor(studyCount: number | undefined): Familiarity {
   if (studyCount === 1) return 1;
   return 2;
 }
+
+// Deterministic, per-topic gate for the expanded-concepts layer (Phase
+// 4.3), derived from the same familiarity tiers rather than a second
+// threshold model: an unstudied topic shows its core node only; studying it
+// once surfaces a quiet textual hint that related concepts exist (see
+// TopicPanel); studying it again and beyond reveals them as real,
+// selectable nodes. Concepts under a topic all share that topic's own
+// expansion state — there's no independent per-concept progress in this
+// phase (see the Phase 4.3 report for why).
+export type ExpansionState = "hidden" | "hinted" | "revealed";
+
+export function expansionStateFor(
+  studyCount: number | undefined,
+): ExpansionState {
+  const familiarity = familiarityFor(studyCount);
+  if (familiarity === 0) return "hidden";
+  if (familiarity === 1) return "hinted";
+  return "revealed";
+}
