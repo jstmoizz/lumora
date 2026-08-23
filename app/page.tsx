@@ -1,30 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useRef, useSyncExternalStore } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import {
   ArrowRightIcon,
   BrainIcon,
-  CompassIcon,
   HelpCircleIcon,
-  HistoryIcon,
-  HomeIcon,
-  InfoIcon,
   ListChecksIcon,
   MessageCircleQuestionIcon,
   RepeatIcon,
-  SettingsIcon,
   TrophyIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import AuroraBackground from "./components/home/AuroraBackground";
 import BorderGlow from "./components/home/BorderGlow";
 import Carousel, { type CarouselItem } from "./components/home/Carousel";
-import Dock, { type DockItemData } from "./components/home/Dock";
+import HeroScrollShell from "./components/home/HeroScrollShell";
+import HeroShaderBackground from "./components/home/HeroShaderBackground";
 
 if (typeof window !== "undefined") {
   gsap.registerPlugin(ScrollTrigger);
@@ -108,7 +102,6 @@ const STEPS: CarouselItem[] = [
 ];
 
 export default function Home() {
-  const router = useRouter();
   const heroRef = useRef<HTMLDivElement>(null);
   const heroEyebrowRef = useRef<HTMLSpanElement>(null);
   const heroHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -116,19 +109,6 @@ export default function Home() {
   const heroCtaRef = useRef<HTMLDivElement>(null);
 
   const featuresRef = useRef<HTMLDivElement>(null);
-
-  // Read via a lazy initializer rather than an effect: Dock's
-  // `magnification`/`distance` props need a stable value at render time,
-  // and computing it here (once, on first render) avoids a setState-in-
-  // effect render cascade for what's really just derived initial state.
-  // `typeof window === "undefined"` (the server render pass) defaults to
-  // "reduced", matching the `prefersReducedMotion()` helper's own default
-  // elsewhere on this page.
-  const [reducedMotion] = useState(() =>
-    typeof window === "undefined"
-      ? true
-      : window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-  );
 
   const carouselWidth = useSyncExternalStore(
     subscribeToResize,
@@ -184,87 +164,79 @@ export default function Home() {
     { scope: featuresRef, dependencies: [] },
   );
 
-  const dockItems: DockItemData[] = [
-    { icon: <HomeIcon className="size-5" />, label: "Home", onClick: () => router.push("/") },
-    { icon: <MessageCircleQuestionIcon className="size-5" />, label: "Generate", onClick: () => router.push("/generate") },
-    { icon: <CompassIcon className="size-5" />, label: "Explore", onClick: () => router.push("/explore") },
-    { icon: <HistoryIcon className="size-5" />, label: "History", onClick: () => router.push("/history") },
-    { icon: <InfoIcon className="size-5" />, label: "About", onClick: () => router.push("/about") },
-    { icon: <SettingsIcon className="size-5" />, label: "Settings", onClick: () => router.push("/settings") },
-  ];
-
   return (
-    <>
-      {/*
-        `overflow-x-clip` (not -hidden — clip never creates a scroll
-        container, so it can't disable `position: sticky` for anything)
-        contains BorderGlow's outer-glow bleed: `.edge-light` deliberately
-        extends past its card/button via a negative inset to render the
-        halo, which pushes a few pixels past the true viewport edge for
-        any card sitting flush against it. `<main>` is a sibling of the
-        root layout's sticky header, not an ancestor of it, so this can't
-        affect the header's own stickiness either way.
-      */}
-      <main className="flex flex-1 flex-col overflow-x-clip pb-24">
-        {/* Hero */}
-        <section
-          ref={heroRef}
-          className="relative flex flex-col items-center justify-center gap-6 overflow-hidden px-6 py-28 text-center sm:py-36"
-        >
-          <AuroraBackground />
-
-          <span
-            ref={heroEyebrowRef}
-            className="rounded-full border border-border px-4 py-1 text-xs font-medium tracking-wide text-muted-foreground uppercase"
+    // `overflow-x-clip` (not -hidden — clip never creates a scroll
+    // container, so it can't disable `position: sticky` for anything)
+    // contains BorderGlow's outer-glow bleed: `.edge-light` deliberately
+    // extends past its card/button via a negative inset to render the
+    // halo, which pushes a few pixels past the true viewport edge for any
+    // card sitting flush against it. `<main>` is a sibling of the root
+    // layout's sticky header, not an ancestor of it, so this can't affect
+    // the header's own stickiness either way.
+    <main className="flex flex-1 flex-col overflow-x-clip pb-24">
+        {/* Hero — opens fullscreen and settles into a contained card as
+            the user scrolls past it; see HeroScrollShell for the
+            technique. */}
+        <HeroScrollShell>
+          <section
+            ref={heroRef}
+            className="relative flex h-full flex-col items-center justify-center gap-6 overflow-hidden px-6 py-28 text-center sm:py-36"
           >
-            AI Study Companion
-          </span>
+            <HeroShaderBackground />
 
-          <h1
-            ref={heroHeadingRef}
-            className="max-w-3xl text-5xl font-semibold tracking-tight text-balance text-foreground sm:text-6xl"
-          >
-            Learn smarter with Lumora.
-          </h1>
-
-          <p
-            ref={heroDescriptionRef}
-            className="max-w-xl text-lg text-balance text-muted-foreground"
-          >
-            Lumora is an AI study companion that explains concepts clearly,
-            quizzes you on what you&apos;ve learned, and helps it stick.
-          </p>
-
-          <div ref={heroCtaRef}>
-            <BorderGlow
-              className="group/cta border-glow-button"
-              edgeSensitivity={15}
-              glowColor={GLOW_HSL}
-              backgroundColor="transparent"
-              borderRadius={14}
-              glowRadius={18}
-              glowIntensity={0.65}
-              coneSpread={30}
-              animated={false}
-              colors={GLOW_COLORS}
-              fillOpacity={0.2}
+            <span
+              ref={heroEyebrowRef}
+              className="rounded-full border border-border px-4 py-1 text-xs font-medium tracking-wide text-muted-foreground uppercase"
             >
-              <Button
-                asChild
-                size="lg"
-                className="h-12 gap-2 rounded-xl px-6 text-base font-semibold motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-[1.03] active:scale-[0.98]"
+              AI Study Companion
+            </span>
+
+            <h1
+              ref={heroHeadingRef}
+              className="max-w-3xl text-5xl font-semibold tracking-tight text-balance text-foreground sm:text-6xl"
+            >
+              Learn smarter with Lumora.
+            </h1>
+
+            <p
+              ref={heroDescriptionRef}
+              className="max-w-xl text-lg text-balance text-muted-foreground"
+            >
+              Lumora is an AI study companion that explains concepts clearly,
+              quizzes you on what you&apos;ve learned, and helps it stick.
+            </p>
+
+            <div ref={heroCtaRef}>
+              <BorderGlow
+                className="group/cta border-glow-button"
+                edgeSensitivity={15}
+                glowColor={GLOW_HSL}
+                backgroundColor="transparent"
+                borderRadius={14}
+                glowRadius={18}
+                glowIntensity={0.65}
+                coneSpread={30}
+                animated={false}
+                colors={GLOW_COLORS}
+                fillOpacity={0.2}
               >
-                <Link href="/generate">
-                  Start studying
-                  <ArrowRightIcon
-                    aria-hidden="true"
-                    className="size-4 motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:group-hover/cta:translate-x-0.5"
-                  />
-                </Link>
-              </Button>
-            </BorderGlow>
-          </div>
-        </section>
+                <Button
+                  asChild
+                  size="lg"
+                  className="h-12 gap-2 rounded-xl px-6 text-base font-semibold motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-[1.03] active:scale-[0.98]"
+                >
+                  <Link href="/generate">
+                    Start studying
+                    <ArrowRightIcon
+                      aria-hidden="true"
+                      className="size-4 motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:group-hover/cta:translate-x-0.5"
+                    />
+                  </Link>
+                </Button>
+              </BorderGlow>
+            </div>
+          </section>
+        </HeroScrollShell>
 
         {/* Feature cards */}
         <section className="px-6 py-20 sm:py-24">
@@ -361,13 +333,5 @@ export default function Home() {
           </BorderGlow>
         </section>
       </main>
-      <Dock
-        items={dockItems}
-        baseItemSize={44}
-        panelHeight={56}
-        magnification={reducedMotion ? 44 : 66}
-        distance={reducedMotion ? 0 : 150}
-      />
-    </>
   );
 }

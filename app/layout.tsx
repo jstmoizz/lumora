@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
-import NavBar from "./components/NavBar";
+import GlobalDock from "./components/GlobalDock";
+import HeaderAccount from "./components/HeaderAccount";
 import ThemeListener from "./components/theme/ThemeListener";
 import ThemeScript from "./components/theme/ThemeScript";
 import { getServerUser } from "@/lib/supabase/server";
@@ -46,8 +47,15 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       </head>
       <body className="flex h-full flex-col">
         <ThemeListener />
+        {/*
+          Single row at every width now — the old `flex-col sm:flex-row`
+          split existed to let the nav-links block wrap onto its own line
+          on narrow screens; with those links gone (GlobalDock is the
+          primary nav now, rendered below), the wordmark and account
+          controls comfortably share one row at any viewport width.
+        */}
         <header className="sticky top-0 z-40 border-b border-border/60 bg-background/85 backdrop-blur-md">
-          <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-3 px-6 py-4 sm:flex-row">
+          <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-6 py-4">
             <Link
               href="/"
               className="flex items-center gap-2 text-lg font-semibold tracking-tight text-foreground"
@@ -58,13 +66,14 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
               />
               Lumora
             </Link>
-            <NavBar userEmail={user?.email ?? null} />
+            <HeaderAccount userEmail={user?.email ?? null} />
           </div>
         </header>
         {children}
         <footer className="border-t border-border/60 px-6 py-6 text-center text-sm text-muted-foreground">
           &copy; {new Date().getFullYear()} Lumora
         </footer>
+        <GlobalDock />
       </body>
     </html>
   );

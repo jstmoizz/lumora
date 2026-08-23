@@ -12,7 +12,7 @@ export default async function ExplorePage() {
   const progress = await getTopicProgress();
 
   return (
-    <main className="flex flex-1 flex-col px-6 py-12 sm:py-16">
+    <main className="flex flex-1 flex-col px-6 py-12 pb-24 sm:py-16">
       <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6">
         <div className="flex flex-col items-center gap-2 text-center">
           <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">

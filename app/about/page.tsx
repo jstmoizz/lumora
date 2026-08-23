@@ -77,7 +77,7 @@ export default function AboutPage() {
   return (
     <main
       ref={pageRef}
-      className="flex flex-1 flex-col items-center px-6 py-16 sm:py-20"
+      className="flex flex-1 flex-col items-center px-6 py-16 pb-24 sm:py-20"
     >
       <div className="flex w-full max-w-2xl flex-col items-center gap-10">
         <div className="flex flex-col items-center gap-2 text-center">

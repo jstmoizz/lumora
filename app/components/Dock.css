@@ -78,6 +78,29 @@
   color: var(--foreground);
 }
 
+/*
+ * "You are here" — the same restrained language the old top-nav's
+ * underline used (a quiet accent-colored mark, not a filled/inverted
+ * button), just adapted to Dock's icon-pill shape: a persistently tinted
+ * background plus a small dot anchored below the icon.
+ */
+.dock-item.dock-item-active {
+  background-color: var(--accent);
+  color: var(--foreground);
+}
+
+.dock-item.dock-item-active::after {
+  content: "";
+  position: absolute;
+  bottom: -0.4rem;
+  left: 50%;
+  translate: -50% 0;
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background-color: var(--primary);
+}
+
 .dock-icon {
   display: flex;
   align-items: center;

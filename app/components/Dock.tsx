@@ -24,6 +24,13 @@ export type DockItemData = {
   label: React.ReactNode;
   onClick: () => void;
   className?: string;
+  // Not part of upstream React Bits' API — Dock is now Lumora's global
+  // navigation (see GlobalDock.tsx), so it needs a route-aware "you are
+  // here" indicator, the same thing the old top-nav's underline provided.
+  // Kept as a boolean prop rather than baking route logic into this
+  // component: Dock itself stays a generic, reusable dock with no opinion
+  // about routing.
+  isActive?: boolean;
 };
 
 export type DockProps = {
@@ -47,6 +54,7 @@ type DockItemProps = {
   baseItemSize: number;
   magnification: number;
   label?: React.ReactNode;
+  isActive?: boolean;
 };
 
 function DockItem({
@@ -59,6 +67,7 @@ function DockItem({
   magnification,
   baseItemSize,
   label,
+  isActive,
 }: DockItemProps) {
   const ref = useRef<HTMLDivElement>(null);
   const isHovered = useMotionValue(0);
@@ -94,11 +103,12 @@ function DockItem({
       onBlur={() => isHovered.set(0)}
       onClick={onClick}
       onKeyDown={handleKeyDown}
-      className={`dock-item ${className}`}
+      className={`dock-item ${isActive ? "dock-item-active" : ""} ${className}`}
       tabIndex={0}
       role="button"
       aria-haspopup="true"
       aria-label={typeof label === "string" ? label : undefined}
+      aria-current={isActive ? "page" : undefined}
     >
       {Children.map(children, (child) =>
         React.isValidElement(child)
@@ -202,6 +212,7 @@ export default function Dock({
             magnification={magnification}
             baseItemSize={baseItemSize}
             label={item.label}
+            isActive={item.isActive}
           >
             <DockIcon>{item.icon}</DockIcon>
             <DockLabel>{item.label}</DockLabel>
