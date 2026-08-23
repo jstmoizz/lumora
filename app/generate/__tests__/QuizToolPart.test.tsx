@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import QuizToolPart from "../QuizToolPart";
 import {
   inputAvailableQuizPart,
@@ -20,46 +20,33 @@ describe("QuizToolPart lifecycle states", () => {
     expect(screen.getByText("Photosynthesis")).toBeInTheDocument();
   });
 
-  test("output-available renders the finished quiz card", () => {
+  test("output-available renders a non-interactive ready notice, not the quiz itself", () => {
     render(<QuizToolPart part={outputAvailableQuizPart()} />);
-    expect(screen.getByText("Quiz")).toBeInTheDocument();
+
+    // The notice reports the topic and question count. Matched with a
+    // regex, not an exact string, since "Quiz ready:" and the topic sit in
+    // sibling text/element nodes within the same paragraph.
+    expect(screen.getByText(/Quiz ready/)).toBeInTheDocument();
+    expect(screen.getByText("Photosynthesis")).toBeInTheDocument();
+    expect(screen.getByText(/1 question/)).toBeInTheDocument();
+
+    // ...but never the question/options themselves — those render
+    // exclusively in the Quiz panel (see QuizPanel.test.tsx). This is the
+    // architecture requirement this refactor exists for: one rendering
+    // location for the interactive quiz, not two.
     expect(
-      screen.getByText("What pigment captures light in photosynthesis?", {
+      screen.queryByText("What pigment captures light in photosynthesis?", {
         exact: false,
       }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Chlorophyll" })).toBeInTheDocument();
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Chlorophyll" }),
+    ).not.toBeInTheDocument();
   });
 
   test("output-error renders the tool's errorText", () => {
     render(<QuizToolPart part={outputErrorQuizPart("Duplicate answer options.")} />);
     expect(screen.getByText("Couldn't build this quiz")).toBeInTheDocument();
     expect(screen.getByText("Duplicate answer options.")).toBeInTheDocument();
-  });
-});
-
-describe("QuizCard answer interaction", () => {
-  test("selecting the correct option locks the question in and shows Correct!", () => {
-    render(<QuizToolPart part={outputAvailableQuizPart()} />);
-
-    const correctOption = screen.getByRole("button", { name: "Chlorophyll" });
-    fireEvent.click(correctOption);
-
-    expect(screen.getByText("Correct!")).toBeInTheDocument();
-    expect(correctOption).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Melanin" })).toBeDisabled();
-  });
-
-  test("selecting a wrong option shows the correct answer and doesn't mark it Correct!", () => {
-    render(<QuizToolPart part={outputAvailableQuizPart()} />);
-
-    const wrongOption = screen.getByRole("button", { name: "Melanin" });
-    fireEvent.click(wrongOption);
-
-    expect(
-      screen.getByText('Not quite — the correct answer is "Chlorophyll."'),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("Correct!")).not.toBeInTheDocument();
-    expect(wrongOption).toBeDisabled();
   });
 });

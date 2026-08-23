@@ -1,12 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import { CircleAlertIcon, SparklesIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import type { CreateQuizOutput, LumoraUIMessage } from "@/lib/ai/tools";
+import { CircleAlertIcon, ClipboardCheckIcon, SparklesIcon } from "lucide-react";
+import type { LumoraUIMessage } from "@/lib/ai/tools";
 
 type CreateQuizUIPart = Extract<
   LumoraUIMessage["parts"][number],
@@ -23,6 +21,15 @@ function prefersReducedMotion() {
 // component stays mounted (not remounted) as the same call progresses
 // input-streaming -> input-available -> output-available/output-error —
 // that's what makes the one-time entrance animation below fire only once.
+//
+// Deliberately non-interactive at every state, including output-available:
+// the actual interactive quiz (question navigation, answer selection,
+// scoring) renders exclusively in the Generate workspace's dedicated Quiz
+// panel (see QuizPanel.tsx) — GenerateWorkspace captures the quiz data via
+// ChatInterface's `onQuizGenerated` callback, watching for this same
+// output-available state. This component only ever shows the tool call's
+// own status (preparing / building / ready / failed) inline in the
+// conversation, never a second copy of the quiz itself.
 export default function QuizToolPart({ part }: { part: CreateQuizUIPart }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -53,7 +60,12 @@ export default function QuizToolPart({ part }: { part: CreateQuizUIPart }) {
             // Arguments are fully parsed; `execute` hasn't resolved yet.
             return <QuizBuilding topic={part.input.topic} />;
           case "output-available":
-            return <QuizCard quiz={part.output} />;
+            return (
+              <QuizReadyNotice
+                topic={part.output.topic}
+                questionCount={part.output.questions.length}
+              />
+            );
           case "output-error":
             return <QuizErrorCard message={part.errorText} />;
           default:
@@ -130,96 +142,32 @@ function QuizErrorCard({ message }: { message: string }) {
   );
 }
 
-function QuizCard({ quiz }: { quiz: CreateQuizOutput }) {
-  // Which option the student picked per question, keyed by question id.
-  // Local-only: no persistence, no backend scoring — answering just
-  // reveals correct/incorrect for that question and locks it in.
-  const [selections, setSelections] = useState<Record<string, number>>({});
-
+// The tool call succeeded — deliberately non-interactive and deliberately
+// not a second copy of the quiz content (no questions/options rendered
+// here at all). GenerateWorkspace already has this same data via
+// `onQuizGenerated` by the time this renders, and shows it in the Quiz
+// panel; this notice exists only so the conversation has a visible record
+// that a quiz was produced and roughly what it covers.
+function QuizReadyNotice({
+  topic,
+  questionCount,
+}: {
+  topic: string;
+  questionCount: number;
+}) {
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5">
-      <div className="flex items-center gap-2">
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-foreground">
-          <SparklesIcon aria-hidden="true" className="size-4" />
-        </div>
-        <div className="flex flex-col">
-          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            Quiz
-          </p>
-          {/*
-            h2, not h3: once a conversation has started, Generate's empty-
-            state h2 ("What are you studying today?") is unmounted, so this
-            is the first heading after the page's h1 — using h3 here would
-            skip a level.
-          */}
-          <h2 className="text-sm font-semibold text-foreground">
-            {quiz.topic}
-          </h2>
-        </div>
+    <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-5">
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-foreground">
+        <ClipboardCheckIcon aria-hidden="true" className="size-4" />
       </div>
-
-      <div className="flex flex-col gap-5">
-        {quiz.questions.map((question, index) => {
-          const selected = selections[question.id];
-          const hasAnswered = selected !== undefined;
-          const answeredCorrectly = selected === question.correctIndex;
-
-          return (
-            <div key={question.id} className="flex flex-col gap-2">
-              <p className="text-sm font-medium text-foreground">
-                {index + 1}. {question.question}
-              </p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {question.options.map((option, optionIndex) => {
-                  const isCorrectOption = optionIndex === question.correctIndex;
-                  const isSelectedOption = selected === optionIndex;
-
-                  return (
-                    <Button
-                      key={optionIndex}
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={hasAnswered}
-                      onClick={() =>
-                        setSelections((prev) => ({
-                          ...prev,
-                          [question.id]: optionIndex,
-                        }))
-                      }
-                      className={cn(
-                        "h-auto justify-start rounded-xl px-3 py-2 text-left text-sm font-normal whitespace-normal disabled:opacity-100",
-                        hasAnswered &&
-                          isCorrectOption &&
-                          "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-400",
-                        hasAnswered &&
-                          isSelectedOption &&
-                          !isCorrectOption &&
-                          "border-red-500/40 bg-red-500/10 text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-400",
-                      )}
-                    >
-                      {option}
-                    </Button>
-                  );
-                })}
-              </div>
-              {hasAnswered && (
-                <p
-                  className={cn(
-                    "text-xs",
-                    answeredCorrectly
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : "text-red-600 dark:text-red-400",
-                  )}
-                >
-                  {answeredCorrectly
-                    ? "Correct!"
-                    : `Not quite — the correct answer is "${question.options[question.correctIndex]}."`}
-                </p>
-              )}
-            </div>
-          );
-        })}
+      <div className="flex flex-col">
+        <p className="text-sm font-medium text-foreground">
+          Quiz ready: <span className="font-semibold">{topic}</span>
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {questionCount} {questionCount === 1 ? "question" : "questions"}{" "}
+          &middot; open the Quiz panel to take it
+        </p>
       </div>
     </div>
   );

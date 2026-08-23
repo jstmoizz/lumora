@@ -17,7 +17,7 @@ import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { LumoraUIMessage } from "@/lib/ai/tools";
+import type { CreateQuizOutput, LumoraUIMessage } from "@/lib/ai/tools";
 import QuizToolPart from "./QuizToolPart";
 
 // How close to the bottom (in pixels) counts as "at the bottom" for the
@@ -157,13 +157,46 @@ function ChatErrorCard({
   );
 }
 
+export interface PendingPrompt {
+  text: string;
+  /** Distinguishes two requests to send the same text — see the effect
+   * below that watches this prop. */
+  id: number;
+}
+
 export default function ChatInterface({
   initialConversationId,
   initialMessages,
+  pendingPrompt,
+  onPendingPromptHandled,
+  onPromptSubmitted,
+  onQuizGenerated,
 }: {
   /** Set when arriving from History via /generate?conversationId=... */
   initialConversationId?: string;
   initialMessages?: LumoraUIMessage[];
+  /**
+   * Set by GenerateWorkspace when the user selects a Recent Prompt — this
+   * is how a sibling panel outside this component triggers a send without
+   * lifting the whole `useChat` state up to the workspace. `id` changes on
+   * every selection (even re-selecting the same text), so the effect below
+   * can tell "a new request" apart from "the same prop object on a
+   * re-render".
+   */
+  pendingPrompt?: PendingPrompt | null;
+  /** Called once a pending prompt has actually been sent, so the workspace
+   * can clear it. */
+  onPendingPromptHandled?: () => void;
+  /** Fired for every message this component actually sends — composer
+   * submissions, example-prompt clicks, and pending-prompt sends alike —
+   * so GenerateWorkspace can build its Recent Prompts list from a single
+   * source instead of duplicating send logic. */
+  onPromptSubmitted?: (text: string) => void;
+  /** Fired once per quiz the moment its tool call reaches
+   * output-available, so GenerateWorkspace can show it in the Quiz panel —
+   * see QuizToolPart.tsx for why the in-chat rendering itself stays
+   * non-interactive. */
+  onQuizGenerated?: (quiz: CreateQuizOutput) => void;
 }) {
   const [input, setInput] = useState("");
   const { messages, sendMessage, regenerate, status, stop, error } =
@@ -190,13 +223,56 @@ export default function ChatInterface({
   // continue — omitting it (rather than passing `body: undefined`) keeps
   // the very first request in a session identical to before this feature
   // existed.
+  //
+  // The single choke point every send path (composer submit, example-
+  // prompt click, pending-prompt-from-Recent-Prompts) routes through, which
+  // is what makes `onPromptSubmitted` a complete record without each call
+  // site needing to remember to report it separately.
   function sendChatMessage(message: { text: string }) {
     if (conversationId) {
       sendMessage(message, { body: { conversationId } });
     } else {
       sendMessage(message);
     }
+    onPromptSubmitted?.(message.text);
   }
+
+  // Selecting a Recent Prompt happens in a sibling panel outside this
+  // component (GenerateWorkspace owns that state), so it can't call
+  // `sendChatMessage` directly — instead it hands this component a
+  // `pendingPrompt` prop, and this effect is what actually sends it. Only
+  // fires once per distinct `id` (a ref, not state, so a synchronous
+  // double-render can't send twice) and only once the chat is actually
+  // `ready` — a prompt selected mid-stream waits rather than getting lost.
+  const lastHandledPendingPromptIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!pendingPrompt || status !== "ready") return;
+    if (lastHandledPendingPromptIdRef.current === pendingPrompt.id) return;
+    lastHandledPendingPromptIdRef.current = pendingPrompt.id;
+    sendChatMessage({ text: pendingPrompt.text });
+    onPendingPromptHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sendChatMessage/onPendingPromptHandled are recreated every render; only pendingPrompt/status should re-trigger this effect.
+  }, [pendingPrompt, status]);
+
+  // Reports each quiz exactly once, the moment its tool call's output
+  // becomes available — scans every message rather than just the latest,
+  // since a resumed conversation (from History) can already contain a
+  // finished quiz on first render. `seenQuizIdsRef` (not state) makes this
+  // a pure "notify once" side effect with nothing to re-render for.
+  const seenQuizIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!onQuizGenerated) return;
+    for (const message of messages) {
+      for (const part of message.parts) {
+        if (part.type !== "tool-createQuiz" || part.state !== "output-available") {
+          continue;
+        }
+        if (seenQuizIdsRef.current.has(part.output.quizId)) continue;
+        seenQuizIdsRef.current.add(part.output.quizId);
+        onQuizGenerated(part.output);
+      }
+    }
+  }, [messages, onQuizGenerated]);
 
   // Randomized once per mount (cached in the ref, computed lazily on first
   // read) and never recomputed afterward — a fresh visit remounts this

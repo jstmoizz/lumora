@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Pacifico } from "next/font/google";
 import GlobalDock from "./components/GlobalDock";
 import HeaderAccount from "./components/HeaderAccount";
 import ThemeListener from "./components/theme/ThemeListener";
@@ -16,6 +16,15 @@ const geistSans = Geist({
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+});
+
+// Used exclusively for the "Lumora" wordmark (header logo, footer, and
+// section headings that are just the brand name) via the `font-wordmark`
+// Tailwind utility below — never for body copy.
+const pacifico = Pacifico({
+  variable: "--font-pacifico",
+  subsets: ["latin", "cyrillic", "vietnamese"],
+  weight: "400",
 });
 
 export const metadata: Metadata = {
@@ -34,7 +43,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${pacifico.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <head>
@@ -64,14 +73,15 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                 aria-hidden="true"
                 className="size-1.5 rounded-full bg-primary"
               />
-              Lumora
+              <span className="font-wordmark text-xl">Lumora</span>
             </Link>
             <HeaderAccount userEmail={user?.email ?? null} />
           </div>
         </header>
         {children}
         <footer className="border-t border-border/60 px-6 py-6 text-center text-sm text-muted-foreground">
-          &copy; {new Date().getFullYear()} Lumora
+          &copy; {new Date().getFullYear()}{" "}
+          <span className="font-wordmark text-base">Lumora</span>
         </footer>
         <GlobalDock />
       </body>

@@ -3,7 +3,12 @@ import { render, screen, within, fireEvent } from "@testing-library/react";
 import { useChat } from "@ai-sdk/react";
 import ChatInterface from "../ChatInterface";
 import { makeUseChatReturn, type MockUseChatReturn } from "./useChatMock";
-import { assistantMessageWithParts, assistantTextMessage, userMessage } from "./fixtures";
+import {
+  assistantMessageWithParts,
+  assistantTextMessage,
+  outputAvailableQuizPart,
+  userMessage,
+} from "./fixtures";
 
 vi.mock("@ai-sdk/react", () => ({
   useChat: vi.fn(),
@@ -242,5 +247,166 @@ describe("error state", () => {
 
     expect(regenerate).toHaveBeenCalledTimes(1);
     resolveRegenerate();
+  });
+});
+
+describe("onPromptSubmitted — GenerateWorkspace's Recent Prompts feed", () => {
+  test("fires once per composer submission, with the sent text", () => {
+    const onPromptSubmitted = vi.fn();
+    mockUseChat.mockReturnValue(makeUseChatReturn());
+    render(<ChatInterface onPromptSubmitted={onPromptSubmitted} />);
+
+    fireEvent.change(screen.getByLabelText("Message"), {
+      target: { value: "Explain osmosis" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(onPromptSubmitted).toHaveBeenCalledTimes(1);
+    expect(onPromptSubmitted).toHaveBeenCalledWith("Explain osmosis");
+  });
+
+  test("fires when an example prompt is clicked", () => {
+    const onPromptSubmitted = vi.fn();
+    mockUseChat.mockReturnValue(makeUseChatReturn());
+    render(<ChatInterface onPromptSubmitted={onPromptSubmitted} />);
+
+    const group = screen.getByRole("group", { name: "Example prompts" });
+    const [firstPrompt] = within(group).getAllByRole("button");
+    fireEvent.click(firstPrompt);
+
+    expect(onPromptSubmitted).toHaveBeenCalledWith(firstPrompt.textContent);
+  });
+
+  test("is optional — omitting it doesn't break sending", () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
+    render(<ChatInterface />);
+
+    fireEvent.change(screen.getByLabelText("Message"), {
+      target: { value: "Explain osmosis" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("pendingPrompt — selecting a Recent Prompt from outside the composer", () => {
+  test("sends the pending prompt's text and reports it handled", () => {
+    const sendMessage = vi.fn();
+    const onPendingPromptHandled = vi.fn();
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
+
+    render(
+      <ChatInterface
+        pendingPrompt={{ text: "Quiz me on cell biology", id: 1 }}
+        onPendingPromptHandled={onPendingPromptHandled}
+      />,
+    );
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith({
+      text: "Quiz me on cell biology",
+    });
+    expect(onPendingPromptHandled).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not resend on a re-render with the same pending prompt id", () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
+
+    const pendingPrompt = { text: "Quiz me on cell biology", id: 1 };
+    const { rerender } = render(
+      <ChatInterface pendingPrompt={pendingPrompt} />,
+    );
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+
+    rerender(<ChatInterface pendingPrompt={pendingPrompt} />);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  test("selecting the same text again (a new id) sends it again", () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
+
+    const { rerender } = render(
+      <ChatInterface pendingPrompt={{ text: "Explain osmosis", id: 1 }} />,
+    );
+    rerender(<ChatInterface pendingPrompt={{ text: "Explain osmosis", id: 2 }} />);
+
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  test("waits for a ready status before sending", () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({ sendMessage, status: "streaming" }),
+    );
+
+    render(
+      <ChatInterface pendingPrompt={{ text: "Quiz me on cell biology", id: 1 }} />,
+    );
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("onQuizGenerated — capturing quiz data for the Quiz panel", () => {
+  test("fires once with the quiz output when a tool-createQuiz part reaches output-available", () => {
+    const onQuizGenerated = vi.fn();
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        messages: [
+          userMessage("Quiz me on photosynthesis"),
+          assistantMessageWithParts([outputAvailableQuizPart()]),
+        ],
+      }),
+    );
+
+    render(<ChatInterface onQuizGenerated={onQuizGenerated} />);
+
+    expect(onQuizGenerated).toHaveBeenCalledTimes(1);
+    expect(onQuizGenerated).toHaveBeenCalledWith(
+      outputAvailableQuizPart().output,
+    );
+  });
+
+  test("does not fire again for a quiz it has already reported", () => {
+    const onQuizGenerated = vi.fn();
+    const messages = [
+      userMessage("Quiz me on photosynthesis"),
+      assistantMessageWithParts([outputAvailableQuizPart()]),
+    ];
+    mockUseChat.mockReturnValue(makeUseChatReturn({ messages }));
+
+    const { rerender } = render(
+      <ChatInterface onQuizGenerated={onQuizGenerated} />,
+    );
+    expect(onQuizGenerated).toHaveBeenCalledTimes(1);
+
+    // Same messages array, e.g. a re-render triggered by something
+    // unrelated (a status change) — must not re-report the same quiz.
+    mockUseChat.mockReturnValue(makeUseChatReturn({ messages }));
+    rerender(<ChatInterface onQuizGenerated={onQuizGenerated} />);
+
+    expect(onQuizGenerated).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not render the interactive quiz inline — only the ready notice", () => {
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        messages: [
+          userMessage("Quiz me on photosynthesis"),
+          assistantMessageWithParts([outputAvailableQuizPart()]),
+        ],
+      }),
+    );
+
+    render(<ChatInterface />);
+
+    expect(screen.getByText(/Quiz ready/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Chlorophyll" }),
+    ).not.toBeInTheDocument();
   });
 });

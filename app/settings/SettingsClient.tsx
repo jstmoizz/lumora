@@ -58,7 +58,7 @@ function SettingsSection({
 }: {
   sectionRef: RefObject<HTMLElement | null>;
   icon: typeof PaletteIcon;
-  title: string;
+  title: ReactNode;
   description: string;
   children: ReactNode;
 }) {
@@ -487,7 +487,11 @@ export default function SettingsClient({
           <SettingsSection
             sectionRef={aboutRef}
             icon={InfoIcon}
-            title="About Lumora"
+            title={
+              <>
+                About <span className="font-wordmark text-lg">Lumora</span>
+              </>
+            }
             description="A little more about the product."
           >
             <p className="text-sm leading-relaxed text-muted-foreground">
@@ -495,7 +499,8 @@ export default function SettingsClient({
               learning clearer, more focused, and more personal.
             </p>
             <p className="text-xs text-muted-foreground">
-              Lumora &middot; Study smarter.
+              <span className="font-wordmark text-sm">Lumora</span> &middot;
+              Study smarter.
             </p>
           </SettingsSection>
         </div>

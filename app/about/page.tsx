@@ -85,7 +85,7 @@ export default function AboutPage() {
             ref={titleRef}
             className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl"
           >
-            About Lumora
+            About <span className="font-wordmark text-3xl sm:text-4xl">Lumora</span>
           </h1>
           <p
             ref={subtitleRef}
@@ -135,7 +135,8 @@ export default function AboutPage() {
             <Link href="/generate">Start studying</Link>
           </Button>
           <p className="text-xs text-muted-foreground">
-            Lumora &middot; Study smarter.
+            <span className="font-wordmark text-sm">Lumora</span> &middot;
+            Study smarter.
           </p>
         </div>
       </div>

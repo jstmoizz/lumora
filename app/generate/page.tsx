@@ -1,5 +1,5 @@
 import { getConversationMessages } from "@/lib/supabase/conversations";
-import ChatInterface from "./ChatInterface";
+import GenerateWorkspace from "./GenerateWorkspace";
 
 export default async function GeneratePage({
   searchParams,
@@ -18,17 +18,19 @@ export default async function GeneratePage({
   const resolvedConversationId = messages ? conversationId : undefined;
 
   return (
-    <main className="flex min-h-0 flex-1 flex-col items-center gap-3 px-4 py-6 pb-24 sm:px-6">
-      <h1 className="motion-safe:animate-in motion-safe:fade-in motion-safe:duration-500 text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
-        Study with Lumora
+    <main className="flex min-h-0 flex-1 flex-col gap-3 px-4 py-6 pb-24 sm:px-6">
+      <h1 className="motion-safe:animate-in motion-safe:fade-in motion-safe:duration-500 text-center text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
+        Study with{" "}
+        <span className="font-wordmark text-2xl sm:text-3xl">Lumora</span>
       </h1>
       {/*
         Keyed by conversation so navigating History -> a different past
-        conversation (or History -> a brand new chat) fully remounts
-        ChatInterface instead of reusing useChat's in-memory state from
-        whatever was open before.
+        conversation (or History -> a brand new chat) fully remounts the
+        whole workspace (including ChatInterface's useChat state, and the
+        Recent Prompts/Quiz panel state alongside it) instead of reusing
+        state from whatever was open before.
       */}
-      <ChatInterface
+      <GenerateWorkspace
         key={resolvedConversationId ?? "new"}
         initialConversationId={resolvedConversationId}
         initialMessages={messages ?? undefined}
