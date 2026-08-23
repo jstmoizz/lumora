@@ -8,7 +8,7 @@ import { useWebglSupported } from "./useWebglSupported";
 // Keeps three/@react-three/* entirely out of the initial Home bundle and
 // out of the server-rendered HTML — same reasoning as Explore's own
 // dynamic(() => import("./components/Scene"), { ssr: false }).
-const ShaderScene = dynamic(() => import("./ShaderScene"), {
+const Galaxy = dynamic(() => import("./Galaxy"), {
   ssr: false,
   loading: () => <AuroraBackground />,
 });
@@ -21,9 +21,11 @@ const ShaderScene = dynamic(() => import("./ShaderScene"), {
 //   4.4's blurred CSS blobs). It's already a valid static/reduced-motion
 //   treatment on its own (see its `prefers-reduced-motion` handling in
 //   globals.css) using the exact same indigo/violet/pink palette, so it
-//   doubles as the shader's fallback with zero new code.
-// - otherwise: the GLSL shader, which becomes the hero's primary
-//   atmosphere.
+//   doubles as Galaxy's fallback with zero new code — see Galaxy.tsx's own
+//   comment on why it doesn't duplicate this reduced-motion/WebGL gating.
+// - otherwise: the restrained Galaxy star field, which becomes the hero's
+//   primary atmosphere (replacing the old flowing-ribbon shader — see
+//   Galaxy.tsx and galaxy.frag.ts for why and how).
 //
 // A soft radial scrim sits between whichever background renders and the
 // real hero content, so the heading/description/CTA stay readable without
@@ -37,7 +39,7 @@ export default function HeroShaderBackground() {
 
   return (
     <>
-      {showShader ? <ShaderScene /> : <AuroraBackground />}
+      {showShader ? <Galaxy /> : <AuroraBackground />}
 
       {/*
         A soft, centered fade toward the page's own background color,

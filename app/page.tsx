@@ -125,11 +125,11 @@ const STEPS: CarouselItem[] = [
 ];
 
 export default function Home() {
-  // TEST VARIANT (see SpecularButton usage below): the hero CTA's fill,
-  // outline, and shine color are overridden per-theme here rather than
-  // using SpecularButton's own default (opaque --primary fill) — ogl's
-  // Color needs a literal value, not a CSS var, so this is the one piece
-  // that can't just be "var(--foreground)" the way textColor is.
+  // TEST VARIANT (see SpecularButton usage below): only the hero CTA's
+  // outline/shine color is overridden per-theme here — the fill itself
+  // stays SpecularButton's own default opaque --primary pill. ogl's Color
+  // needs a literal value, not a CSS var, which is why this resolves it in
+  // JS via useIsDarkTheme() rather than passing a var(...) straight through.
   const isDark = useIsDarkTheme();
   const heroRef = useRef<HTMLDivElement>(null);
   const heroEyebrowRef = useRef<HTMLSpanElement>(null);
@@ -249,16 +249,16 @@ export default function Home() {
             <div ref={heroCtaRef}>
               {/*
                 TEST VARIANT, may be reverted later: fill matches the
-                surrounding page (fully transparent, tintOpacity 0) instead
-                of SpecularButton's default opaque --primary pill — the
-                button reads purely by its outline + moving shine, white/
-                light in dark mode, black/dark in light mode.
+                surrounding primary button (SpecularButton's own default
+                opaque --primary pill — no tintOpacity/textColor override)
+                — only the moving outline/shine provides the contrasting
+                effect, white/light in dark mode, black/dark in light mode.
+                Not transparent-glass; see SpecularButton.tsx/css for the
+                untouched global defaults this only overrides two colors of.
               */}
               <SpecularButton
                 href="/generate"
                 size="lg"
-                tintOpacity={0}
-                textColor="var(--foreground)"
                 lineColor={isDark ? "#ffffff" : "#0a0a0a"}
                 baseColor={isDark ? "#e4e4e7" : "#27272a"}
                 className="motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-[1.03] active:scale-[0.98]"
