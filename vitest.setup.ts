@@ -10,8 +10,26 @@ afterEach(() => {
 });
 
 // jsdom has no scroll layout engine and doesn't implement Element.scrollTo.
-// ChatInterface's auto-follow effect calls it on every `messages` change.
-Element.prototype.scrollTo = vi.fn();
+// ChatInterface's auto-follow effect calls it on every `messages` change,
+// and (unlike a plain no-op) also reads `scrollTop` back immediately
+// afterward to update its "near top/bottom" state — a real browser's
+// `scrollTo({ top, behavior: "auto" })` applies synchronously, so this
+// stub mirrors that by actually assigning `scrollTop`, rather than
+// silently doing nothing and leaving it stuck at 0.
+Element.prototype.scrollTo = vi.fn(function (
+  this: Element,
+  options?: ScrollToOptions | number,
+) {
+  if (typeof options === "object" && options !== null && "top" in options) {
+    // Real browsers clamp `scrollTop` to `[0, scrollHeight - clientHeight]`
+    // — a non-scrollable element (content exactly fills its box, as in the
+    // "fits without scrolling" test case) can never actually scroll away
+    // from 0, so this clamps too rather than letting `scrollTop` end up at
+    // an unreachable value no real browser would ever report.
+    const maxScrollTop = Math.max(0, this.scrollHeight - this.clientHeight);
+    this.scrollTop = Math.max(0, Math.min(options.top ?? this.scrollTop, maxScrollTop));
+  }
+});
 
 // jsdom does not implement matchMedia. Components in this app gate GSAP
 // animations behind `prefers-reduced-motion`, so defaulting `matches: true`

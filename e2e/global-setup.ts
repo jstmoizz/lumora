@@ -37,6 +37,15 @@ export const E2E_PERSISTENCE_TEST_PASSWORD =
 export const E2E_HISTORY_TEST_EMAIL = "lumora-e2e-history-test@example.com";
 export const E2E_HISTORY_TEST_PASSWORD = "Lumora-E2E-History-Test-Password-1!";
 
+// A fourth account, used only by generate-workspace.spec.ts — same reasoning
+// as the history account's own split above: that spec seeds a conversation
+// via the admin client and asserts on Recent Chats' exact contents, which
+// would race with anything else concurrently writing to the same account.
+export const E2E_WORKSPACE_TEST_EMAIL =
+  "lumora-e2e-workspace-test@example.com";
+export const E2E_WORKSPACE_TEST_PASSWORD =
+  "Lumora-E2E-Workspace-Test-Password-1!";
+
 export const AUTH_STATE_PATH = resolve(__dirname, ".auth", "user.json");
 
 // Playwright's own process (unlike the `webServer` child process, which runs
@@ -106,6 +115,7 @@ export default async function globalSetup(config: FullConfig) {
   await ensureUserExists(E2E_TEST_EMAIL, E2E_TEST_PASSWORD);
   await ensureUserExists(E2E_PERSISTENCE_TEST_EMAIL, E2E_PERSISTENCE_TEST_PASSWORD);
   await ensureUserExists(E2E_HISTORY_TEST_EMAIL, E2E_HISTORY_TEST_PASSWORD);
+  await ensureUserExists(E2E_WORKSPACE_TEST_EMAIL, E2E_WORKSPACE_TEST_PASSWORD);
 
   const baseURL =
     config.projects[0]?.use?.baseURL ?? "http://localhost:3100";

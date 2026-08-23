@@ -64,9 +64,9 @@ The Groq API key is read from the server environment (`GROQ_API_KEY`) inside `li
 
 ## 5. Tool calling
 
-Lumora's chat route registers two server-side tools with the AI SDK's `streamText`: `createQuiz` and `createFlashcards`. The model decides when to call each (e.g. when the user asks to be quizzed, or asks for flashcards) and supplies the content itself as the tool call's arguments; `execute` never makes a further model call of its own — it only validates and normalizes that content. `createFlashcards` mirrors `createQuiz`'s shape exactly (same validate-and-assign-ids `execute`, same per-item stable-id scheme) for a second activity type, so both render through the same "Practice" panel architecture described below rather than duplicated logic.
+Lumora's chat route registers two server-side tools with the AI SDK's `streamText`: `createQuiz` and `createFlashcards`. The model decides when to call each (e.g. when the user asks to be quizzed, or asks for flashcards) and supplies the content itself as the tool call's arguments; `execute` never makes a further model call of its own — it only validates and normalizes that content. `createFlashcards` mirrors `createQuiz`'s shape exactly (same validate-and-assign-ids `execute`, same per-item stable-id scheme) for a second activity type, so both render through the same Resources panel architecture described below rather than duplicated logic.
 
-`SYSTEM_PROMPT` (in [`lib/ai/config.ts`](lib/ai/config.ts)) explicitly instructs the model not to restate a quiz's/flashcard set's content in its own written reply after calling either tool — the activity itself only ever renders in the Practice panel (see below), never as chat text, so the model is told to give a short one-sentence acknowledgment instead.
+`SYSTEM_PROMPT` (in [`lib/ai/config.ts`](lib/ai/config.ts)) explicitly instructs the model not to restate a quiz's/flashcard set's content in its own written reply after calling either tool — the activity itself only ever renders in the Resources panel (see below), never as chat text, so the model is told to give a short one-sentence acknowledgment instead.
 
 ### `createQuiz`
 
@@ -115,12 +115,18 @@ z.object({
 |---|---|
 | `input-streaming` | A generic skeleton card ("Lumora is preparing a quiz…" / "…flashcards…") — the arguments are still streaming in, so no partial JSON is rendered. |
 | `input-available` | A "Building your quiz/flashcards on *{topic}*…" card — the arguments are fully parsed, `execute` hasn't resolved yet. |
-| `output-available` | A compact ready notice only — e.g. "Quiz ready: {topic} · {N} questions · Open Practice to take it". The actual interactive quiz/flashcards render exclusively in Generate's Practice panel ([`app/generate/PracticePanel.tsx`](app/generate/PracticePanel.tsx), tabbed Quizzes/Flashcards — see [`app/generate/QuizPanel.tsx`](app/generate/QuizPanel.tsx) and [`app/generate/FlashcardsPanel.tsx`](app/generate/FlashcardsPanel.tsx)), never duplicated into the chat itself. |
+| `output-available` | A compact ready notice only — e.g. "Quiz ready: {topic} · {N} questions · Open Resources to take it". The actual interactive quiz/flashcards render exclusively in Generate's Resources panel ([`app/generate/PracticePanel.tsx`](app/generate/PracticePanel.tsx) — internally still named "Practice"; only the user-facing label changed — tabbed Quizzes/Flashcards, see [`app/generate/QuizPanel.tsx`](app/generate/QuizPanel.tsx) and [`app/generate/FlashcardsPanel.tsx`](app/generate/FlashcardsPanel.tsx)), never duplicated into the chat itself. |
 | `output-error` | A designed error card (icon + the thrown error's message) — not raw JSON, not an unhandled exception. |
 
 The chat route also sets `stopWhen: stepCountIs(2)`, so the model gets a turn to comment after calling a tool instead of the AI SDK's single-step default ending the turn immediately after the tool call — `SYSTEM_PROMPT` keeps that comment short rather than a restatement (see above).
 
-Every quiz/flashcard set generated in a session gets its own collapsible card in Practice (via the shared [`app/generate/Disclosure.tsx`](app/generate/Disclosure.tsx) and [`app/generate/useAutoCollapseList.ts`](app/generate/useAutoCollapseList.ts)) rather than replacing the last one — the newest opens automatically, the previously-auto-opened one collapses, and anything the user opened by hand is left alone. Disclosure keeps collapsed content mounted (hidden via the `hidden` attribute, not unmounted) specifically so a quiz's in-progress answers or a flashcard set's current card/flip side survive being collapsed and reopened.
+Every quiz/flashcard set generated in a session gets its own collapsible card in Resources (via the shared [`app/generate/Disclosure.tsx`](app/generate/Disclosure.tsx) and [`app/generate/useAutoCollapseList.ts`](app/generate/useAutoCollapseList.ts)) rather than replacing the last one — the newest opens automatically, the previously-auto-opened one collapses, and anything the user opened by hand is left alone. Disclosure keeps collapsed content mounted (hidden via the `hidden` attribute, not unmounted) specifically so a quiz's in-progress answers or a flashcard set's current card/flip side survive being collapsed and reopened; Resources' own Quizzes/Flashcards tabs use the same mount-and-hide approach (Radix `Tabs` with `forceMount`) so switching tabs preserves state too.
+
+### Generate workspace — Recent Chats and conversation persistence
+
+Generate is a three-column layout: Recent Chats (left) | chat (center) | Resources (right) on desktop, both side panels collapsing into drawers on mobile — see [`app/generate/GenerateWorkspace.tsx`](app/generate/GenerateWorkspace.tsx). Recent Chats is backed by the real `conversations` table (via `app/api/conversations/route.ts` and `app/api/conversations/[id]/route.ts`), not a session-only prompt log — selecting a row or clicking New Chat swaps the active conversation in place by remounting an internal `GenerateSession` (keyed by a bump counter), without a full page navigation.
+
+The active conversation id is synced to the URL (`?conversationId=`) and to `sessionStorage` (not `localStorage`) as soon as it's known — `sessionStorage` is naturally per-tab, which is what lets the ongoing conversation survive navigating to another route and back within the same tab (and a plain refresh) while a brand-new tab still starts its own fresh session, per [`app/generate/activeConversationStorage.ts`](app/generate/activeConversationStorage.ts).
 
 ## 6. Playground
 

@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono, Pacifico } from "next/font/google";
+import AppFooter from "./components/AppFooter";
 import ClickSpark from "./components/ClickSpark";
 import GlobalDock from "./components/GlobalDock";
 import HeaderAccount from "./components/HeaderAccount";
+import LumoraMark from "./components/LumoraMark";
 import ThemeListener from "./components/theme/ThemeListener";
 import ThemeScript from "./components/theme/ThemeScript";
 import { getServerUser } from "@/lib/supabase/server";
@@ -76,22 +78,18 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
             <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-6 py-4">
               <Link
                 href="/"
-                className="flex items-center gap-2 text-lg font-semibold tracking-tight text-foreground"
+                className="lumora-brand flex items-center gap-2 text-lg font-semibold tracking-tight text-foreground"
               >
-                <span
-                  aria-hidden="true"
-                  className="size-1.5 rounded-full bg-primary"
-                />
-                <span className="font-wordmark text-xl">Lumora</span>
+                <LumoraMark className="size-6" />
+                <span className="lumora-wordmark-accent font-wordmark text-xl">
+                  Lumora
+                </span>
               </Link>
               <HeaderAccount userEmail={user?.email ?? null} />
             </div>
           </header>
           {children}
-          <footer className="border-t border-border/60 px-6 py-6 text-center text-sm text-muted-foreground">
-            &copy; {new Date().getFullYear()}{" "}
-            <span className="font-wordmark text-base">Lumora</span>
-          </footer>
+          <AppFooter />
           <GlobalDock />
         </ClickSpark>
       </body>

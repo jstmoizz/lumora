@@ -176,7 +176,7 @@ export function QuizToolPart({ part }: { part: CreateQuizUIPart }) {
             return (
               <ActivityReadyNotice
                 title={`Quiz ready: ${part.output.topic}`}
-                detail={`${count} question${count === 1 ? "" : "s"} · Open Practice to take it`}
+                detail={`${count} question${count === 1 ? "" : "s"} · Open Resources to take it`}
               />
             );
           }
@@ -220,7 +220,7 @@ export function FlashcardsToolPart({ part }: { part: CreateFlashcardsUIPart }) {
             return (
               <ActivityReadyNotice
                 title={`Flashcards ready: ${part.output.topic}`}
-                detail={`${count} card${count === 1 ? "" : "s"} · Open Practice to study`}
+                detail={`${count} card${count === 1 ? "" : "s"} · Open Resources to study`}
               />
             );
           }

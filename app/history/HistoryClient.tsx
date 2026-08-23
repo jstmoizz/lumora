@@ -6,39 +6,12 @@ import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { HistoryIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { formatRelativeTime } from "@/lib/formatRelativeTime";
 import type { ConversationSummary } from "@/lib/supabase/conversations";
 
 function prefersReducedMotion() {
   if (typeof window === "undefined") return true;
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
-
-const RELATIVE_TIME_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
-  ["year", 1000 * 60 * 60 * 24 * 365],
-  ["month", 1000 * 60 * 60 * 24 * 30],
-  ["week", 1000 * 60 * 60 * 24 * 7],
-  ["day", 1000 * 60 * 60 * 24],
-  ["hour", 1000 * 60 * 60],
-  ["minute", 1000 * 60],
-];
-
-const relativeTimeFormatter = new Intl.RelativeTimeFormat(undefined, {
-  numeric: "auto",
-});
-
-// "2 hours ago", "Yesterday", etc. via the built-in Intl formatter — no new
-// dependency needed for this. Kept out of the component body's own render
-// (called inline per-row instead) since its result depends on the current
-// time, not just `updatedAt`; see the `suppressHydrationWarning` note below
-// for why that's fine here.
-function formatRelativeTime(iso: string): string {
-  const diffMs = new Date(iso).getTime() - Date.now();
-  for (const [unit, unitMs] of RELATIVE_TIME_UNITS) {
-    if (Math.abs(diffMs) >= unitMs) {
-      return relativeTimeFormatter.format(Math.round(diffMs / unitMs), unit);
-    }
-  }
-  return relativeTimeFormatter.format(0, "minute");
 }
 
 function ConversationRow({

@@ -14,10 +14,12 @@ export { CHAT_MODEL_ID };
 /**
  * The Groq model Lumora's chat feature uses, instantiated from
  * `CHAT_MODEL_ID` (see `lib/ai/model.ts` for the identifier itself and why
- * it lives in its own module). It's a reasoning model, so responses may
- * include a separate reasoning stream alongside the chat text; the AI SDK
- * surfaces that as its own message part, and the existing streaming setup
- * here doesn't need any changes to keep working.
+ * it lives in its own module). Some models on this route emit a separate
+ * reasoning stream alongside the chat text; the AI SDK surfaces that as its
+ * own message part, ChatInterface.tsx doesn't render it (only `text` and
+ * the tool parts are handled there), and the existing streaming setup here
+ * doesn't need any changes either way — a model that emits one just has
+ * that part silently skipped on the client.
  *
  * The `groq()` provider reads the API key from the `GROQ_API_KEY`
  * environment variable automatically — the key is never read, stored, or
@@ -44,9 +46,9 @@ If you are unsure about something, say so instead of guessing.
 
 When you call createQuiz or createFlashcards, the questions/cards you pass
 as arguments already render as their own interactive activity in the app's
-Practice panel — do not also write them out in your reply. After calling
+Resources panel — do not also write them out in your reply. After calling
 either tool, respond with only a short one-sentence acknowledgment (e.g.
-"Here's a quiz on photosynthesis — open Practice to take it!"), never the
+"Here's a quiz on photosynthesis — open Resources to take it!"), never the
 questions, options, answers, cards, or explanations themselves.`;
 
 /**

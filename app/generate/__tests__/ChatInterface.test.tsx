@@ -1,4 +1,4 @@
-import { describe, test, expect, vi, beforeEach, type Mock } from "vitest";
+import { describe, test, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { render, screen, within, fireEvent } from "@testing-library/react";
 import { useChat } from "@ai-sdk/react";
 import ChatInterface from "../ChatInterface";
@@ -251,31 +251,38 @@ describe("error state", () => {
   });
 });
 
-describe("onPromptSubmitted — GenerateWorkspace's Recent Prompts feed", () => {
-  test("fires once per composer submission, with the sent text", () => {
-    const onPromptSubmitted = vi.fn();
+describe("onConversationIdKnown — GenerateWorkspace's URL/Recent Chats sync", () => {
+  test("fires immediately with initialConversationId, for a resumed conversation", () => {
+    const onConversationIdKnown = vi.fn();
     mockUseChat.mockReturnValue(makeUseChatReturn());
-    render(<ChatInterface onPromptSubmitted={onPromptSubmitted} />);
 
-    fireEvent.change(screen.getByLabelText("Message"), {
-      target: { value: "Explain osmosis" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    render(
+      <ChatInterface
+        initialConversationId="conv-1"
+        onConversationIdKnown={onConversationIdKnown}
+      />,
+    );
 
-    expect(onPromptSubmitted).toHaveBeenCalledTimes(1);
-    expect(onPromptSubmitted).toHaveBeenCalledWith("Explain osmosis");
+    expect(onConversationIdKnown).toHaveBeenCalledWith("conv-1");
   });
 
-  test("fires when an example prompt is clicked", () => {
-    const onPromptSubmitted = vi.fn();
-    mockUseChat.mockReturnValue(makeUseChatReturn());
-    render(<ChatInterface onPromptSubmitted={onPromptSubmitted} />);
+  test("fires once metadata reports a newly created conversation's id", () => {
+    const onConversationIdKnown = vi.fn();
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        messages: [
+          userMessage("Explain osmosis"),
+          {
+            ...assistantTextMessage("Osmosis is...", "assistant-1"),
+            metadata: { conversationId: "conv-new" },
+          },
+        ],
+      }),
+    );
 
-    const group = screen.getByRole("group", { name: "Example prompts" });
-    const [firstPrompt] = within(group).getAllByRole("button");
-    fireEvent.click(firstPrompt);
+    render(<ChatInterface onConversationIdKnown={onConversationIdKnown} />);
 
-    expect(onPromptSubmitted).toHaveBeenCalledWith(firstPrompt.textContent);
+    expect(onConversationIdKnown).toHaveBeenCalledWith("conv-new");
   });
 
   test("is optional — omitting it doesn't break sending", () => {
@@ -292,63 +299,69 @@ describe("onPromptSubmitted — GenerateWorkspace's Recent Prompts feed", () => 
   });
 });
 
-describe("pendingPrompt — selecting a Recent Prompt from outside the composer", () => {
-  test("sends the pending prompt's text and reports it handled", () => {
-    const sendMessage = vi.fn();
-    const onPendingPromptHandled = vi.fn();
-    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
-
-    render(
-      <ChatInterface
-        pendingPrompt={{ text: "Quiz me on cell biology", id: 1 }}
-        onPendingPromptHandled={onPendingPromptHandled}
-      />,
-    );
-
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-    expect(sendMessage).toHaveBeenCalledWith({
-      text: "Quiz me on cell biology",
-    });
-    expect(onPendingPromptHandled).toHaveBeenCalledTimes(1);
-  });
-
-  test("does not resend on a re-render with the same pending prompt id", () => {
-    const sendMessage = vi.fn();
-    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
-
-    const pendingPrompt = { text: "Quiz me on cell biology", id: 1 };
-    const { rerender } = render(
-      <ChatInterface pendingPrompt={pendingPrompt} />,
-    );
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-
-    rerender(<ChatInterface pendingPrompt={pendingPrompt} />);
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-  });
-
-  test("selecting the same text again (a new id) sends it again", () => {
-    const sendMessage = vi.fn();
-    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
-
-    const { rerender } = render(
-      <ChatInterface pendingPrompt={{ text: "Explain osmosis", id: 1 }} />,
-    );
-    rerender(<ChatInterface pendingPrompt={{ text: "Explain osmosis", id: 2 }} />);
-
-    expect(sendMessage).toHaveBeenCalledTimes(2);
-  });
-
-  test("waits for a ready status before sending", () => {
-    const sendMessage = vi.fn();
+describe("onTurnSettled — GenerateWorkspace's Recent Chats refresh trigger", () => {
+  test("fires when status moves from streaming to ready", () => {
+    const onTurnSettled = vi.fn();
     mockUseChat.mockReturnValue(
-      makeUseChatReturn({ sendMessage, status: "streaming" }),
+      makeUseChatReturn({
+        status: "streaming",
+        messages: [userMessage("Explain osmosis")],
+      }),
+    );
+    const { rerender } = render(
+      <ChatInterface onTurnSettled={onTurnSettled} />,
+    );
+    expect(onTurnSettled).not.toHaveBeenCalled();
+
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        status: "ready",
+        messages: [
+          userMessage("Explain osmosis"),
+          assistantTextMessage("Osmosis is...", "assistant-1"),
+        ],
+      }),
+    );
+    rerender(<ChatInterface onTurnSettled={onTurnSettled} />);
+
+    expect(onTurnSettled).toHaveBeenCalledTimes(1);
+  });
+
+  test("fires when a turn ends in error, not just success", () => {
+    const onTurnSettled = vi.fn();
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        status: "submitted",
+        messages: [userMessage("Explain osmosis")],
+      }),
+    );
+    const { rerender } = render(
+      <ChatInterface onTurnSettled={onTurnSettled} />,
     );
 
-    render(
-      <ChatInterface pendingPrompt={{ text: "Quiz me on cell biology", id: 1 }} />,
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        status: "error",
+        messages: [userMessage("Explain osmosis")],
+        error: new Error("failed"),
+      }),
+    );
+    rerender(<ChatInterface onTurnSettled={onTurnSettled} />);
+
+    expect(onTurnSettled).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not fire on an unrelated re-render while already idle", () => {
+    const onTurnSettled = vi.fn();
+    mockUseChat.mockReturnValue(makeUseChatReturn({ status: "ready" }));
+    const { rerender } = render(
+      <ChatInterface onTurnSettled={onTurnSettled} />,
     );
 
-    expect(sendMessage).not.toHaveBeenCalled();
+    mockUseChat.mockReturnValue(makeUseChatReturn({ status: "ready" }));
+    rerender(<ChatInterface onTurnSettled={onTurnSettled} />);
+
+    expect(onTurnSettled).not.toHaveBeenCalled();
   });
 });
 
@@ -468,6 +481,170 @@ describe("onFlashcardsGenerated — capturing flashcard data for Practice", () =
       screen.queryByText("What pigment captures light in photosynthesis?", {
         exact: false,
       }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("initial scroll position when resuming a conversation", () => {
+  // jsdom has no real layout engine, so scrollHeight/clientHeight are 0 by
+  // default — a scrollable conversation is simulated by stubbing them on
+  // the prototype (affects every element for the test, restored after).
+  function mockScrollableContainer() {
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(2000);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("starts at the top and offers Go to latest, instead of jumping to the newest message", () => {
+    mockScrollableContainer();
+    const initialMessages = [
+      userMessage("Explain osmosis", "msg-1"),
+      assistantTextMessage("Osmosis is the movement of water.", "assistant-1"),
+    ];
+    mockUseChat.mockReturnValue(makeUseChatReturn({ messages: initialMessages }));
+
+    render(
+      <ChatInterface
+        initialConversationId="conv-1"
+        initialMessages={initialMessages}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Go to latest" }),
+    ).toBeInTheDocument();
+  });
+
+  test("a brand-new conversation (no initialMessages) has nothing to start at the top of", () => {
+    mockScrollableContainer();
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({ messages: [userMessage("Explain osmosis")] }),
+    );
+
+    // No `initialMessages` prop — this message came from the user typing
+    // just now, not from resuming history.
+    render(<ChatInterface />);
+
+    expect(
+      screen.queryByRole("button", { name: "Go to latest" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("clicking Go to latest scrolls down and hides itself", () => {
+    mockScrollableContainer();
+    const initialMessages = [
+      userMessage("Explain osmosis", "msg-1"),
+      assistantTextMessage("Osmosis is the movement of water.", "assistant-1"),
+    ];
+    mockUseChat.mockReturnValue(makeUseChatReturn({ messages: initialMessages }));
+
+    render(
+      <ChatInterface
+        initialConversationId="conv-1"
+        initialMessages={initialMessages}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to latest" }));
+
+    expect(
+      screen.queryByRole("button", { name: "Go to latest" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("resuming a conversation starts at the top, so Go to top has nothing to offer yet", () => {
+    mockScrollableContainer();
+    const initialMessages = [
+      userMessage("Explain osmosis", "msg-1"),
+      assistantTextMessage("Osmosis is the movement of water.", "assistant-1"),
+    ];
+    mockUseChat.mockReturnValue(makeUseChatReturn({ messages: initialMessages }));
+
+    render(
+      <ChatInterface
+        initialConversationId="conv-1"
+        initialMessages={initialMessages}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Go to top" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("a short conversation that fits without scrolling offers neither button", () => {
+    // No scrollable overflow: content exactly fills the viewport.
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(400);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({ messages: [userMessage("Explain osmosis")] }),
+    );
+
+    render(<ChatInterface />);
+
+    expect(
+      screen.queryByRole("button", { name: "Go to latest" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Go to top" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("Go to top — as an already-scrolled-down conversation grows", () => {
+  function mockScrollableContainer() {
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(2000);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("appears once the conversation grows past one screen, even though the user never touched the scrollbar", () => {
+    mockScrollableContainer();
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        messages: [
+          userMessage("Explain osmosis"),
+          assistantTextMessage("Osmosis is the movement of water.", "assistant-1"),
+        ],
+      }),
+    );
+
+    render(<ChatInterface />);
+
+    // Auto-follow scrolled to the bottom as the reply streamed in — the top
+    // of the conversation is now out of view purely from that growth.
+    expect(
+      screen.getByRole("button", { name: "Go to top" }),
+    ).toBeInTheDocument();
+    // Already at the bottom (that's where auto-follow left it), so there's
+    // nothing further down to jump to.
+    expect(
+      screen.queryByRole("button", { name: "Go to latest" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("clicking Go to top scrolls up and hides itself", () => {
+    mockScrollableContainer();
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        messages: [
+          userMessage("Explain osmosis"),
+          assistantTextMessage("Osmosis is the movement of water.", "assistant-1"),
+        ],
+      }),
+    );
+
+    render(<ChatInterface />);
+    fireEvent.click(screen.getByRole("button", { name: "Go to top" }));
+
+    expect(
+      screen.queryByRole("button", { name: "Go to top" }),
     ).not.toBeInTheDocument();
   });
 });

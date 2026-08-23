@@ -1,0 +1,83 @@
+/*
+ * Color tokens shared by the header's icon mark (LumoraMark.tsx) and the
+ * "Lumora" wordmark text next to it, so both pick up the same accent
+ * identity from one place. Indigo -> violet -> pink: the same three-color
+ * progression as the Home hero shader's ribbon (lumora.frag.ts's indigo/
+ * violet/pink mix, explicitly "Lumora's own palette") and BorderGlow's
+ * violet/pink/blue glow — this is that identity applied to the header
+ * brand lockup, not a new palette. A flat two-stop indigo->violet read as
+ * static, near-solid purple at this size; three stops make the transition
+ * actually visible.
+ *
+ * Defined on `.lumora-brand` (the header's Link wrapper) rather than on
+ * `.lumora-mark` itself, so the wordmark span — a sibling of the svg, not
+ * a descendant of it — can inherit the same custom properties too.
+ */
+.lumora-brand {
+  --mark-start: #4f46e5; /* indigo-600 */
+  --mark-mid: #7c3aed; /* violet-600 */
+  --mark-end: #db2777; /* pink-600 */
+}
+
+/*
+ * Dark mode: lighter tints (same three hues, shifted for contrast against
+ * a near-black background — the same "muted white/indigo in dark" style
+ * adaptation SpecularButton already makes) plus a soft glow on both the
+ * icon and the text. `color-mix(in oklch, ...)` matches this codebase's
+ * existing convention for deriving translucent accent colors (see
+ * globals.css) rather than introducing separate rgba literals.
+ */
+.dark .lumora-brand {
+  --mark-start: #a5b4fc; /* indigo-300 */
+  --mark-mid: #c4b5fd; /* violet-300 */
+  --mark-end: #f9a8d4; /* pink-300 */
+}
+
+.dark .lumora-mark {
+  filter:
+    drop-shadow(0 0 4px color-mix(in oklch, var(--mark-start) 55%, transparent))
+    drop-shadow(0 0 8px color-mix(in oklch, var(--mark-mid) 55%, transparent))
+    drop-shadow(0 0 12px color-mix(in oklch, var(--mark-end) 40%, transparent));
+}
+
+/*
+ * The "Lumora" wordmark text: the same three-color progression as the
+ * icon, animated so it visibly flows through indigo -> violet -> pink
+ * rather than sitting as one static tint. The gradient repeats its stops
+ * in reverse (start/mid/end/mid/start) over 400% width so sliding
+ * `background-position` loops seamlessly with no hard cut. `color:
+ * transparent` hides the fallback text fill — the gradient is what
+ * actually paints the glyphs via `background-clip: text`.
+ */
+.lumora-wordmark-accent {
+  background-image: linear-gradient(
+    90deg,
+    var(--mark-start),
+    var(--mark-mid),
+    var(--mark-end),
+    var(--mark-mid),
+    var(--mark-start)
+  );
+  background-size: 400% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: lumora-wordmark-flow 8s linear infinite;
+}
+
+@keyframes lumora-wordmark-flow {
+  to {
+    background-position: -400% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lumora-wordmark-accent {
+    animation: none;
+    background-position: 0 0;
+  }
+}
+
+.dark .lumora-wordmark-accent {
+  text-shadow: 0 0 16px color-mix(in oklch, var(--mark-mid) 45%, transparent);
+}

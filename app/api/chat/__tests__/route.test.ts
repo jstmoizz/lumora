@@ -204,6 +204,24 @@ describe("authentication", () => {
     expect(response.status).toBe(200);
     expect(streamTextMock).toHaveBeenCalled();
   });
+
+  test("streams the response through a smoothing transform, not raw provider chunks", async () => {
+    // Groq responds fast enough that raw chunks can otherwise arrive as one
+    // or two bursts — indistinguishable from the message just appearing all
+    // at once. Asserting only that some transform is wired in (not its
+    // exact pacing) so tuning delayInMs/chunking later doesn't break this.
+    setupSupabaseMock();
+    setupStreamText({
+      responseMessage: assistantMessageWithParts([
+        { type: "text", text: "hello", state: "done" },
+      ]),
+    });
+
+    await POST(makeRequest({ messages: [userMessage("hi")] }));
+
+    const [[callArgs]] = streamTextMock.mock.calls;
+    expect(typeof callArgs.experimental_transform).toBe("function");
+  });
 });
 
 describe("conversation ownership", () => {

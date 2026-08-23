@@ -24,15 +24,15 @@ describe("QuizToolPart lifecycle states", () => {
     expect(screen.getByText("Photosynthesis")).toBeInTheDocument();
   });
 
-  test("output-available renders a compact ready notice pointing at Practice, not the quiz itself", () => {
+  test("output-available renders a compact ready notice pointing at Resources, not the quiz itself", () => {
     render(<QuizToolPart part={outputAvailableQuizPart()} />);
 
     expect(screen.getByText(/Quiz ready: Photosynthesis/)).toBeInTheDocument();
     expect(screen.getByText(/1 question/)).toBeInTheDocument();
-    expect(screen.getByText(/Open Practice to take it/)).toBeInTheDocument();
+    expect(screen.getByText(/Open Resources to take it/)).toBeInTheDocument();
 
     // ...but never the question/options themselves — those render
-    // exclusively in Practice's Quizzes tab (see QuizPanel.test.tsx). This
+    // exclusively in Resources' Quizzes tab (see QuizPanel.test.tsx). This
     // is the architecture requirement this component exists for: the quiz
     // content has exactly one rendering location, and it isn't the chat.
     expect(
@@ -66,14 +66,14 @@ describe("FlashcardsToolPart lifecycle states", () => {
     expect(screen.getByText("Photosynthesis")).toBeInTheDocument();
   });
 
-  test("output-available renders a compact ready notice pointing at Practice, not the cards themselves", () => {
+  test("output-available renders a compact ready notice pointing at Resources, not the cards themselves", () => {
     render(<FlashcardsToolPart part={outputAvailableFlashcardsPart()} />);
 
     expect(
       screen.getByText(/Flashcards ready: Photosynthesis/),
     ).toBeInTheDocument();
     expect(screen.getByText(/1 card/)).toBeInTheDocument();
-    expect(screen.getByText(/Open Practice to study/)).toBeInTheDocument();
+    expect(screen.getByText(/Open Resources to study/)).toBeInTheDocument();
 
     expect(
       screen.queryByText("What pigment captures light in photosynthesis?", {

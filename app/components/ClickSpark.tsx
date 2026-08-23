@@ -49,10 +49,11 @@ const SPARK_RADIUS = 16;
 const DURATION = 400;
 const LINE_WIDTH = 1.5;
 
-// Dark mode: muted white / indigo. Light mode: muted slate / indigo — a
-// literal white spark would be invisible against a light page.
-const DARK_COLORS = ["rgba(244, 244, 245, 0.55)", "rgba(165, 180, 252, 0.5)"];
-const LIGHT_COLORS = ["rgba(71, 85, 105, 0.45)", "rgba(99, 102, 241, 0.4)"];
+// Straight contrast against the page: white sparks on a dark background,
+// black sparks on a light one — not a muted/tinted color, since the whole
+// point is the spark reads clearly against whatever's behind it.
+const DARK_COLORS = ["rgba(255, 255, 255, 0.75)", "rgba(255, 255, 255, 0.5)"];
+const LIGHT_COLORS = ["rgba(0, 0, 0, 0.65)", "rgba(0, 0, 0, 0.4)"];
 
 function easeOutQuad(t: number): number {
   return t * (2 - t);

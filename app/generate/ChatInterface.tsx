@@ -12,7 +12,12 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, isTextUIPart } from "ai";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import { ArrowDownIcon, CircleAlertIcon, RotateCcwIcon } from "lucide-react";
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  CircleAlertIcon,
+  RotateCcwIcon,
+} from "lucide-react";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { Button } from "@/components/ui/button";
@@ -24,10 +29,11 @@ import type {
 } from "@/lib/ai/tools";
 import { FlashcardsToolPart, QuizToolPart } from "./PracticeToolPart";
 
-// How close to the bottom (in pixels) counts as "at the bottom" for the
-// purpose of re-engaging auto-scroll. A small tolerance, not an exact 0,
-// so sub-pixel/rounding scroll positions don't falsely look "scrolled up".
-const NEAR_BOTTOM_THRESHOLD_PX = 64;
+// How close to either edge (in pixels) counts as "at that edge" — for
+// re-engaging bottom auto-scroll, and for deciding whether "Go to top"/
+// "Go to latest" are worth showing at all. A small tolerance, not an exact
+// 0, so sub-pixel/rounding scroll positions don't falsely look "scrolled".
+const NEAR_EDGE_THRESHOLD_PX = 64;
 
 // Curated pool of study-related suggestions shown in the empty state.
 // Spans multiple subjects (not just CS) and mixes plain "explain" prompts
@@ -161,49 +167,37 @@ function ChatErrorCard({
   );
 }
 
-export interface PendingPrompt {
-  text: string;
-  /** Distinguishes two requests to send the same text — see the effect
-   * below that watches this prop. */
-  id: number;
-}
-
 export default function ChatInterface({
   initialConversationId,
   initialMessages,
-  pendingPrompt,
-  onPendingPromptHandled,
-  onPromptSubmitted,
+  onConversationIdKnown,
+  onTurnSettled,
   onQuizGenerated,
   onFlashcardsGenerated,
 }: {
-  /** Set when arriving from History via /generate?conversationId=... */
+  /** Set when arriving from History (or a Recent Chat selection) via
+   * /generate?conversationId=... */
   initialConversationId?: string;
   initialMessages?: LumoraUIMessage[];
-  /**
-   * Set by GenerateWorkspace when the user selects a Recent Prompt — this
-   * is how a sibling panel outside this component triggers a send without
-   * lifting the whole `useChat` state up to the workspace. `id` changes on
-   * every selection (even re-selecting the same text), so the effect below
-   * can tell "a new request" apart from "the same prop object on a
-   * re-render".
-   */
-  pendingPrompt?: PendingPrompt | null;
-  /** Called once a pending prompt has actually been sent, so the workspace
-   * can clear it. */
-  onPendingPromptHandled?: () => void;
-  /** Fired for every message this component actually sends — composer
-   * submissions, example-prompt clicks, and pending-prompt sends alike —
-   * so GenerateWorkspace can build its Recent Prompts list from a single
-   * source instead of duplicating send logic. */
-  onPromptSubmitted?: (text: string) => void;
+  /** Fired the moment `conversationId` (see below) becomes known — either
+   * immediately, if `initialConversationId` was already given, or the
+   * instant the server creates a brand-new conversation and reports it
+   * back via message metadata. GenerateWorkspace uses this to keep the
+   * URL and its Recent Chats list in sync with whichever conversation is
+   * actually active in this tab. */
+  onConversationIdKnown?: (id: string) => void;
+  /** Fired whenever a turn finishes (successfully or not) — i.e. `status`
+   * leaves "submitted"/"streaming". GenerateWorkspace uses this to
+   * refresh the Recent Chats list so a conversation's position/title stay
+   * current after each message. */
+  onTurnSettled?: () => void;
   /** Fired once per quiz the moment its tool call reaches
-   * output-available, so GenerateWorkspace can show it in Practice's
+   * output-available, so GenerateWorkspace can show it in Resources'
    * Quizzes tab — see PracticeToolPart.tsx for why the in-chat rendering
    * itself stays non-interactive. */
   onQuizGenerated?: (quiz: CreateQuizOutput) => void;
   /** Same as onQuizGenerated, for the `createFlashcards` tool and
-   * Practice's Flashcards tab. */
+   * Resources' Flashcards tab. */
   onFlashcardsGenerated?: (flashcards: CreateFlashcardsOutput) => void;
 }) {
   const [input, setInput] = useState("");
@@ -230,37 +224,40 @@ export default function ChatInterface({
   // Only passes a second argument at all once there's a conversation to
   // continue — omitting it (rather than passing `body: undefined`) keeps
   // the very first request in a session identical to before this feature
-  // existed.
-  //
-  // The single choke point every send path (composer submit, example-
-  // prompt click, pending-prompt-from-Recent-Prompts) routes through, which
-  // is what makes `onPromptSubmitted` a complete record without each call
-  // site needing to remember to report it separately.
+  // existed. The single choke point every send path (composer submit,
+  // example-prompt click) routes through.
   function sendChatMessage(message: { text: string }) {
     if (conversationId) {
       sendMessage(message, { body: { conversationId } });
     } else {
       sendMessage(message);
     }
-    onPromptSubmitted?.(message.text);
   }
 
-  // Selecting a Recent Prompt happens in a sibling panel outside this
-  // component (GenerateWorkspace owns that state), so it can't call
-  // `sendChatMessage` directly — instead it hands this component a
-  // `pendingPrompt` prop, and this effect is what actually sends it. Only
-  // fires once per distinct `id` (a ref, not state, so a synchronous
-  // double-render can't send twice) and only once the chat is actually
-  // `ready` — a prompt selected mid-stream waits rather than getting lost.
-  const lastHandledPendingPromptIdRef = useRef<number | null>(null);
+  // Reports `conversationId` up the moment it's known — for a resumed
+  // conversation that's immediately (it only ever repeats the same value
+  // `initialConversationId` already gave the parent); for a brand-new one
+  // it fires mid-stream, the instant the server's `start` metadata reaches
+  // `messages`, well before the turn actually finishes.
   useEffect(() => {
-    if (!pendingPrompt || status !== "ready") return;
-    if (lastHandledPendingPromptIdRef.current === pendingPrompt.id) return;
-    lastHandledPendingPromptIdRef.current = pendingPrompt.id;
-    sendChatMessage({ text: pendingPrompt.text });
-    onPendingPromptHandled?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- sendChatMessage/onPendingPromptHandled are recreated every render; only pendingPrompt/status should re-trigger this effect.
-  }, [pendingPrompt, status]);
+    if (conversationId) onConversationIdKnown?.(conversationId);
+  }, [conversationId, onConversationIdKnown]);
+
+  // Reports every time a turn finishes — success or failure — so
+  // GenerateWorkspace can re-fetch Recent Chats (new conversation now
+  // exists / an existing one just moved to the top). Comparing against the
+  // previous status (not just checking `status === "ready"` directly) is
+  // what limits this to real transitions rather than firing on every
+  // unrelated re-render while already idle.
+  const previousStatusRef = useRef(status);
+  useEffect(() => {
+    const previousStatus = previousStatusRef.current;
+    previousStatusRef.current = status;
+    const wasActive = previousStatus === "submitted" || previousStatus === "streaming";
+    if (wasActive && status !== previousStatus) {
+      onTurnSettled?.();
+    }
+  }, [status, onTurnSettled]);
 
   // Reports each quiz exactly once, the moment its tool call's output
   // becomes available — scans every message rather than just the latest,
@@ -345,6 +342,11 @@ export default function ChatInterface({
   // (near <-> away) touch React state, via `showJumpToLatest` below.
   const isNearBottomRef = useRef(true);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  // Symmetric to the above, for the top edge. Unlike `isNearBottomRef` this
+  // has no "auto-follow" behavior attached to it — it only ever drives
+  // whether the "Go to top" button is shown.
+  const isNearTopRef = useRef(true);
+  const [showGoToTop, setShowGoToTop] = useState(false);
 
   // Refs targeted by the empty-state entrance animation below.
   const emptyStateRef = useRef<HTMLDivElement>(null);
@@ -354,6 +356,7 @@ export default function ChatInterface({
   const emptyComposerRef = useRef<HTMLDivElement>(null);
 
   const jumpButtonWrapperRef = useRef<HTMLDivElement>(null);
+  const goToTopButtonWrapperRef = useRef<HTMLDivElement>(null);
 
   // Message ids already given their entrance animation, so a message is
   // only ever animated in once — never re-triggered while its text is
@@ -364,13 +367,75 @@ export default function ChatInterface({
     const el = scrollContainerRef.current;
     if (!el) return true;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    return distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX;
+    return distanceFromBottom <= NEAR_EDGE_THRESHOLD_PX;
+  }
+
+  function isScrolledNearTop() {
+    const el = scrollContainerRef.current;
+    if (!el) return true;
+    return el.scrollTop <= NEAR_EDGE_THRESHOLD_PX;
   }
 
   function scrollToBottom(behavior: ScrollBehavior) {
     const el = scrollContainerRef.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior });
+  }
+
+  function scrollToTop(behavior: ScrollBehavior) {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    el.scrollTo({ top: 0, behavior });
+  }
+
+  // A conversation that already has history when this component mounts —
+  // resumed from History, from a Recent Chat, or simply still here after a
+  // refresh — starts at the *top* of that history instead of jumping
+  // straight to the latest message (a fresh, empty conversation has no
+  // history to start at the top of, so this never touches that case: the
+  // scroll container isn't even rendered yet — see `isEmpty` below). "Go to
+  // latest" (below) is how the user reaches the bottom from here; whether
+  // it's shown is computed the same way the scroll-tracking effect already
+  // computes it, from the real post-scroll position, not assumed.
+  const hasAppliedInitialScrollRef = useRef(false);
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el || hasAppliedInitialScrollRef.current) return;
+    if (!initialMessages || initialMessages.length === 0) return;
+    hasAppliedInitialScrollRef.current = true;
+    el.scrollTop = 0;
+    const nearBottom = isScrolledNearBottom();
+    isNearBottomRef.current = nearBottom;
+    isNearTopRef.current = true;
+    // Not a state-mirrors-state loop: `showJumpToLatest` reflects the real
+    // post-mutation scroll position, which can only be measured once the
+    // scroll container exists and `scrollTop` above has actually been
+    // applied — there's no way to know it before that DOM mutation runs.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setShowJumpToLatest(!nearBottom);
+    // We just forced scrollTop to 0 above, so this is always at the top —
+    // no measurement needed, unlike the bottom case.
+    setShowGoToTop(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, the first time the scroll container exists; only `isEmpty` flipping to false makes that happen.
+  }, [isEmpty]);
+
+  // Recomputes both edge states from the real, current scroll position, and
+  // only touches React state on an actual near/away transition — shared by
+  // the scroll listener below (the user's own scrolling) and the auto-
+  // follow effect further down (programmatic scrolling as new content
+  // arrives), so both sources of movement keep "Go to top"/"Go to latest"
+  // correct the same way.
+  function updateScrollEdgeState() {
+    const nearBottom = isScrolledNearBottom();
+    if (nearBottom !== isNearBottomRef.current) {
+      isNearBottomRef.current = nearBottom;
+      setShowJumpToLatest(!nearBottom);
+    }
+    const nearTop = isScrolledNearTop();
+    if (nearTop !== isNearTopRef.current) {
+      isNearTopRef.current = nearTop;
+      setShowGoToTop(!nearTop);
+    }
   }
 
   // Track the user's own scrolling. Passive + only updates state on an
@@ -385,26 +450,29 @@ export default function ChatInterface({
     const el = scrollContainerRef.current;
     if (!el) return;
 
-    function handleScroll() {
-      const nearBottom = isScrolledNearBottom();
-      if (nearBottom !== isNearBottomRef.current) {
-        isNearBottomRef.current = nearBottom;
-        setShowJumpToLatest(!nearBottom);
-      }
-    }
-
-    el.addEventListener("scroll", handleScroll, { passive: true });
-    return () => el.removeEventListener("scroll", handleScroll);
+    el.addEventListener("scroll", updateScrollEdgeState, { passive: true });
+    return () => el.removeEventListener("scroll", updateScrollEdgeState);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- updateScrollEdgeState is recreated every render; only isEmpty (the container mounting) should re-attach the listener.
   }, [isEmpty]);
 
   // Auto-follow new content (streamed tokens or newly added messages), but
   // only while the user hasn't scrolled away from the bottom. Instant
   // ("auto") rather than smooth, since this can fire once per token and a
   // smooth-scroll animation restarting on every chunk looks janky; smooth
-  // scrolling is reserved for the explicit "Jump to latest" action below.
+  // scrolling is reserved for the explicit "Go to latest" action below.
+  //
+  // As a long response streams in (or a long conversation just grows), the
+  // top of the conversation scrolls out of view even though the user never
+  // touched the scrollbar — `updateScrollEdgeState()` here is what notices
+  // that and brings "Go to top" up, since the growth itself never fires a
+  // native `scroll` event on its own (only an actual position change does).
   useEffect(() => {
-    if (!isNearBottomRef.current) return;
-    scrollToBottom("auto");
+    if (isNearBottomRef.current) scrollToBottom("auto");
+    // Reflects the real, just-applied scroll position (including the
+    // programmatic scroll above, when it ran) — not a state-mirrors-state
+    // loop, the DOM mutation is the source of truth being measured.
+    updateScrollEdgeState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- updateScrollEdgeState is recreated every render; only new message content should re-run this.
   }, [messages]);
 
   // One-time cascading entrance for the empty state (heading -> description
@@ -458,6 +526,25 @@ export default function ChatInterface({
     { dependencies: [showJumpToLatest] },
   );
 
+  // Same fade + scale-in as "Go to latest" above, for "Go to top".
+  useGSAP(
+    () => {
+      if (
+        !showGoToTop ||
+        prefersReducedMotion() ||
+        !goToTopButtonWrapperRef.current
+      ) {
+        return;
+      }
+      gsap.fromTo(
+        goToTopButtonWrapperRef.current,
+        { opacity: 0, scale: 0.95 },
+        { opacity: 1, scale: 1, duration: 0.22, ease: "power2.out" },
+      );
+    },
+    { dependencies: [showGoToTop] },
+  );
+
   // Animate a message row in only the first time it's introduced into the
   // list — never on subsequent content updates. `messages.length` only
   // changes when a message is pushed (a new user message, or the
@@ -492,6 +579,12 @@ export default function ChatInterface({
     isNearBottomRef.current = true;
     setShowJumpToLatest(false);
     scrollToBottom(prefersReducedMotion() ? "auto" : "smooth");
+  }
+
+  function handleGoToTop() {
+    isNearTopRef.current = true;
+    setShowGoToTop(false);
+    scrollToTop(prefersReducedMotion() ? "auto" : "smooth");
   }
 
   function handleSubmit(event?: FormEvent) {
@@ -784,6 +877,24 @@ export default function ChatInterface({
               </div>
             </div>
 
+            {showGoToTop && (
+              <div
+                ref={goToTopButtonWrapperRef}
+                className="pointer-events-none absolute inset-x-0 top-2 flex justify-center"
+              >
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleGoToTop}
+                  className="pointer-events-auto gap-1 rounded-full border border-border shadow-md transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]"
+                >
+                  <ArrowUpIcon aria-hidden="true" className="size-3.5" />
+                  Go to top
+                </Button>
+              </div>
+            )}
+
             {showJumpToLatest && (
               <div
                 ref={jumpButtonWrapperRef}
@@ -797,7 +908,7 @@ export default function ChatInterface({
                   className="pointer-events-auto gap-1 rounded-full border border-border shadow-md transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]"
                 >
                   <ArrowDownIcon aria-hidden="true" className="size-3.5" />
-                  Jump to latest
+                  Go to latest
                 </Button>
               </div>
             )}

@@ -1,6 +1,7 @@
 import {
   convertToModelMessages,
   isTextUIPart,
+  smoothStream,
   stepCountIs,
   streamText,
 } from "ai";
@@ -167,8 +168,17 @@ export async function POST(req: Request) {
     // steps lets it call `createQuiz`/`createFlashcards` and then comment
     // on the result — SYSTEM_PROMPT instructs it to keep that comment to a
     // short acknowledgment rather than restating the activity it just
-    // generated, since the activity itself renders in the Practice panel.
+    // generated, since the activity itself renders in the Resources panel.
     stopWhen: stepCountIs(2),
+    // Groq's inference is fast enough that, without this, a whole response
+    // can arrive across only one or two real network chunks — technically
+    // "streamed" but visually indistinguishable from the message just
+    // appearing all at once. This re-chunks the model's raw output into a
+    // steady word-by-word stream on the server, independent of how bursty
+    // the underlying provider chunks actually are, so the client always
+    // sees a genuine progressive reveal (and its own auto-scroll-while-
+    // streaming behavior has something to follow).
+    experimental_transform: smoothStream({ chunking: "word", delayInMs: 20 }),
     ...GENERATION_CONFIG,
   });
 

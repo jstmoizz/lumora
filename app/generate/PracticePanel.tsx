@@ -10,11 +10,15 @@ interface PracticePanelProps {
   flashcardSets: CreateFlashcardsOutput[];
 }
 
-// Generate's Practice panel — the container for both activity types the
-// chat can generate (Quizzes, Flashcards). Replaces the old single-purpose
-// Quiz panel: the interactive quiz/flashcard experience lives entirely
-// here, never duplicated into the chat itself (see PracticeToolPart.tsx
-// and ChatInterface.tsx's onQuizGenerated/onFlashcardsGenerated).
+// Generate's Resources panel (internally still "Practice" — see
+// PracticeToolPart.tsx and the file name itself; only the user-facing
+// label changed) — the container for both activity types the chat can
+// generate (Quizzes, Flashcards). The interactive quiz/flashcard
+// experience lives entirely here, never duplicated into the chat itself
+// (see PracticeToolPart.tsx and ChatInterface.tsx's
+// onQuizGenerated/onFlashcardsGenerated). Built to extend to further
+// resource types later (summaries, study guides, notes) without changing
+// this shape — each would just be another TabsTrigger/TabsContent pair.
 //
 // Reuses the project's existing Tabs primitive (components/ui/tabs.tsx,
 // a Radix wrapper — real tab semantics, roving tabindex, and
@@ -30,7 +34,7 @@ export default function PracticePanel({
     <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="flex flex-col gap-1">
         <h2 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-          Practice
+          Resources
         </h2>
         <p className="text-xs text-muted-foreground">
           Test your knowledge or review a topic with generated quizzes and
