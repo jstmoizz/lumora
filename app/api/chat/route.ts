@@ -1,11 +1,11 @@
 import {
   convertToModelMessages,
   isTextUIPart,
-  smoothStream,
   stepCountIs,
   streamText,
 } from "ai";
 import { chatModel, GENERATION_CONFIG, SYSTEM_PROMPT } from "@/lib/ai/config";
+import { smoothTextStream } from "@/lib/ai/smoothTextStream";
 import { lumoraTools, type LumoraUIMessage } from "@/lib/ai/tools";
 import { requireUser } from "@/lib/supabase/authorization";
 import { createClient } from "@/lib/supabase/server";
@@ -178,7 +178,14 @@ export async function POST(req: Request) {
     // the underlying provider chunks actually are, so the client always
     // sees a genuine progressive reveal (and its own auto-scroll-while-
     // streaming behavior has something to follow).
-    experimental_transform: smoothStream({ chunking: "word", delayInMs: 20 }),
+    //
+    // Deliberately `smoothTextStream` (ours), not the AI SDK's own
+    // `smoothStream` — that one paces `reasoning-delta` chunks at the same
+    // rate as text, and reasoning models (qwen3.6-27b included) emit a full
+    // "thinking" trace before every step. ChatInterface.tsx never renders
+    // reasoning parts, so smoothing them only adds wall-clock latency to a
+    // stream nobody sees; this variant passes reasoning straight through.
+    experimental_transform: smoothTextStream({ chunking: "word", delayInMs: 20 }),
     ...GENERATION_CONFIG,
   });
 
