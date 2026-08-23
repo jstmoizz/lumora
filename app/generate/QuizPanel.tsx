@@ -134,7 +134,7 @@ function ActiveQuiz({ quiz }: { quiz: CreateQuizOutput }) {
         </p>
       </div>
 
-      <p className="text-sm font-medium text-foreground">
+      <p className="min-w-0 text-sm font-medium break-words text-foreground">
         {question.question}
       </p>
 
@@ -157,7 +157,7 @@ function ActiveQuiz({ quiz }: { quiz: CreateQuizOutput }) {
               aria-pressed={isSelectedOption}
               onClick={() => selectOption(optionIndex)}
               className={cn(
-                "h-auto justify-start rounded-xl px-3 py-2 text-left text-sm font-normal whitespace-normal disabled:opacity-100",
+                "h-auto min-w-0 justify-start rounded-xl px-3 py-2 text-left text-sm font-normal whitespace-normal break-words disabled:opacity-100",
                 hasAnswered &&
                   isCorrectOption &&
                   "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-400",

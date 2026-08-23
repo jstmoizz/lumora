@@ -19,15 +19,19 @@ function getSnapshot() {
   return document.documentElement.classList.contains("dark");
 }
 
-// Never rendered during SSR (ShaderScene is loaded via next/dynamic with
-// ssr:false), so this value is never actually read on the server.
+// `true` here is just a placeholder — ThemeScript (see
+// app/components/theme/ThemeScript.tsx) sets the real `.dark`/`.light`
+// class before hydration even starts, so useSyncExternalStore's
+// tearing-prevention behavior reconciles this to the actual value before
+// the first paint, exactly like useReducedMotion's server snapshot.
 function getServerSnapshot() {
   return true;
 }
 
-// Feeds the shader's `u_isLight` uniform, so switching themes mid-session
-// (Settings' Light/Dark/System control) retunes the shader's palette
-// intensity without needing a remount.
+// Shared across the app shell: originally the shader's `u_isLight` uniform
+// (ShaderScene.tsx), now also SpecularButton's and ClickSpark's theme-aware
+// color defaults — anywhere that needs to pick a literal color value (not a
+// CSS var) based on the live theme, reactively, without a remount.
 export function useIsDarkTheme(): boolean {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

@@ -15,10 +15,13 @@ import {
   TrophyIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import SpecularButton from "./components/SpecularButton";
+import { useIsDarkTheme } from "./components/useIsDarkTheme";
 import BorderGlow from "./components/home/BorderGlow";
 import Carousel, { type CarouselItem } from "./components/home/Carousel";
 import HeroScrollShell from "./components/home/HeroScrollShell";
 import HeroShaderBackground from "./components/home/HeroShaderBackground";
+import WarpText, { type WarpTextRun } from "./components/home/WarpText";
 
 if (typeof window !== "undefined") {
   gsap.registerPlugin(ScrollTrigger);
@@ -61,6 +64,26 @@ function getServerCarouselWidth() {
 const GLOW_COLORS = ["#4f46e5", "#db2777", "#7c3aed"];
 const GLOW_HSL = "262 83 58"; // violet-600, for BorderGlow's outer edge-light halo
 
+// The hero headline, split so "Lumora" renders in the brand's own wordmark
+// font instead of WarpText's base display font — the exact same treatment
+// (`font-wordmark`, which resolves to Pacifico) already used everywhere
+// else the brand name appears as itself rather than inline body text (see
+// app/layout.tsx's header/footer, About, Settings). The trailing period
+// stays in the base font: Pacifico's own descender/period shape read badly
+// immediately after the word in earlier testing, the same reason the plain-
+// DOM version of this headline dropped it from the wordmark span too.
+// Pacifico only ships a 400 weight — explicitly overriding fontWeight here
+// (rather than inheriting WarpText's own bold default) keeps it at its one
+// real weight instead of asking the canvas to synthesize a fake bold.
+// A module-level constant (not built inline in JSX) so WarpText's props-
+// sync effect — which re-rasterizes whenever `text` changes by reference —
+// doesn't refire on every Home render for a value that never changes.
+const HERO_HEADLINE_RUNS: WarpTextRun[] = [
+  { text: "Study Smarter with " },
+  { text: "Lumora", fontFamily: "var(--font-wordmark)", fontWeight: 400 },
+  { text: "." },
+];
+
 const FEATURES = [
   {
     icon: MessageCircleQuestionIcon,
@@ -102,6 +125,12 @@ const STEPS: CarouselItem[] = [
 ];
 
 export default function Home() {
+  // TEST VARIANT (see SpecularButton usage below): the hero CTA's fill,
+  // outline, and shine color are overridden per-theme here rather than
+  // using SpecularButton's own default (opaque --primary fill) — ogl's
+  // Color needs a literal value, not a CSS var, so this is the one piece
+  // that can't just be "var(--foreground)" the way textColor is.
+  const isDark = useIsDarkTheme();
   const heroRef = useRef<HTMLDivElement>(null);
   const heroEyebrowRef = useRef<HTMLSpanElement>(null);
   const heroHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -191,15 +220,22 @@ export default function Home() {
               AI Study Companion
             </span>
 
-            <h1
-              ref={heroHeadingRef}
-              className="max-w-3xl text-5xl font-semibold tracking-tight text-balance text-foreground sm:text-6xl"
-            >
-              Learn smarter with{" "}
-              <span className="font-wordmark text-4xl sm:text-5xl">
-                Lumora
-              </span>
-              .
+            <h1 ref={heroHeadingRef} className="w-full max-w-3xl">
+              <WarpText
+                text={HERO_HEADLINE_RUNS}
+                fontSize="clamp(2.75rem, 7vw, 4.75rem)"
+                fontWeight={700}
+                letterSpacing="-0.02em"
+                lineHeight={1.05}
+                warpStrength={0.05}
+                warpScale={1.6}
+                speed={0.35}
+                pointerInfluence={0.35}
+                pointerStrength={0.28}
+                refraction={0.01}
+                ripple
+                style={{ minHeight: "clamp(140px, 16vw, 220px)" }}
+              />
             </h1>
 
             <p
@@ -211,33 +247,25 @@ export default function Home() {
             </p>
 
             <div ref={heroCtaRef}>
-              <BorderGlow
-                className="group/cta border-glow-button"
-                edgeSensitivity={15}
-                glowColor={GLOW_HSL}
-                backgroundColor="transparent"
-                borderRadius={14}
-                glowRadius={18}
-                glowIntensity={0.65}
-                coneSpread={30}
-                animated={false}
-                colors={GLOW_COLORS}
-                fillOpacity={0.2}
+              {/*
+                TEST VARIANT, may be reverted later: fill matches the
+                surrounding page (fully transparent, tintOpacity 0) instead
+                of SpecularButton's default opaque --primary pill — the
+                button reads purely by its outline + moving shine, white/
+                light in dark mode, black/dark in light mode.
+              */}
+              <SpecularButton
+                href="/generate"
+                size="lg"
+                tintOpacity={0}
+                textColor="var(--foreground)"
+                lineColor={isDark ? "#ffffff" : "#0a0a0a"}
+                baseColor={isDark ? "#e4e4e7" : "#27272a"}
+                className="motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-[1.03] active:scale-[0.98]"
               >
-                <Button
-                  asChild
-                  size="lg"
-                  className="h-12 gap-2 rounded-xl px-6 text-base font-semibold motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-[1.03] active:scale-[0.98]"
-                >
-                  <Link href="/generate">
-                    Start studying
-                    <ArrowRightIcon
-                      aria-hidden="true"
-                      className="size-4 motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:group-hover/cta:translate-x-0.5"
-                    />
-                  </Link>
-                </Button>
-              </BorderGlow>
+                Start Learning
+                <ArrowRightIcon aria-hidden="true" className="size-4" />
+              </SpecularButton>
             </div>
           </section>
         </HeroScrollShell>

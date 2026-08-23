@@ -52,6 +52,25 @@ export function getStoredThemePreference(): ThemePreference {
   }
 }
 
+// Distinguishes "nothing has ever been stored" from "system" as a stored
+// value — getStoredThemePreference() collapses both to "system", which
+// isn't enough to tell a genuinely fresh browser apart from one where the
+// user explicitly picked System. Settings' cross-device reconciliation
+// (see AppearanceRow in app/settings/SettingsClient.tsx) needs exactly
+// that distinction: it should only ever pull the database's value in on a
+// browser that has never made a local choice at all, never as a general
+// "these two disagree, database wins" rule — the database read can be
+// stale or defaulted for reasons that have nothing to do with which one is
+// actually more recent.
+export function hasStoredThemePreference(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(THEME_STORAGE_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Applies a theme preference: persists it locally and toggles the `.dark`
  * class `@custom-variant dark` in globals.css keys every `dark:` utility

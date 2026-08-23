@@ -200,15 +200,33 @@ describe("SettingsClient — Study Preferences", () => {
     });
   });
 
-  test("reconciles a mismatched local theme to the persisted value on load", () => {
+  test("a fresh browser with no local theme choice pulls in the persisted value", () => {
+    // No localStorage key at all — the cross-device bootstrap case: this
+    // account already has a saved preference from another browser/device.
+    render(<SettingsClient account={null} preferences={preferences} />);
+
+    // preferences.theme is "system" — nothing local to conflict with it.
+    expect(window.localStorage.getItem("lumora-theme")).toBe("system");
+  });
+
+  // Regression test for the "theme reverts to dark when navigating between
+  // pages" bug: this component's reconciliation effect used to overwrite
+  // ANY mismatch between localStorage and the server-fetched `initialTheme`
+  // in the database's favor — but `initialTheme` falls back to "system"
+  // whenever nothing's been persisted for this account yet (see
+  // `preferences.theme` below), which isn't actually more authoritative
+  // than a real explicit choice already sitting in localStorage. A browser
+  // that has already made a local choice must keep it.
+  test("does not overwrite an existing local theme choice, even if it differs from the persisted value", () => {
     window.localStorage.setItem("lumora-theme", "dark");
     document.documentElement.classList.add("dark");
 
     render(<SettingsClient account={null} preferences={preferences} />);
 
-    // preferences.theme is "system" — the persisted value should win over
-    // whatever this browser had stored locally.
-    expect(window.localStorage.getItem("lumora-theme")).toBe("system");
+    // preferences.theme is "system" here — the local "dark" choice must
+    // win, not get silently reset back to "system".
+    expect(window.localStorage.getItem("lumora-theme")).toBe("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
   });
 
   test("each preference row is independent", async () => {

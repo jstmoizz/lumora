@@ -1,0 +1,457 @@
+"use client";
+
+import Link from "next/link";
+import {
+  useEffect,
+  useRef,
+  type CSSProperties,
+  type MouseEventHandler,
+  type ReactNode,
+  type Ref,
+} from "react";
+import { Renderer, Program, Mesh, Triangle, Color } from "ogl";
+import { useIsDarkTheme } from "./useIsDarkTheme";
+import { useReducedMotion } from "./useReducedMotion";
+import "./SpecularButton.css";
+
+// A faithful port of React Bits' SpecularButton component
+// (https://reactbits.dev/components/specular-button, source:
+// DavidHDev/react-bits, src/ts-default/Components/SpecularButton). The
+// shader (a rounded-rect SDF with a pointer-steered specular rim) is
+// reproduced as-is, GLSL comments included. What changed for Lumora:
+//
+// - `lineColor`/`baseColor` (the two colors the shader itself consumes)
+//   can't be plain CSS vars — ogl's `Color` parses a literal CSS color
+//   string, not a custom property — so when the caller doesn't override
+//   them, they're now resolved from the live theme via useIsDarkTheme()
+//   instead of upstream's single hardcoded white-on-dark pair. `textColor`
+//   and `tint` stay real CSS vars (`--primary-foreground`/`--primary`),
+//   resolved by the browser like any other CSS, since those only ever
+//   reach `style`/CSS, never ogl's color parser.
+// - `href`: renders through next/link instead of a plain `<button>` when
+//   given, so the primary use (a CTA that navigates) gets real link
+//   semantics — ctrl/cmd-click, "open in new tab", prefetch-on-hover —
+//   instead of a JS-driven `onClick`. Not part of upstream's API.
+// - The render loop now pauses via IntersectionObserver + document
+//   visibility, the same technique this codebase's WarpText.tsx uses —
+//   upstream ran its rAF loop unconditionally for the component's entire
+//   mounted lifetime, including while scrolled out of view.
+type ButtonSize = "sm" | "md" | "lg";
+
+export interface SpecularButtonProps {
+  children?: ReactNode;
+  href?: string;
+  size?: ButtonSize;
+  radius?: number;
+  tint?: string;
+  tintOpacity?: number;
+  blur?: number;
+  textColor?: string;
+  lineColor?: string;
+  baseColor?: string;
+  intensity?: number;
+  shineSize?: number;
+  shineFade?: number;
+  thickness?: number;
+  speed?: number;
+  followMouse?: boolean;
+  proximity?: number;
+  autoAnimate?: boolean;
+  disabled?: boolean;
+  onClick?: MouseEventHandler<HTMLButtonElement | HTMLAnchorElement>;
+  className?: string;
+  type?: "button" | "submit" | "reset";
+}
+
+interface ShaderProps {
+  radius: number;
+  lineColor: string;
+  baseColor: string;
+  intensity: number;
+  shineSize: number;
+  shineFade: number;
+  thickness: number;
+  speed: number;
+  followMouse: boolean;
+  proximity: number;
+  autoAnimate: boolean;
+  reducedMotion: boolean;
+}
+
+const PAD = 20;
+
+const VERT = `#version 300 es
+in vec2 position;
+void main() {
+  gl_Position = vec4(position, 0.0, 1.0);
+}
+`;
+
+const FRAG = `#version 300 es
+precision highp float;
+
+uniform vec2 uCenter;
+uniform vec2 uHalfSize;
+uniform float uRadius;
+uniform float uAngle;
+uniform float uPx;
+uniform vec3 uLineColor;
+uniform vec3 uBaseColor;
+uniform float uIntensity;
+uniform float uShineSize;
+uniform float uShineFade;
+uniform float uThickness;
+uniform float uBaseWidth;
+
+out vec4 fragColor;
+
+float sdRoundedRect(vec2 p, vec2 b, float r) {
+  vec2 q = abs(p) - b + r;
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
+float shapeSDF(vec2 p) { return sdRoundedRect(p, uHalfSize, uRadius); }
+
+float gaussianLine(float d, float sigma) {
+  float x = d / (sigma + 1e-6);
+  float k = mix(1.0, 1.6, smoothstep(0.0, 1.5, x));
+  return exp(-k * x * x);
+}
+
+void main() {
+  vec2 p = gl_FragCoord.xy - uCenter;
+  float d = shapeSDF(p);
+  vec2 L = vec2(cos(uAngle), sin(uAngle));
+
+  // Dark base stroke hugging the edge for a sense of thickness
+  float base = (1.0 - smoothstep(0.0, uBaseWidth, abs(d))) * 0.45;
+
+  // Symmetric specular: the edges facing toward/away from the light both
+  // catch a streak. The angular window (size + fade) is measured with an
+  // elliptical normal so it varies continuously along straight edges.
+  vec2 nEll = normalize(p / (uHalfSize * uHalfSize) + 1e-6);
+  float phi = acos(clamp(abs(dot(nEll, L)), 0.0, 1.0));
+  float rim = 1.0 - smoothstep(uShineSize - uShineFade, uShineSize + uShineFade + 1e-4, phi);
+  float line = gaussianLine(d, uThickness);
+  float edgeClamp = 1.0 - smoothstep(0.5 * uPx, 3.0 * uPx, abs(d));
+  float hi = line * rim * edgeClamp * uIntensity;
+
+  vec3 col = uBaseColor * base + uLineColor * hi;
+  float a = clamp(base + hi, 0.0, 1.0);
+  fragColor = vec4(col, a);
+}
+`;
+
+const SpecularButton = ({
+  children = "Get Started",
+  href,
+  size = "lg",
+  radius = 14,
+  tint = "var(--primary)",
+  tintOpacity = 1,
+  blur = 0,
+  textColor = "var(--primary-foreground)",
+  lineColor,
+  baseColor,
+  intensity = 0.85,
+  shineSize = 10,
+  shineFade = 40,
+  thickness = 1,
+  speed = 0.35,
+  followMouse = true,
+  proximity = 250,
+  autoAnimate = false,
+  disabled = false,
+  onClick,
+  className = "",
+  type = "button",
+}: SpecularButtonProps) => {
+  // Typed as the plain element rather than button|anchor union: the setup
+  // effect below only ever calls generic DOM methods (getBoundingClientRect,
+  // ResizeObserver.observe) on it, and the two render branches below cast
+  // it to whichever concrete ref type each host element actually expects.
+  const btnRef = useRef<HTMLElement>(null);
+  const fxRef = useRef<HTMLSpanElement>(null);
+  const propsRef = useRef<ShaderProps>({} as ShaderProps);
+
+  const isDark = useIsDarkTheme();
+  const reducedMotion = useReducedMotion();
+
+  // ogl's Color parses a literal CSS color string, not a custom property,
+  // so an unset lineColor/baseColor is resolved here from the live theme —
+  // "restrained white/indigo" in dark mode (visible against Lumora's dark
+  // page background), "restrained indigo/slate" in light mode (the
+  // upstream white default would be invisible against a light page).
+  const resolvedLineColor = lineColor ?? (isDark ? "#c7d2fe" : "#4f46e5");
+  const resolvedBaseColor = baseColor ?? (isDark ? "#3f3f46" : "#a1a1aa");
+
+  // Written in an effect, not the render body — refs are for imperative
+  // reads (the rAF loop below), and mutating one during render trips this
+  // project's react-hooks/refs lint rule (upstream did this inline; that
+  // rule isn't part of its own lint config).
+  useEffect(() => {
+    propsRef.current = {
+      radius,
+      lineColor: resolvedLineColor,
+      baseColor: resolvedBaseColor,
+      intensity,
+      shineSize,
+      shineFade,
+      thickness,
+      speed,
+      followMouse,
+      proximity,
+      autoAnimate,
+      reducedMotion,
+    };
+  }, [
+    radius,
+    resolvedLineColor,
+    resolvedBaseColor,
+    intensity,
+    shineSize,
+    shineFade,
+    thickness,
+    speed,
+    followMouse,
+    proximity,
+    autoAnimate,
+    reducedMotion,
+  ]);
+
+  useEffect(() => {
+    const btn = btnRef.current;
+    const fx = fxRef.current;
+    if (!btn || !fx) return;
+
+    // Cap at 2 — a decorative rim glow doesn't need to shade a 3x
+    // framebuffer on high-DPI displays, and it's one more GPU context the
+    // page is paying for on top of the Home hero's own shader.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    let renderer: Renderer;
+    try {
+      renderer = new Renderer({ alpha: true, premultipliedAlpha: true, antialias: true, dpr });
+    } catch (error) {
+      // No WebGL (unsupported browser/flag, jsdom in tests, too many live
+      // contexts) — same graceful bail as WarpText.tsx. The button itself
+      // is plain DOM (label + link/button semantics), so it stays fully
+      // usable without the shine.
+      console.warn("SpecularButton: WebGL could not be initialized.", error);
+      return;
+    }
+    const gl = renderer.gl;
+    gl.clearColor(0, 0, 0, 0);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+    const geometry = new Triangle(gl);
+    if (geometry.attributes.uv) delete geometry.attributes.uv;
+
+    const program = new Program(gl, {
+      vertex: VERT,
+      fragment: FRAG,
+      uniforms: {
+        uCenter: { value: [0, 0] },
+        uHalfSize: { value: [1, 1] },
+        uRadius: { value: 0 },
+        uAngle: { value: 2.4 },
+        uPx: { value: dpr },
+        uLineColor: { value: [1, 1, 1] },
+        uBaseColor: { value: [0.32, 0.32, 0.32] },
+        uIntensity: { value: 1 },
+        uShineSize: { value: 0.17 },
+        uShineFade: { value: 0.7 },
+        uThickness: { value: 1 },
+
+        uBaseWidth: { value: dpr },
+      },
+    });
+
+    const mesh = new Mesh(gl, { geometry, program });
+    fx.appendChild(gl.canvas);
+
+    const sizeRef = { w: 1, h: 1 };
+    const resize = () => {
+      // Fractional size + explicit center keep the SDF pinned to the exact
+      // CSS border, instead of drifting up to a pixel from offsetWidth rounding.
+      const rect = btn.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+      sizeRef.w = w;
+      sizeRef.h = h;
+      renderer.setSize(w + PAD * 2, h + PAD * 2);
+      program.uniforms.uCenter.value = [(PAD + w / 2) * dpr, (PAD + h / 2) * dpr];
+      program.uniforms.uHalfSize.value = [(w / 2) * dpr, (h / 2) * dpr];
+    };
+    const ro = new ResizeObserver(resize);
+    ro.observe(btn);
+    resize();
+
+    // Light angle steers toward the pointer (anywhere on the page) and falls
+    // back to a slow sweep when the pointer hasn't moved yet.
+    let pointerAngle: number | null = null;
+    let proximityT = 0;
+    const onPointerMove = (e: PointerEvent) => {
+      const rect = btn.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const dx = Math.max(rect.left - e.clientX, 0, e.clientX - rect.right);
+      const dy = Math.max(rect.top - e.clientY, 0, e.clientY - rect.bottom);
+      const dist = Math.hypot(dx, dy);
+      // Over the button itself the light settles on the diagonal (framing the
+      // corners) and gently sways with the cursor position within the button.
+      if (dist === 0) {
+        const nx = (e.clientX - cx) / (rect.width / 2);
+        const ny = (cy - e.clientY) / (rect.height / 2);
+        pointerAngle = Math.atan2(2 / rect.height, -2 / rect.width) + nx * 0.3 + ny * 0.15;
+      } else {
+        pointerAngle = Math.atan2(cy - e.clientY, e.clientX - cx);
+      }
+      const t = Math.max(0, 1 - dist / Math.max(propsRef.current.proximity, 1));
+      proximityT = t * t * (3 - 2 * t);
+    };
+    window.addEventListener("pointermove", onPointerMove);
+
+    let angle = 2.4;
+    let idleAngle = 2.4;
+    let bright = 0;
+    let last = performance.now();
+    let raf = 0;
+    let running = false;
+    let elementVisible = true;
+    let pageVisible = !document.hidden;
+
+    const lineC = new Color();
+    const baseC = new Color();
+
+    const update = (now: number) => {
+      raf = requestAnimationFrame(update);
+      const dt = Math.min((now - last) / 1000, 0.05);
+      last = now;
+      const p = propsRef.current;
+
+      // Reduced motion: freeze the idle auto-sweep (a real, continuous,
+      // autoplaying animation) but keep the pointer-follow shine intact —
+      // it only moves in direct response to the user's own cursor, the
+      // same carve-out BorderGlow.tsx already makes.
+      if (!p.reducedMotion) idleAngle += p.speed * dt;
+      // Narrowed directly in the ternary's condition (rather than through a
+      // separate boolean) so TypeScript can see `pointerAngle` is non-null
+      // in the branch that uses it.
+      const target =
+        p.followMouse && pointerAngle !== null && (!p.autoAnimate || proximityT > 0) ? pointerAngle : idleAngle;
+      const diff = ((target - angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      angle += diff * (1 - Math.exp(-dt * 7));
+
+      // Shine fades in with pointer proximity unless autoAnimate keeps it on
+      const brightTarget = p.autoAnimate ? 1 : proximityT;
+      bright += (brightTarget - bright) * (1 - Math.exp(-dt * 8));
+
+      lineC.set(p.lineColor);
+      baseC.set(p.baseColor);
+      program.uniforms.uAngle.value = angle;
+      program.uniforms.uRadius.value = Math.min(p.radius, Math.min(sizeRef.w, sizeRef.h) / 2) * dpr;
+      program.uniforms.uLineColor.value = [lineC.r, lineC.g, lineC.b];
+      program.uniforms.uBaseColor.value = [baseC.r, baseC.g, baseC.b];
+      program.uniforms.uIntensity.value = p.intensity * bright;
+      program.uniforms.uShineSize.value = (p.shineSize * Math.PI) / 180;
+      program.uniforms.uShineFade.value = (p.shineFade * Math.PI) / 180;
+      program.uniforms.uThickness.value = p.thickness * dpr;
+      renderer.render({ scene: mesh });
+    };
+
+    const startLoop = () => {
+      if (running) return;
+      running = true;
+      last = performance.now();
+      raf = requestAnimationFrame(update);
+    };
+    const stopLoop = () => {
+      running = false;
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+    };
+
+    // Don't keep shading a button that's scrolled away or hidden behind a
+    // backgrounded tab — mirrors WarpText.tsx's IntersectionObserver +
+    // visibilitychange pairing exactly.
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        elementVisible = entry.isIntersecting;
+        if (elementVisible && pageVisible) startLoop();
+        else stopLoop();
+      },
+      { threshold: 0 },
+    );
+    io.observe(btn);
+
+    const onVisibilityChange = () => {
+      pageVisible = !document.hidden;
+      if (pageVisible && elementVisible) startLoop();
+      else stopLoop();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    startLoop();
+
+    return () => {
+      stopLoop();
+      io.disconnect();
+      ro.disconnect();
+      window.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (gl.canvas.parentNode === fx) fx.removeChild(gl.canvas);
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+    };
+  }, []);
+
+  const style = {
+    "--sb-radius": `${radius}px`,
+    "--sb-tint": tint,
+    "--sb-tint-opacity": tintOpacity,
+    "--sb-blur": `${blur}px`,
+    "--sb-text-color": textColor,
+  } as CSSProperties;
+  const sharedClassName = `specular-button specular-button--${size}${className ? ` ${className}` : ""}`;
+  const fx = <span ref={fxRef} className="specular-button__fx" aria-hidden="true" />;
+  const label = <span className="specular-button__label">{children}</span>;
+
+  if (href) {
+    return (
+      <Link
+        ref={btnRef as Ref<HTMLAnchorElement>}
+        href={href}
+        className={sharedClassName}
+        style={style}
+        onClick={(event) => {
+          if (disabled) {
+            event.preventDefault();
+            return;
+          }
+          (onClick as MouseEventHandler<HTMLAnchorElement> | undefined)?.(event);
+        }}
+        aria-disabled={disabled || undefined}
+        tabIndex={disabled ? -1 : undefined}
+      >
+        {fx}
+        {label}
+      </Link>
+    );
+  }
+
+  return (
+    <button
+      ref={btnRef as Ref<HTMLButtonElement>}
+      type={type}
+      disabled={disabled}
+      onClick={onClick as MouseEventHandler<HTMLButtonElement>}
+      className={sharedClassName}
+      style={style}
+    >
+      {fx}
+      {label}
+    </button>
+  );
+};
+
+export default SpecularButton;

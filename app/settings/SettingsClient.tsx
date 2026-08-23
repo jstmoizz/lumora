@@ -25,7 +25,7 @@ import {
 import type { UserSettings } from "@/lib/supabase/settings";
 import {
   applyThemePreference,
-  getStoredThemePreference,
+  hasStoredThemePreference,
   isThemePreference,
   type ThemePreference,
 } from "../components/theme/theme";
@@ -203,17 +203,21 @@ function AppearanceRow({ initialTheme }: { initialTheme: ThemePreference }) {
   const [isPending, startTransition] = useTransition();
 
   // Reconciles the durable (database) value into this browser's local
-  // storage/DOM once, on mount — the one place DB and localStorage are
-  // compared. `current` (React state) already starts equal to
-  // `initialTheme`, so there's nothing to update there; this effect only
-  // ever needs to synchronize the *external* systems (localStorage, the
-  // `.dark`/`.light` class) to match, exactly the kind of effect body
-  // React's docs recommend. If they already agree (the common case: same
-  // browser, returning visit) this is a no-op; if they disagree (a fresh
-  // browser that already has an account-level preference from elsewhere)
-  // the database wins, since it represents the most recent explicit choice.
+  // storage/DOM, but ONLY on a browser that has never made a local theme
+  // choice at all — the cross-device bootstrap case (a fresh browser that
+  // already has an account-level preference saved from elsewhere). This
+  // used to fire whenever the two merely *disagreed*, on the theory that
+  // the database always represents the more recent explicit choice — but
+  // that isn't actually true: `initialTheme` falls back to "system"
+  // whenever `preferences`/`preferences.theme` isn't set yet (e.g. this
+  // account has never saved a theme before), and comparing against that
+  // fallback as if it were authoritative meant any explicit Light/Dark
+  // pick could get silently overwritten back to "system" the next time
+  // this component mounted — this was the theme-reverts-on-navigation bug.
+  // A real local choice, once made, is authoritative for this browser from
+  // then on; nothing here should ever second-guess it again.
   useEffect(() => {
-    if (getStoredThemePreference() !== initialTheme) {
+    if (!hasStoredThemePreference()) {
       applyThemePreference(initialTheme);
     }
     // Only ever meant to run once, against the value Settings loaded with.

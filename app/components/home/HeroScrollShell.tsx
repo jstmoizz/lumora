@@ -37,10 +37,16 @@ export default function HeroScrollShell({ children }: HeroScrollShellProps) {
   const reducedMotion = useReducedMotion();
   const spacerRef = useRef<HTMLDivElement>(null);
 
-  const { scrollYProgress } = useScroll({
-    target: spacerRef,
-    offset: ["start start", "end start"],
-  });
+  // Rules of Hooks means this runs even on the reduced-motion early return
+  // below, which never renders the spacer div `spacerRef` points at —
+  // passing `target: spacerRef` unconditionally in that case left the ref
+  // permanently un-hydrated, which motion/react treats as an error. Only
+  // wire up the target when the scroll-linked branch below will actually
+  // render it; the resulting scrollYProgress goes unused either way when
+  // reducedMotion is true, exactly like `height`/`marginInline`/etc. below.
+  const { scrollYProgress } = useScroll(
+    reducedMotion ? undefined : { target: spacerRef, offset: ["start start", "end start"] },
+  );
 
   const height = useTransform(scrollYProgress, [0, 1], ["100svh", SETTLED_HEIGHT]);
   const marginInline = useTransform(scrollYProgress, [0, 1], ["0px", SETTLED_MARGIN_INLINE]);

@@ -661,7 +661,10 @@ export default function ChatInterface({
                     <div
                       key={message.id}
                       data-message-id={message.id}
-                      className={isUser ? "flex justify-end" : "flex justify-start"}
+                      className={cn(
+                        "min-w-0",
+                        isUser ? "flex justify-end" : "flex justify-start",
+                      )}
                     >
                       {isUser ? (
                         <div className="min-w-0 max-w-[85%] rounded-2xl bg-primary px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap break-words text-primary-foreground sm:max-w-[75%]">
