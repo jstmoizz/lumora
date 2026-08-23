@@ -3,10 +3,12 @@
 import { useEffect, useRef, useState, useTransition, type ReactNode, type RefObject } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
+import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 import {
   BotIcon,
   BadgeCheckIcon,
   CheckIcon,
+  ChevronDownIcon,
   CircleAlertIcon,
   InfoIcon,
   MonitorIcon,
@@ -29,6 +31,15 @@ import {
   isThemePreference,
   type ThemePreference,
 } from "../components/theme/theme";
+import {
+  applyGenerateAccent,
+  DEFAULT_GENERATE_ACCENT,
+  GENERATE_ACCENTS,
+  getStoredGenerateAccent,
+  isGenerateAccent,
+  type GenerateAccent,
+} from "../components/theme/generateAccent";
+import "../components/theme/generate-accent.css";
 
 export interface SettingsAccount {
   email: string;
@@ -298,6 +309,96 @@ function AppearanceRow({ initialTheme }: { initialTheme: ThemePreference }) {
   );
 }
 
+// A small dropdown, not a button row like AppearanceRow above — 10 options
+// don't fit a Settings row as buttons without wrapping awkwardly, and this
+// preference only ever affects one page. localStorage-only (see
+// generateAccent.ts's own comment on why): there's no server round trip to
+// wait on or fail, so unlike AppearanceRow this never shows a
+// pending/error/"Saved" state — the selection just applies instantly and
+// stays applied.
+//
+// No `initial*` prop the way AppearanceRow gets `initialTheme` from the
+// server: nothing durable backs this value (it's client-only by design), so
+// it starts at the default and corrects itself from localStorage in an
+// effect, same "briefly default, then correct after mount" tradeoff
+// GenerateWorkspace.tsx's own copy of this pattern accepts.
+function GenerateAccentRow() {
+  const [accent, setAccent] = useState<GenerateAccent>(DEFAULT_GENERATE_ACCENT);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time read of a value only knowable client-side (localStorage), not a state-mirrors-state loop.
+    setAccent(getStoredGenerateAccent());
+  }, []);
+
+  function handleSelect(next: string) {
+    if (!isGenerateAccent(next) || next === accent) return;
+    setAccent(next);
+    applyGenerateAccent(next);
+  }
+
+  const current =
+    GENERATE_ACCENTS.find((option) => option.value === accent) ??
+    GENERATE_ACCENTS[0];
+
+  return (
+    <div className="flex items-center justify-between gap-4 py-2">
+      <div className="flex flex-col gap-0.5">
+        <span className="text-sm text-muted-foreground">
+          Generate accent
+        </span>
+        <span className="text-xs text-muted-foreground/70">
+          Accent color for the Generate workspace.
+        </span>
+      </div>
+
+      <DropdownMenuPrimitive.Root>
+        <DropdownMenuPrimitive.Trigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label={`Generate accent: ${current.label}. Change accent.`}
+            className="gap-1.5"
+          >
+            <span
+              aria-hidden="true"
+              data-generate-accent={accent}
+              className="size-2.5 shrink-0 rounded-full bg-[var(--generate-accent)]"
+            />
+            {current.label}
+            <ChevronDownIcon aria-hidden="true" className="size-3.5 text-muted-foreground" />
+          </Button>
+        </DropdownMenuPrimitive.Trigger>
+        <DropdownMenuPrimitive.Content
+          align="end"
+          sideOffset={6}
+          className="z-50 min-w-40 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none"
+        >
+          <DropdownMenuPrimitive.RadioGroup value={accent} onValueChange={handleSelect}>
+            {GENERATE_ACCENTS.map((option) => (
+              <DropdownMenuPrimitive.RadioItem
+                key={option.value}
+                value={option.value}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground outline-none data-[highlighted]:bg-accent"
+              >
+                <span
+                  aria-hidden="true"
+                  data-generate-accent={option.value}
+                  className="size-2.5 shrink-0 rounded-full bg-[var(--generate-accent)]"
+                />
+                <span className="flex-1">{option.label}</span>
+                <DropdownMenuPrimitive.ItemIndicator>
+                  <CheckIcon aria-hidden="true" className="size-3.5" />
+                </DropdownMenuPrimitive.ItemIndicator>
+              </DropdownMenuPrimitive.RadioItem>
+            ))}
+          </DropdownMenuPrimitive.RadioGroup>
+        </DropdownMenuPrimitive.Content>
+      </DropdownMenuPrimitive.Root>
+    </div>
+  );
+}
+
 // A read-only "label: value" info row for the AI & Model section. The
 // Model row's value is `CHAT_MODEL_ID` itself (see lib/ai/model.ts) rather
 // than a hand-written display name, so it cannot drift out of sync with
@@ -438,7 +539,10 @@ export default function SettingsClient({
             title="Appearance"
             description="Choose how Lumora looks across your device."
           >
-            <AppearanceRow initialTheme={initialTheme} />
+            <div className="flex flex-col divide-y divide-border">
+              <AppearanceRow initialTheme={initialTheme} />
+              <GenerateAccentRow />
+            </div>
           </SettingsSection>
 
           <SettingsSection

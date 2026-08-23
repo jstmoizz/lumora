@@ -646,7 +646,7 @@ export default function ChatInterface({
   const composer = (
     <form
       onSubmit={handleSubmit}
-      className="flex w-full items-end gap-2 rounded-xl border border-border bg-card p-2 shadow-sm transition-[border-color,box-shadow] duration-200 ease-out focus-within:border-ring focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/30"
+      className="flex w-full items-end gap-2 rounded-xl border border-border bg-card p-2 shadow-sm transition-[border-color,box-shadow] duration-200 ease-out focus-within:border-[var(--generate-accent)] focus-within:shadow-md focus-within:ring-2 focus-within:ring-[var(--generate-accent-ring)]"
     >
       <textarea
         value={input}
@@ -671,7 +671,7 @@ export default function ChatInterface({
         <Button
           type="submit"
           disabled={!canSend}
-          className="h-11 shrink-0 rounded-xl px-5 text-sm font-semibold transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]"
+          className="h-11 shrink-0 rounded-xl bg-[var(--generate-accent-solid)] px-5 text-sm font-semibold text-[var(--generate-accent-foreground)] transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03] hover:bg-[var(--generate-accent-solid)] hover:opacity-90"
         >
           Send
         </Button>
@@ -791,7 +791,7 @@ export default function ChatInterface({
                       )}
                     >
                       {isUser ? (
-                        <div className="min-w-0 max-w-[85%] rounded-2xl bg-primary px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap break-words text-primary-foreground sm:max-w-[75%]">
+                        <div className="min-w-0 max-w-[85%] rounded-2xl bg-[var(--generate-accent-solid)] px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap break-words text-[var(--generate-accent-foreground)] sm:max-w-[75%]">
                           {text}
                         </div>
                       ) : (

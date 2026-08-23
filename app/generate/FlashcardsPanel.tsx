@@ -108,6 +108,16 @@ function ActiveFlashcardSet({ set }: { set: CreateFlashcardsOutput }) {
         </p>
       </div>
 
+      <div
+        aria-hidden="true"
+        className="h-1 w-full overflow-hidden rounded-full bg-[var(--generate-accent-soft)]"
+      >
+        <div
+          className="h-full rounded-full bg-[var(--generate-accent-solid)] transition-[width] duration-300 ease-out"
+          style={{ width: `${((index + 1) / total) * 100}%` }}
+        />
+      </div>
+
       <Flashcard
         front={card.front}
         back={card.back}
@@ -137,7 +147,7 @@ function ActiveFlashcardSet({ set }: { set: CreateFlashcardsOutput }) {
           onClick={goToNext}
           disabled={isLast}
           aria-label="Next card"
-          className="gap-1"
+          className="gap-1 bg-[var(--generate-accent-solid)] text-[var(--generate-accent-foreground)] hover:bg-[var(--generate-accent-solid)] hover:opacity-90"
         >
           Next
           <ChevronRightIcon aria-hidden="true" className="size-4" />

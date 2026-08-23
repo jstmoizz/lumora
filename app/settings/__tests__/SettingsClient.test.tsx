@@ -252,3 +252,76 @@ describe("SettingsClient — Study Preferences", () => {
     ).toHaveTextContent("Clear and concise");
   });
 });
+
+// Radix's DropdownMenuTrigger opens on `pointerdown`, not `click` — a plain
+// fireEvent.click() (a bare "click" DOM event, unlike a real click which a
+// browser precedes with pointerdown/mousedown) never reaches that handler,
+// so the menu never opens under jsdom without this.
+function openGenerateAccentMenu() {
+  const trigger = screen.getByRole("button", { name: /^Generate accent:/ });
+  fireEvent.pointerDown(trigger, { button: 0, pointerId: 1, isPrimary: true });
+  fireEvent.click(trigger);
+}
+
+describe("SettingsClient — Generate accent", () => {
+  test("defaults to Indigo when nothing is stored", () => {
+    render(<SettingsClient account={null} preferences={preferences} />);
+
+    expect(
+      screen.getByRole("button", {
+        name: "Generate accent: Indigo. Change accent.",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  test("reflects a previously stored accent on mount", () => {
+    window.localStorage.setItem("lumora-generate-accent", "pink");
+
+    render(<SettingsClient account={null} preferences={preferences} />);
+
+    expect(
+      screen.getByRole("button", {
+        name: "Generate accent: Pink. Change accent.",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  test("selecting an accent applies it instantly, persists it, and exposes the selected state accessibly", async () => {
+    render(<SettingsClient account={null} preferences={preferences} />);
+
+    openGenerateAccentMenu();
+
+    const pinkOption = await screen.findByRole("menuitemradio", {
+      name: "Pink",
+    });
+    expect(pinkOption).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(pinkOption);
+
+    expect(window.localStorage.getItem("lumora-generate-accent")).toBe(
+      "pink",
+    );
+    expect(
+      screen.getByRole("button", {
+        name: "Generate accent: Pink. Change accent.",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  test("does not touch the global theme's storage key or DOM class", async () => {
+    render(<SettingsClient account={null} preferences={preferences} />);
+    // AppearanceRow's own bootstrap effect legitimately writes the server's
+    // initialTheme ("system" here) on mount — capture that baseline first,
+    // so this only asserts the Generate accent selection itself never
+    // changes it any further.
+    const themeBeforeAccentChange = window.localStorage.getItem("lumora-theme");
+    const darkBeforeAccentChange = document.documentElement.classList.contains("dark");
+    const lightBeforeAccentChange = document.documentElement.classList.contains("light");
+
+    openGenerateAccentMenu();
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Green" }));
+
+    expect(window.localStorage.getItem("lumora-theme")).toBe(themeBeforeAccentChange);
+    expect(document.documentElement.classList.contains("dark")).toBe(darkBeforeAccentChange);
+    expect(document.documentElement.classList.contains("light")).toBe(lightBeforeAccentChange);
+  });
+});

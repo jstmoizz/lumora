@@ -1,9 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { HistoryIcon, SparklesIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DEFAULT_GENERATE_ACCENT,
+  getStoredGenerateAccent,
+  type GenerateAccent,
+} from "@/app/components/theme/generateAccent";
+import "@/app/components/theme/generate-accent.css";
 import type {
   CreateFlashcardsOutput,
   CreateQuizOutput,
@@ -18,6 +24,29 @@ import ChatInterface from "./ChatInterface";
 import MobilePanelDrawer from "./MobilePanelDrawer";
 import PracticePanel from "./PracticePanel";
 import RecentChatsPanel from "./RecentChatsPanel";
+
+// Radix's Dialog (which MobilePanelDrawer builds on) renders its content
+// through a Portal straight into `document.body` — outside this component's
+// own DOM subtree, so a `data-generate-accent` attribute on the workspace's
+// root div never cascades to it (CSS custom properties inherit through the
+// real DOM tree, not the React tree, and a portal breaks that containment
+// even though it doesn't break React context). Wrapping each drawer's
+// `children` in this re-scopes the accent locally for exactly the portaled
+// content that needs it. `contents` keeps the wrapper itself out of layout
+// entirely, so it can't affect MobilePanelDrawer's own flex sizing.
+function AccentScope({
+  accent,
+  children,
+}: {
+  accent: string;
+  children: ReactNode;
+}) {
+  return (
+    <div data-generate-accent={accent} className="contents">
+      {children}
+    </div>
+  );
+}
 
 interface GenerateWorkspaceProps {
   initialConversationId?: string;
@@ -40,6 +69,7 @@ function GenerateSession({
   onResourcesMobileOpenChange,
   onConversationIdKnown,
   onTurnSettled,
+  accent,
 }: {
   initialConversationId?: string;
   initialMessages?: LumoraUIMessage[];
@@ -47,6 +77,7 @@ function GenerateSession({
   onResourcesMobileOpenChange: (open: boolean) => void;
   onConversationIdKnown: (id: string) => void;
   onTurnSettled: () => void;
+  accent: string;
 }) {
   const [quizzes, setQuizzes] = useState<CreateQuizOutput[]>([]);
   const [flashcardSets, setFlashcardSets] = useState<CreateFlashcardsOutput[]>(
@@ -96,7 +127,9 @@ function GenerateSession({
         title="Resources"
         side="right"
       >
-        <PracticePanel quizzes={quizzes} flashcardSets={flashcardSets} />
+        <AccentScope accent={accent}>
+          <PracticePanel quizzes={quizzes} flashcardSets={flashcardSets} />
+        </AccentScope>
       </MobilePanelDrawer>
     </>
   );
@@ -133,6 +166,23 @@ export default function GenerateWorkspace({
   // an away-and-back navigation (see the mount effect below) — never true
   // when the server already resolved a conversation from the URL.
   const [isRestoringSession, setIsRestoringSession] = useState(false);
+
+  // Defaults to indigo (matching generateAccent.ts's DEFAULT_GENERATE_ACCENT)
+  // so server and first client render agree — localStorage only exists on
+  // the client, so the real stored choice (set from Settings; see
+  // SettingsClient.tsx's GenerateAccentRow) is picked up a moment later in
+  // the effect below, same "correct after mount, not before" tradeoff
+  // AppearanceRow accepts for its own non-blocking preferences. No
+  // storage-event listener: Settings and Generate are never mounted at the
+  // same time (different routes), so there's nothing to live-sync — the
+  // next time this component mounts, it simply reads whatever was last
+  // saved.
+  const [accent, setAccent] = useState<GenerateAccent>(DEFAULT_GENERATE_ACCENT);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time read of a value only knowable client-side (localStorage), not a state-mirrors-state loop.
+    setAccent(getStoredGenerateAccent());
+  }, []);
 
   const refreshConversations = useCallback(async () => {
     try {
@@ -247,7 +297,10 @@ export default function GenerateWorkspace({
   }, []);
 
   return (
-    <div className="flex min-h-0 w-full flex-1 flex-col gap-3 lg:mx-auto lg:max-w-[1400px] lg:grid lg:grid-cols-[220px_minmax(0,1fr)_260px] lg:items-stretch lg:gap-5">
+    <div
+      data-generate-accent={accent}
+      className="flex min-h-0 w-full flex-1 flex-col gap-3 lg:mx-auto lg:max-w-[1400px] lg:grid lg:grid-cols-[220px_minmax(0,1fr)_260px] lg:items-stretch lg:gap-5"
+    >
       {/*
         Below `lg`, both side panels collapse behind these two toggles
         (opening MobilePanelDrawer) instead of squeezing three columns into
@@ -319,6 +372,7 @@ export default function GenerateWorkspace({
           onResourcesMobileOpenChange={handleResourcesMobileOpenChange}
           onConversationIdKnown={handleConversationIdKnown}
           onTurnSettled={handleTurnSettled}
+          accent={accent}
         />
       )}
 
@@ -328,13 +382,15 @@ export default function GenerateWorkspace({
         title="Recent chats"
         side="left"
       >
-        <RecentChatsPanel
-          conversations={conversations}
-          activeConversationId={activeConversationId}
-          loadingConversationId={loadingConversationId}
-          onSelect={handleSelectConversation}
-          onNewChat={handleNewChat}
-        />
+        <AccentScope accent={accent}>
+          <RecentChatsPanel
+            conversations={conversations}
+            activeConversationId={activeConversationId}
+            loadingConversationId={loadingConversationId}
+            onSelect={handleSelectConversation}
+            onNewChat={handleNewChat}
+          />
+        </AccentScope>
       </MobilePanelDrawer>
     </div>
   );

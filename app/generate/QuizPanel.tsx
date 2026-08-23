@@ -150,6 +150,16 @@ function ActiveQuiz({ quiz }: { quiz: CreateQuizOutput }) {
         </p>
       </div>
 
+      <div
+        aria-hidden="true"
+        className="h-1 w-full overflow-hidden rounded-full bg-[var(--generate-accent-soft)]"
+      >
+        <div
+          className="h-full rounded-full bg-[var(--generate-accent-solid)] transition-[width] duration-300 ease-out"
+          style={{ width: `${((index + 1) / total) * 100}%` }}
+        />
+      </div>
+
       <p className="min-w-0 text-sm font-medium break-words text-foreground">
         {question.question}
       </p>
@@ -173,7 +183,7 @@ function ActiveQuiz({ quiz }: { quiz: CreateQuizOutput }) {
               aria-pressed={isSelectedOption}
               onClick={() => selectOption(optionIndex)}
               className={cn(
-                "h-auto min-w-0 justify-start rounded-xl px-3 py-2 text-left text-sm font-normal whitespace-normal break-words disabled:opacity-100",
+                "h-auto min-w-0 justify-start rounded-xl px-3 py-2 text-left text-sm font-normal whitespace-normal break-words focus-visible:ring-[var(--generate-accent-ring)] disabled:opacity-100",
                 hasAnswered &&
                   isCorrectOption &&
                   "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-400",
@@ -223,7 +233,7 @@ function ActiveQuiz({ quiz }: { quiz: CreateQuizOutput }) {
           size="sm"
           onClick={goToNext}
           aria-label={isLastQuestion ? "Finish quiz" : "Next question"}
-          className="gap-1"
+          className="gap-1 bg-[var(--generate-accent-solid)] text-[var(--generate-accent-foreground)] hover:bg-[var(--generate-accent-solid)] hover:opacity-90"
         >
           {isLastQuestion ? "Finish" : "Next"}
           <ChevronRightIcon aria-hidden="true" className="size-4" />

@@ -44,21 +44,27 @@ export default function PracticePanel({
 
       <Tabs defaultValue="quizzes" className="min-h-0 flex-1">
         <TabsList className="w-full">
-          <TabsTrigger value="quizzes">
+          <TabsTrigger
+            value="quizzes"
+            className="data-active:text-[var(--generate-accent)]"
+          >
             Quizzes
             {quizzes.length > 0 && (
               <span
                 aria-hidden="true"
-                className="ml-1 size-1.5 rounded-full bg-primary"
+                className="ml-1 size-1.5 rounded-full bg-[var(--generate-accent-solid)]"
               />
             )}
           </TabsTrigger>
-          <TabsTrigger value="flashcards">
+          <TabsTrigger
+            value="flashcards"
+            className="data-active:text-[var(--generate-accent)]"
+          >
             Flashcards
             {flashcardSets.length > 0 && (
               <span
                 aria-hidden="true"
-                className="ml-1 size-1.5 rounded-full bg-primary"
+                className="ml-1 size-1.5 rounded-full bg-[var(--generate-accent-solid)]"
               />
             )}
           </TabsTrigger>

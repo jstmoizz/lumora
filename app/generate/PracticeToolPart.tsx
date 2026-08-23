@@ -139,7 +139,7 @@ function ActivityReadyNotice({
 }) {
   return (
     <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-5">
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-foreground">
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--generate-accent-soft)] text-[var(--generate-accent-solid)]">
         <ClipboardCheckIcon aria-hidden="true" className="size-4" />
       </div>
       <div className="flex flex-col">

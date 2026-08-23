@@ -73,8 +73,9 @@ export default function RecentChatsPanel({
                   disabled={loadingConversationId === conversation.id}
                   onClick={() => onSelect(conversation.id)}
                   className={cn(
-                    "flex w-full flex-col gap-0.5 rounded-lg px-3 py-2 text-left transition-colors duration-150 ease-out hover:bg-accent focus-visible:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60",
-                    isActive && "bg-accent",
+                    "flex w-full flex-col gap-0.5 rounded-lg border-l-2 border-l-transparent px-3 py-2 text-left transition-colors duration-150 ease-out hover:bg-[var(--generate-accent-soft)] focus-visible:bg-[var(--generate-accent-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--generate-accent-ring)] disabled:opacity-60",
+                    isActive &&
+                      "border-l-[var(--generate-accent)] bg-[var(--generate-accent-soft)]",
                   )}
                 >
                   <span

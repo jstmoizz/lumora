@@ -72,6 +72,47 @@ describe("layout and labels", () => {
   });
 });
 
+describe("Generate accent", () => {
+  test("defaults to indigo", () => {
+    const { container } = render(
+      <GenerateWorkspace initialConversations={[conversation()]} />,
+    );
+
+    expect(container.querySelector("[data-generate-accent]")).toHaveAttribute(
+      "data-generate-accent",
+      "indigo",
+    );
+  });
+
+  test("picks up an accent chosen earlier in Settings, persisted via localStorage", async () => {
+    window.localStorage.setItem("lumora-generate-accent", "pink");
+
+    const { container } = render(
+      <GenerateWorkspace initialConversations={[conversation()]} />,
+    );
+
+    await waitFor(() => {
+      expect(
+        container.querySelector("[data-generate-accent]"),
+      ).toHaveAttribute("data-generate-accent", "pink");
+    });
+  });
+
+  test("ignores a corrupted stored value and falls back to indigo", async () => {
+    window.localStorage.setItem("lumora-generate-accent", "not-a-real-accent");
+
+    const { container } = render(
+      <GenerateWorkspace initialConversations={[conversation()]} />,
+    );
+
+    await waitFor(() => {
+      expect(
+        container.querySelector("[data-generate-accent]"),
+      ).toHaveAttribute("data-generate-accent", "indigo");
+    });
+  });
+});
+
 describe("New Chat", () => {
   test("clears the active conversation, remounts the session, and resets the URL", () => {
     render(

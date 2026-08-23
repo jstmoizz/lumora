@@ -71,7 +71,7 @@ export default function Disclosure({
         aria-expanded={isExpanded}
         aria-controls={contentId}
         onClick={toggle}
-        className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left transition-colors duration-150 ease-out hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left transition-colors duration-150 ease-out hover:bg-[var(--generate-accent-soft)] focus-visible:bg-[var(--generate-accent-soft)] focus-visible:ring-2 focus-visible:ring-[var(--generate-accent-ring)] focus-visible:outline-none"
       >
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-sm font-medium text-foreground">

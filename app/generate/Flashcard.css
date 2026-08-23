@@ -8,9 +8,15 @@
  * comment for the accessible-state announcement this pairs with.
  *
  * Every color here is an existing Lumora token (--card/--secondary/
- * --border/--foreground/--muted-foreground/--ring) — nothing new, so this
- * is automatically correct in both themes without a single dark:/light:
- * override anywhere in this file.
+ * --border/--foreground/--muted-foreground/--ring), plus Generate's own
+ * accent tokens (--generate-accent/-border, defined in
+ * app/components/theme/generate-accent.css and scoped via the
+ * `data-generate-accent` attribute GenerateWorkspace.tsx applies) for the
+ * card border, flip focus outline, and "Question"/"Answer" eyebrow label —
+ * never the actual question/answer/explanation text itself, which stays on
+ * the plain neutral foreground tokens. So this is automatically correct in
+ * both themes and every accent without a single dark:/light: or
+ * per-accent override anywhere in this file.
  */
 .flashcard-scene {
   width: 100%;
@@ -35,7 +41,7 @@
 }
 
 .flashcard-inner:focus-visible {
-  outline: 2px solid var(--ring);
+  outline: 2px solid var(--generate-accent, var(--ring));
   outline-offset: 3px;
 }
 
@@ -62,7 +68,7 @@
   gap: 0.5rem;
   overflow-y: auto;
   border-radius: inherit;
-  border: 1px solid var(--border);
+  border: 1px solid var(--generate-accent-border, var(--border));
   padding: 1.25rem 1.5rem;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
@@ -84,7 +90,7 @@
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--muted-foreground);
+  color: var(--generate-accent, var(--muted-foreground));
 }
 
 .flashcard-text {

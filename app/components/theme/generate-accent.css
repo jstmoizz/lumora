@@ -1,0 +1,116 @@
+/*
+ * Generate's accent-theme tokens. Scoped entirely via the
+ * `[data-generate-accent="…"]` attribute (set by GenerateWorkspace.tsx, and
+ * placed on individual swatch dots by the Settings dropdown — see
+ * SettingsClient.tsx) — nothing here ever touches `:root`, `.dark` on its
+ * own, or any of Lumora's global tokens, so the site-wide Light/Dark system
+ * in globals.css is completely untouched by this file.
+ *
+ * Each accent defines exactly one literal per mode, `--generate-accent`
+ * (light below, `.dark` override beneath it) — light uses a deep 600/700
+ * shade for readable text/borders on a light surface, dark uses a bright
+ * 300/400 shade for visibility against a near-black surface, the same
+ * "lighten for dark" adaptation already used for the header's LumoraMark
+ * icon. Every other token is derived from that one value via
+ * `color-mix(in oklch, …)` — this codebase's existing idiom for translucent/
+ * blended accent colors (see globals.css, LumoraMark.css) — computed once
+ * below rather than hand-picked per accent, so adding an 11th accent only
+ * ever means adding one new color pair, never five.
+ *
+ * `--generate-accent-solid`/`-foreground` are the exception: a *fixed* deep
+ * shade reused in both modes (not lightened for dark), specifically for
+ * filled surfaces that carry foreground text on top (the chat's user
+ * bubble, primary buttons) — guarantees white text stays readable without
+ * having to verify contrast per accent per mode; a saturated bubble color
+ * doesn't need to lighten for a dark backdrop the way thin text/borders do,
+ * since it's legible via its own area/saturation either way.
+ */
+
+[data-generate-accent="indigo"] {
+  --generate-accent: #4f46e5;
+  --generate-accent-solid: #4f46e5;
+}
+[data-generate-accent="purple"] {
+  --generate-accent: #9333ea;
+  --generate-accent-solid: #9333ea;
+}
+[data-generate-accent="pink"] {
+  --generate-accent: #db2777;
+  --generate-accent-solid: #db2777;
+}
+[data-generate-accent="blue"] {
+  --generate-accent: #2563eb;
+  --generate-accent-solid: #2563eb;
+}
+[data-generate-accent="cyan"] {
+  --generate-accent: #0e7490;
+  --generate-accent-solid: #0e7490;
+}
+[data-generate-accent="green"] {
+  --generate-accent: #15803d;
+  --generate-accent-solid: #15803d;
+}
+[data-generate-accent="teal"] {
+  --generate-accent: #0f766e;
+  --generate-accent-solid: #0f766e;
+}
+[data-generate-accent="amber"] {
+  --generate-accent: #b45309;
+  --generate-accent-solid: #b45309;
+}
+[data-generate-accent="red"] {
+  --generate-accent: #dc2626;
+  --generate-accent-solid: #dc2626;
+}
+[data-generate-accent="violet"] {
+  --generate-accent: #7c3aed;
+  --generate-accent-solid: #7c3aed;
+}
+
+.dark [data-generate-accent="indigo"] {
+  --generate-accent: #818cf8;
+}
+.dark [data-generate-accent="purple"] {
+  --generate-accent: #c084fc;
+}
+.dark [data-generate-accent="pink"] {
+  --generate-accent: #f472b6;
+}
+.dark [data-generate-accent="blue"] {
+  --generate-accent: #60a5fa;
+}
+.dark [data-generate-accent="cyan"] {
+  --generate-accent: #22d3ee;
+}
+.dark [data-generate-accent="green"] {
+  --generate-accent: #4ade80;
+}
+.dark [data-generate-accent="teal"] {
+  --generate-accent: #2dd4bf;
+}
+.dark [data-generate-accent="amber"] {
+  --generate-accent: #fbbf24;
+}
+.dark [data-generate-accent="red"] {
+  --generate-accent: #f87171;
+}
+.dark [data-generate-accent="violet"] {
+  --generate-accent: #a78bfa;
+}
+
+/*
+ * Derived once, from whichever `--generate-accent` is currently in scope —
+ * every accent gets these four for free, no per-accent repetition:
+ * - `-foreground`: white, paired with `-solid` (always deep enough for it).
+ * - `-soft`: a light tint over `--card`, for badge/chip-style fills.
+ * - `-border`: the accent blended into the neutral `--border`, so accented
+ *   borders still read as "a border", not a stray colored line.
+ * - `-ring`: a translucent version of the accent for focus-visible rings,
+ *   matching the weight of the site's existing `--ring` usage.
+ */
+[data-generate-accent] {
+  --generate-accent-foreground: oklch(1 0 0);
+  --generate-accent-soft: color-mix(in oklch, var(--generate-accent) 16%, var(--card));
+  --generate-accent-border: color-mix(in oklch, var(--generate-accent) 45%, var(--border));
+  --generate-accent-ring: color-mix(in oklch, var(--generate-accent) 55%, transparent);
+}
