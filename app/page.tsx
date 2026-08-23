@@ -195,7 +195,11 @@ export default function Home() {
               ref={heroHeadingRef}
               className="max-w-3xl text-5xl font-semibold tracking-tight text-balance text-foreground sm:text-6xl"
             >
-              Learn smarter with Lumora.
+              Learn smarter with{" "}
+              <span className="font-wordmark text-4xl sm:text-5xl">
+                Lumora
+              </span>
+              .
             </h1>
 
             <p
