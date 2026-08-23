@@ -64,7 +64,9 @@ The Groq API key is read from the server environment (`GROQ_API_KEY`) inside `li
 
 ## 5. Tool calling
 
-Lumora's chat route registers one server-side tool with the AI SDK's `streamText`: `createQuiz`. The model decides when to call it (e.g. when the user asks to be quizzed on something) and supplies the quiz content itself as the tool call's arguments; `execute` never makes a further model call of its own — it only validates and normalizes that content.
+Lumora's chat route registers two server-side tools with the AI SDK's `streamText`: `createQuiz` and `createFlashcards`. The model decides when to call each (e.g. when the user asks to be quizzed, or asks for flashcards) and supplies the content itself as the tool call's arguments; `execute` never makes a further model call of its own — it only validates and normalizes that content. `createFlashcards` mirrors `createQuiz`'s shape exactly (same validate-and-assign-ids `execute`, same per-item stable-id scheme) for a second activity type, so both render through the same "Practice" panel architecture described below rather than duplicated logic.
+
+`SYSTEM_PROMPT` (in [`lib/ai/config.ts`](lib/ai/config.ts)) explicitly instructs the model not to restate a quiz's/flashcard set's content in its own written reply after calling either tool — the activity itself only ever renders in the Practice panel (see below), never as chat text, so the model is told to give a short one-sentence acknowledgment instead.
 
 ### `createQuiz`
 
@@ -105,18 +107,20 @@ z.object({
 }
 ```
 
-### Client rendering — four lifecycle states
+### Client rendering — four lifecycle states, and where the activity actually lives
 
-[`app/generate/QuizToolPart.tsx`](app/generate/QuizToolPart.tsx) renders the tool call's message part differently for each state the AI SDK exposes on it (`ToolUIPart`'s `state` field):
+[`app/generate/PracticeToolPart.tsx`](app/generate/PracticeToolPart.tsx) exports `QuizToolPart`/`FlashcardsToolPart`, which render their tool call's message part differently for each state the AI SDK exposes on it (`ToolUIPart`'s `state` field) — but **never** the activity's own content, by design:
 
 | State | What's shown |
 |---|---|
-| `input-streaming` | A generic skeleton card ("Lumora is preparing a quiz…") — the arguments are still streaming in, so no partial JSON is rendered. |
-| `input-available` | A "Building your quiz on *{topic}*…" card — the arguments are fully parsed, `execute` hasn't resolved yet. |
-| `output-available` | The real quiz: topic + each question with four clickable answer options. Clicking an option reveals correct/incorrect locally (no persistence, no backend scoring). |
+| `input-streaming` | A generic skeleton card ("Lumora is preparing a quiz…" / "…flashcards…") — the arguments are still streaming in, so no partial JSON is rendered. |
+| `input-available` | A "Building your quiz/flashcards on *{topic}*…" card — the arguments are fully parsed, `execute` hasn't resolved yet. |
+| `output-available` | A compact ready notice only — e.g. "Quiz ready: {topic} · {N} questions · Open Practice to take it". The actual interactive quiz/flashcards render exclusively in Generate's Practice panel ([`app/generate/PracticePanel.tsx`](app/generate/PracticePanel.tsx), tabbed Quizzes/Flashcards — see [`app/generate/QuizPanel.tsx`](app/generate/QuizPanel.tsx) and [`app/generate/FlashcardsPanel.tsx`](app/generate/FlashcardsPanel.tsx)), never duplicated into the chat itself. |
 | `output-error` | A designed error card (icon + the thrown error's message) — not raw JSON, not an unhandled exception. |
 
-The chat route also sets `stopWhen: stepCountIs(2)`, so the model gets a turn to comment on the quiz after calling the tool instead of the AI SDK's single-step default ending the turn immediately after the tool call.
+The chat route also sets `stopWhen: stepCountIs(2)`, so the model gets a turn to comment after calling a tool instead of the AI SDK's single-step default ending the turn immediately after the tool call — `SYSTEM_PROMPT` keeps that comment short rather than a restatement (see above).
+
+Every quiz/flashcard set generated in a session gets its own collapsible card in Practice (via the shared [`app/generate/Disclosure.tsx`](app/generate/Disclosure.tsx) and [`app/generate/useAutoCollapseList.ts`](app/generate/useAutoCollapseList.ts)) rather than replacing the last one — the newest opens automatically, the previously-auto-opened one collapses, and anything the user opened by hand is left alone. Disclosure keeps collapsed content mounted (hidden via the `hidden` attribute, not unmounted) specifically so a quiz's in-progress answers or a flashcard set's current card/flip side survive being collapsed and reopened.
 
 ## 6. Playground
 

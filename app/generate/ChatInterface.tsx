@@ -17,8 +17,12 @@ import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { CreateQuizOutput, LumoraUIMessage } from "@/lib/ai/tools";
-import QuizToolPart from "./QuizToolPart";
+import type {
+  CreateFlashcardsOutput,
+  CreateQuizOutput,
+  LumoraUIMessage,
+} from "@/lib/ai/tools";
+import { FlashcardsToolPart, QuizToolPart } from "./PracticeToolPart";
 
 // How close to the bottom (in pixels) counts as "at the bottom" for the
 // purpose of re-engaging auto-scroll. A small tolerance, not an exact 0,
@@ -171,6 +175,7 @@ export default function ChatInterface({
   onPendingPromptHandled,
   onPromptSubmitted,
   onQuizGenerated,
+  onFlashcardsGenerated,
 }: {
   /** Set when arriving from History via /generate?conversationId=... */
   initialConversationId?: string;
@@ -193,10 +198,13 @@ export default function ChatInterface({
    * source instead of duplicating send logic. */
   onPromptSubmitted?: (text: string) => void;
   /** Fired once per quiz the moment its tool call reaches
-   * output-available, so GenerateWorkspace can show it in the Quiz panel —
-   * see QuizToolPart.tsx for why the in-chat rendering itself stays
-   * non-interactive. */
+   * output-available, so GenerateWorkspace can show it in Practice's
+   * Quizzes tab — see PracticeToolPart.tsx for why the in-chat rendering
+   * itself stays non-interactive. */
   onQuizGenerated?: (quiz: CreateQuizOutput) => void;
+  /** Same as onQuizGenerated, for the `createFlashcards` tool and
+   * Practice's Flashcards tab. */
+  onFlashcardsGenerated?: (flashcards: CreateFlashcardsOutput) => void;
 }) {
   const [input, setInput] = useState("");
   const { messages, sendMessage, regenerate, status, stop, error } =
@@ -273,6 +281,28 @@ export default function ChatInterface({
       }
     }
   }, [messages, onQuizGenerated]);
+
+  // Same "notify once" mechanism as the quiz effect above, for
+  // `tool-createFlashcards` parts.
+  const seenFlashcardSetIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!onFlashcardsGenerated) return;
+    for (const message of messages) {
+      for (const part of message.parts) {
+        if (
+          part.type !== "tool-createFlashcards" ||
+          part.state !== "output-available"
+        ) {
+          continue;
+        }
+        if (seenFlashcardSetIdsRef.current.has(part.output.flashcardSetId)) {
+          continue;
+        }
+        seenFlashcardSetIdsRef.current.add(part.output.flashcardSetId);
+        onFlashcardsGenerated(part.output);
+      }
+    }
+  }, [messages, onFlashcardsGenerated]);
 
   // Randomized once per mount (cached in the ref, computed lazily on first
   // read) and never recomputed afterward — a fresh visit remounts this
@@ -643,7 +673,8 @@ export default function ChatInterface({
                   const hasRenderableContent = message.parts.some(
                     (part) =>
                       (part.type === "text" && part.text.length > 0) ||
-                      part.type === "tool-createQuiz",
+                      part.type === "tool-createQuiz" ||
+                      part.type === "tool-createFlashcards",
                   );
                   const isPending =
                     !isUser &&
@@ -698,6 +729,14 @@ export default function ChatInterface({
                                 if (part.type === "tool-createQuiz") {
                                   return (
                                     <QuizToolPart
+                                      key={part.toolCallId}
+                                      part={part}
+                                    />
+                                  );
+                                }
+                                if (part.type === "tool-createFlashcards") {
+                                  return (
+                                    <FlashcardsToolPart
                                       key={part.toolCallId}
                                       part={part}
                                     />

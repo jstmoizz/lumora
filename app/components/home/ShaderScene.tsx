@@ -8,6 +8,7 @@ import { vertexShader } from "./shaders/lumora.vert";
 import { useIsDarkTheme } from "../useIsDarkTheme";
 import { useElementVisible } from "./useElementVisible";
 import { useTabVisible } from "./useTabVisible";
+import "./ShaderScene.css";
 
 // Coarse pointers (touch) skip straight to the cap's floor — a phone's GPU
 // doesn't need to shade this many physical pixels for a decorative
@@ -130,7 +131,7 @@ export default function ShaderScene() {
     <div
       ref={wrapperRef}
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
+      className="shader-scene pointer-events-none absolute inset-0 -z-10 overflow-hidden"
     >
       <Canvas
         dpr={getDpr()}
@@ -142,7 +143,10 @@ export default function ShaderScene() {
         // HeroScrollShell keeps this section pinned only for a bounded
         // scroll range, then lets it scroll away normally like any other
         // section, at which point there's no reason left to keep paying for
-        // a WebGL frame every tick.
+        // a WebGL frame every tick. Toggling this prop only changes the
+        // frameloop mode on the existing Canvas/renderer/program — nothing
+        // here ever unmounts or recreates them, so a hero leaving/re-
+        // entering the viewport is a pause/resume, never a reinit.
         frameloop={tabVisible && heroVisible ? "always" : "never"}
         // R3F measures this wrapper via react-use-measure and calls
         // renderer.setSize on every reported change. Counter-intuitively,
@@ -151,18 +155,30 @@ export default function ShaderScene() {
         // HeroScrollShell's scroll-linked shrink does every animation frame
         // while mid-transition — is wired to the `scroll` debounce value,
         // not `resize` (`resize`'s debounce only governs actual
-        // window-resize events; see react-use-measure's source). Measured
-        // before this change: ~37 ResizeObserver fires / ~75 canvas buffer
-        // resizes across one slow scroll through the hero, each one
-        // reallocating the WebGL framebuffer — the actual cost behind
-        // "scrolling feels heavy while the hero is shrinking". Raising
-        // `scroll`'s debounce from the 50ms default means the canvas's CSS
-        // box still tracks the shrink every frame as before — the browser
-        // just bitmap-scales the existing frame to fit in between, which is
-        // imperceptible on a soft gradient shader — while the actual
-        // expensive buffer resize happens far less often across the whole
-        // gesture instead of on nearly every tick.
-        resize={{ debounce: { scroll: 200, resize: 0 } }}
+        // window-resize events; see react-use-measure's source).
+        //
+        // That debounce alone turned out not to be enough: three.js's
+        // renderer.setSize() also rewrites the <canvas> element's own CSS
+        // pixel width/height (see ShaderScene.css), so for the length of
+        // this debounce window the canvas sits at its *previous* size while
+        // its actual (ordinary-CSS, instantly correct) parent has already
+        // shrunk or grown with the scroll — and when the debounced resize
+        // finally fires, both the CSS box and the WebGL buffer snap to the
+        // new size at once, which is the visible "hitch" reported when
+        // scrolling back into the hero. ShaderScene.css now forces the
+        // canvas's *visual* size to always be 100% of its parent (decoupled
+        // from how stale the measured size is), so that snap is gone
+        // regardless of this debounce's length — which means the debounce
+        // itself can now be tuned purely for reallocation cost (how often
+        // the actual WebGL framebuffer gets rebuilt) with zero visual
+        // downside, so it's raised further here: from ~37 ResizeObserver
+        // fires / ~75 buffer resizes across one slow scroll through the
+        // hero at the original 50ms default, down to a handful at 200ms,
+        // down further still at 500ms — the browser just bitmap-scales the
+        // existing frame to fit in between, imperceptible on a soft
+        // gradient shader, while the actual expensive buffer resize now
+        // only happens once scrolling has properly stopped.
+        resize={{ debounce: { scroll: 500, resize: 0 } }}
       >
         <ShaderPlane isDark={isDark} mouseRef={mouseRef} />
       </Canvas>

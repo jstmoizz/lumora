@@ -3,10 +3,14 @@
 import { useCallback, useRef, useState } from "react";
 import { HistoryIcon, SparklesIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { CreateQuizOutput, LumoraUIMessage } from "@/lib/ai/tools";
+import type {
+  CreateFlashcardsOutput,
+  CreateQuizOutput,
+  LumoraUIMessage,
+} from "@/lib/ai/tools";
 import ChatInterface, { type PendingPrompt } from "./ChatInterface";
 import MobilePanelDrawer from "./MobilePanelDrawer";
-import QuizPanel from "./QuizPanel";
+import PracticePanel from "./PracticePanel";
 import RecentPromptsPanel from "./RecentPromptsPanel";
 
 // How many recent prompts to keep — an intentionally simple in-memory
@@ -20,22 +24,30 @@ interface GenerateWorkspaceProps {
   initialMessages?: LumoraUIMessage[];
 }
 
-// The three-column Generate layout: Recent Prompts | Chat | Quiz. Chat
+// The three-column Generate layout: Recent Prompts | Chat | Practice. Chat
 // (ChatInterface) is the only piece that owns `useChat` — this component
-// doesn't lift that state up, it just listens to two callbacks
-// (`onPromptSubmitted`, `onQuizGenerated`) and, in the other direction,
-// hands ChatInterface a `pendingPrompt` when a Recent Prompt is selected.
-// See ChatInterface.tsx's prop comments for the full contract.
+// doesn't lift that state up, it just listens to three callbacks
+// (`onPromptSubmitted`, `onQuizGenerated`, `onFlashcardsGenerated`) and, in
+// the other direction, hands ChatInterface a `pendingPrompt` when a Recent
+// Prompt is selected. See ChatInterface.tsx's prop comments for the full
+// contract.
 export default function GenerateWorkspace({
   initialConversationId,
   initialMessages,
 }: GenerateWorkspaceProps) {
   const [recentPrompts, setRecentPrompts] = useState<string[]>([]);
-  const [activeQuiz, setActiveQuiz] = useState<CreateQuizOutput | null>(null);
+  // Newest first, matching Recent Prompts' own ordering convention below —
+  // every quiz/flashcard set the user generates this session gets its own
+  // slot rather than replacing the last one (see PracticePanel.tsx for the
+  // per-activity collapsible-card rendering these feed).
+  const [quizzes, setQuizzes] = useState<CreateQuizOutput[]>([]);
+  const [flashcardSets, setFlashcardSets] = useState<CreateFlashcardsOutput[]>(
+    [],
+  );
   const [pendingPrompt, setPendingPrompt] = useState<PendingPrompt | null>(
     null,
   );
-  const [mobilePanel, setMobilePanel] = useState<"recent" | "quiz" | null>(
+  const [mobilePanel, setMobilePanel] = useState<"recent" | "practice" | null>(
     null,
   );
   const nextPendingPromptIdRef = useRef(0);
@@ -62,8 +74,23 @@ export default function GenerateWorkspace({
   }, []);
 
   const handleQuizGenerated = useCallback((quiz: CreateQuizOutput) => {
-    setActiveQuiz(quiz);
+    // Dedupes by quizId defensively (ChatInterface's own onQuizGenerated
+    // effect already only fires once per id), rather than assuming it'll
+    // never be called twice for the same quiz.
+    setQuizzes((prev) => [quiz, ...prev.filter((q) => q.quizId !== quiz.quizId)]);
   }, []);
+
+  const handleFlashcardsGenerated = useCallback(
+    (flashcards: CreateFlashcardsOutput) => {
+      setFlashcardSets((prev) => [
+        flashcards,
+        ...prev.filter((set) => set.flashcardSetId !== flashcards.flashcardSetId),
+      ]);
+    },
+    [],
+  );
+
+  const hasPracticeContent = quizzes.length > 0 || flashcardSets.length > 0;
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col gap-3 lg:mx-auto lg:max-w-[1400px] lg:grid lg:grid-cols-[240px_minmax(0,1fr)_300px] lg:items-stretch lg:gap-5">
@@ -88,12 +115,12 @@ export default function GenerateWorkspace({
           type="button"
           variant="outline"
           size="sm"
-          onClick={() => setMobilePanel("quiz")}
+          onClick={() => setMobilePanel("practice")}
           className="gap-1.5"
         >
           <SparklesIcon aria-hidden="true" className="size-3.5" />
-          Quiz
-          {activeQuiz && (
+          Practice
+          {hasPracticeContent && (
             <span
               aria-hidden="true"
               className="size-1.5 rounded-full bg-primary"
@@ -120,14 +147,15 @@ export default function GenerateWorkspace({
           onPendingPromptHandled={handlePendingPromptHandled}
           onPromptSubmitted={handlePromptSubmitted}
           onQuizGenerated={handleQuizGenerated}
+          onFlashcardsGenerated={handleFlashcardsGenerated}
         />
       </div>
 
       <aside
-        aria-label="Quiz"
+        aria-label="Practice"
         className="hidden min-h-0 lg:flex lg:flex-col lg:overflow-y-auto lg:rounded-2xl lg:border lg:border-border lg:bg-card lg:p-4"
       >
-        <QuizPanel quiz={activeQuiz} />
+        <PracticePanel quizzes={quizzes} flashcardSets={flashcardSets} />
       </aside>
 
       <MobilePanelDrawer
@@ -143,12 +171,12 @@ export default function GenerateWorkspace({
       </MobilePanelDrawer>
 
       <MobilePanelDrawer
-        open={mobilePanel === "quiz"}
-        onOpenChange={(open) => setMobilePanel(open ? "quiz" : null)}
-        title="Quiz"
+        open={mobilePanel === "practice"}
+        onOpenChange={(open) => setMobilePanel(open ? "practice" : null)}
+        title="Practice"
         side="right"
       >
-        <QuizPanel quiz={activeQuiz} />
+        <PracticePanel quizzes={quizzes} flashcardSets={flashcardSets} />
       </MobilePanelDrawer>
     </div>
   );

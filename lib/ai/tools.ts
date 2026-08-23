@@ -120,6 +120,81 @@ export const createQuizTool = tool({
   },
 });
 
+const flashcardInputSchema = z.object({
+  front: z.string().min(1).max(200),
+  back: z.string().min(1).max(300),
+  explanation: z.string().max(400).optional(),
+});
+
+const createFlashcardsInputSchema = z.object({
+  topic: z.string().min(1).max(80),
+  cards: z.array(flashcardInputSchema).min(1).max(10),
+});
+
+export type CreateFlashcardsInput = z.infer<typeof createFlashcardsInputSchema>;
+
+export interface Flashcard {
+  id: string;
+  front: string;
+  back: string;
+  explanation?: string;
+}
+
+export interface CreateFlashcardsOutput {
+  flashcardSetId: string;
+  topic: string;
+  cards: Flashcard[];
+}
+
+/**
+ * Generates a flashcard set. Mirrors createQuizTool exactly — same
+ * validate-the-model's-own-arguments shape, same normalize/id-assign-only
+ * `execute` (no further model calls), same per-item stable-id scheme keyed
+ * off a freshly minted set id — so Practice's two activity types share one
+ * mental model end to end, not just similar-looking UI.
+ */
+export const createFlashcardsTool = tool({
+  description:
+    "Create a set of flashcards to help the student review and memorize a topic they're studying. Call this whenever the user asks for flashcards, or to review/memorize/study a topic that way. Write 1-10 cards, each with a short front (the question or term) and a back (the answer or definition); an optional brief explanation can add context the back alone doesn't cover.",
+  inputSchema: createFlashcardsInputSchema,
+  execute: async ({ topic, cards }): Promise<CreateFlashcardsOutput> => {
+    const normalizedTopic = topic.trim();
+    if (!normalizedTopic) {
+      throw new Error(
+        "The flashcard topic was empty after trimming whitespace.",
+      );
+    }
+
+    const flashcardSetId = randomUUID();
+
+    const normalizedCards = cards.map((rawCard, index) => {
+      const cardNumber = index + 1;
+      const front = rawCard.front.trim();
+      if (!front) {
+        throw new Error(`Card ${cardNumber} had an empty front after trimming whitespace.`);
+      }
+      const back = rawCard.back.trim();
+      if (!back) {
+        throw new Error(`Card ${cardNumber} ("${front}") had an empty back after trimming whitespace.`);
+      }
+      const explanation = rawCard.explanation?.trim();
+
+      return {
+        id: `${flashcardSetId}-${cardNumber}`,
+        front,
+        back,
+        ...(explanation ? { explanation } : {}),
+      };
+    });
+
+    return {
+      flashcardSetId,
+      topic: normalizedTopic,
+      cards: normalizedCards,
+    };
+  },
+});
+
 /**
  * The set of tools registered with the chat model, keyed by tool name.
  * `streamText`'s `tools` option in `app/api/chat/route.ts` is passed this
@@ -128,6 +203,7 @@ export const createQuizTool = tool({
  */
 export const lumoraTools = {
   createQuiz: createQuizTool,
+  createFlashcards: createFlashcardsTool,
 };
 
 /**

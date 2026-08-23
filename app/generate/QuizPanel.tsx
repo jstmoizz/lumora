@@ -10,30 +10,32 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { CreateQuizOutput } from "@/lib/ai/tools";
+import Disclosure from "./Disclosure";
+import { useAutoCollapseList } from "./useAutoCollapseList";
 
 interface QuizPanelProps {
-  quiz: CreateQuizOutput | null;
+  quizzes: CreateQuizOutput[];
 }
 
-// Lumora's dedicated Quiz experience — the *only* place the interactive
-// quiz (question navigation, answer selection, scoring) renders. See
-// QuizToolPart.tsx for why: the in-chat tool-call UI only ever shows a
-// non-interactive status/notice, specifically so the quiz itself isn't
-// duplicated between the conversation and this panel.
-export default function QuizPanel({ quiz }: QuizPanelProps) {
-  return (
-    <div className="flex h-full flex-col gap-3">
-      <h2 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-        Quiz
-      </h2>
+// The Quizzes half of Practice (see PracticePanel.tsx) — the *only* place
+// the interactive quiz (question navigation, answer selection, scoring)
+// renders. See PracticeToolPart.tsx for why: the in-chat tool-call UI only
+// ever shows a non-interactive status/notice, specifically so the quiz
+// itself isn't duplicated between the conversation and here.
+//
+// Every quiz generated this session gets its own row — requesting another
+// quiz no longer replaces/loses the last one (GenerateWorkspace accumulates
+// `quizzes` instead of holding one `activeQuiz`), and each row is its own
+// Disclosure so a growing study session doesn't turn into a permanently-
+// open wall of questions: only the most recently generated quiz starts
+// expanded, everything older starts collapsed but stays reachable — see
+// useAutoCollapseList.ts (shared with FlashcardsPanel) for exactly how.
+export default function QuizPanel({ quizzes }: QuizPanelProps) {
+  const { isOpen, setOpen } = useAutoCollapseList(quizzes[0]?.quizId);
 
-      {quiz ? (
-        // Remounts (resetting question index/selections/completion)
-        // whenever a *different* quiz arrives, keyed by its own quizId — a
-        // fresh `useState` per quiz is simpler and less error-prone here
-        // than manually resetting three pieces of state in an effect.
-        <ActiveQuiz key={quiz.quizId} quiz={quiz} />
-      ) : (
+  return (
+    <div className="flex h-full flex-col gap-2">
+      {quizzes.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 py-6 text-center">
           <div
             aria-hidden="true"
@@ -45,6 +47,20 @@ export default function QuizPanel({ quiz }: QuizPanelProps) {
           <p className="max-w-[22ch] text-xs text-muted-foreground">
             Ask Lumora to quiz you on a topic and it&apos;ll show up here.
           </p>
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+          {quizzes.map((quiz) => (
+            <Disclosure
+              key={quiz.quizId}
+              open={isOpen(quiz.quizId)}
+              onOpenChange={(open) => setOpen(quiz.quizId, open)}
+              label={quiz.topic}
+              meta={`${quiz.questions.length} question${quiz.questions.length === 1 ? "" : "s"}`}
+            >
+              <ActiveQuiz quiz={quiz} />
+            </Disclosure>
+          ))}
         </div>
       )}
     </div>
@@ -90,7 +106,7 @@ function ActiveQuiz({ quiz }: { quiz: CreateQuizOutput }) {
 
   if (finished) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+      <div className="flex flex-col items-center gap-3 py-4 text-center">
         <div
           aria-hidden="true"
           className="flex size-10 items-center justify-center rounded-full bg-secondary text-foreground"
@@ -124,7 +140,7 @@ function ActiveQuiz({ quiz }: { quiz: CreateQuizOutput }) {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 p-1">
+    <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-2">
         <p className="min-w-0 truncate text-xs font-medium tracking-wide text-muted-foreground uppercase">
           {quiz.topic}
@@ -189,7 +205,7 @@ function ActiveQuiz({ quiz }: { quiz: CreateQuizOutput }) {
         </p>
       )}
 
-      <div className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-3">
+      <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
         <Button
           type="button"
           variant="outline"

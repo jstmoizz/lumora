@@ -163,8 +163,11 @@ export async function POST(req: Request) {
     messages: modelMessages,
     tools: lumoraTools,
     // Default is a single step, which would end the turn right after a
-    // tool call with no room for the model to respond to its result.
-    // Two steps lets it call `createQuiz` and then comment on the result.
+    // tool call with no room for the model to respond to its result. Two
+    // steps lets it call `createQuiz`/`createFlashcards` and then comment
+    // on the result — SYSTEM_PROMPT instructs it to keep that comment to a
+    // short acknowledgment rather than restating the activity it just
+    // generated, since the activity itself renders in the Practice panel.
     stopWhen: stepCountIs(2),
     ...GENERATION_CONFIG,
   });

@@ -43,10 +43,10 @@ interface ClickSparkProps {
   children?: ReactNode;
 }
 
-const SPARK_COUNT = 5;
-const SPARK_SIZE = 7;
-const SPARK_RADIUS = 13;
-const DURATION = 320;
+const SPARK_COUNT = 7;
+const SPARK_SIZE = 9;
+const SPARK_RADIUS = 16;
+const DURATION = 400;
 const LINE_WIDTH = 1.5;
 
 // Dark mode: muted white / indigo. Light mode: muted slate / indigo — a

@@ -1,0 +1,28 @@
+/*
+ * R3F's <Canvas> sets the actual <canvas> DOM element's CSS width/height as
+ * explicit pixel values (three.js's renderer.setSize(w, h) defaults to also
+ * writing canvas.style.width/height, not just the drawing buffer) — driven
+ * by the same debounced measurement that decides when to reallocate the
+ * WebGL framebuffer (see the `resize` prop in ShaderScene.tsx). Inside
+ * HeroScrollShell, this component's true container height animates
+ * continuously while the hero settles from 100svh down to its resting
+ * height — so for the length of that debounce window, the canvas's pixel-
+ * based CSS size is stale relative to its own (ordinary-CSS, instantly
+ * correct) parent, and the debounced resize firing produces a visible pop
+ * right as scrolling settles. That pop, not the render cost itself, is
+ * root cause of the "scrolling back into the hero causes a hitch" report.
+ *
+ * `!important` is required — it's the only way a stylesheet rule can win
+ * over an inline style three.js sets directly on the element. This
+ * decouples the canvas's *visual* size (always 100% of its true parent,
+ * exactly like every other decorative background in this codebase) from
+ * its *drawing-buffer resolution* (still reallocated by R3F on its own,
+ * debounced schedule) — the browser bitmap-scales the existing frame to
+ * fit in between, the same acceptable tradeoff the debounce itself already
+ * relies on for a soft gradient shader. The buffer catching up late is
+ * invisible now that the box it's being stretched into is never wrong.
+ */
+.shader-scene canvas {
+  width: 100% !important;
+  height: 100% !important;
+}

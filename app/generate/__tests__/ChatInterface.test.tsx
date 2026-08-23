@@ -6,6 +6,7 @@ import { makeUseChatReturn, type MockUseChatReturn } from "./useChatMock";
 import {
   assistantMessageWithParts,
   assistantTextMessage,
+  outputAvailableFlashcardsPart,
   outputAvailableQuizPart,
   userMessage,
 } from "./fixtures";
@@ -407,6 +408,66 @@ describe("onQuizGenerated — capturing quiz data for the Quiz panel", () => {
     expect(screen.getByText(/Quiz ready/)).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Chlorophyll" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("onFlashcardsGenerated — capturing flashcard data for Practice", () => {
+  test("fires once with the flashcards output when a tool-createFlashcards part reaches output-available", () => {
+    const onFlashcardsGenerated = vi.fn();
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        messages: [
+          userMessage("Flashcards on photosynthesis please"),
+          assistantMessageWithParts([outputAvailableFlashcardsPart()]),
+        ],
+      }),
+    );
+
+    render(<ChatInterface onFlashcardsGenerated={onFlashcardsGenerated} />);
+
+    expect(onFlashcardsGenerated).toHaveBeenCalledTimes(1);
+    expect(onFlashcardsGenerated).toHaveBeenCalledWith(
+      outputAvailableFlashcardsPart().output,
+    );
+  });
+
+  test("does not fire again for a set it has already reported", () => {
+    const onFlashcardsGenerated = vi.fn();
+    const messages = [
+      userMessage("Flashcards on photosynthesis please"),
+      assistantMessageWithParts([outputAvailableFlashcardsPart()]),
+    ];
+    mockUseChat.mockReturnValue(makeUseChatReturn({ messages }));
+
+    const { rerender } = render(
+      <ChatInterface onFlashcardsGenerated={onFlashcardsGenerated} />,
+    );
+    expect(onFlashcardsGenerated).toHaveBeenCalledTimes(1);
+
+    mockUseChat.mockReturnValue(makeUseChatReturn({ messages }));
+    rerender(<ChatInterface onFlashcardsGenerated={onFlashcardsGenerated} />);
+
+    expect(onFlashcardsGenerated).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not render the flashcards inline — only the ready notice", () => {
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        messages: [
+          userMessage("Flashcards on photosynthesis please"),
+          assistantMessageWithParts([outputAvailableFlashcardsPart()]),
+        ],
+      }),
+    );
+
+    render(<ChatInterface />);
+
+    expect(screen.getByText(/Flashcards ready/)).toBeInTheDocument();
+    expect(
+      screen.queryByText("What pigment captures light in photosynthesis?", {
+        exact: false,
+      }),
     ).not.toBeInTheDocument();
   });
 });

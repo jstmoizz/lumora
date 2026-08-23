@@ -8,7 +8,7 @@ import { useWebglSupported } from "./useWebglSupported";
 // Keeps three/@react-three/* entirely out of the initial Home bundle and
 // out of the server-rendered HTML — same reasoning as Explore's own
 // dynamic(() => import("./components/Scene"), { ssr: false }).
-const Galaxy = dynamic(() => import("./Galaxy"), {
+const ShaderScene = dynamic(() => import("./ShaderScene"), {
   ssr: false,
   loading: () => <AuroraBackground />,
 });
@@ -21,11 +21,17 @@ const Galaxy = dynamic(() => import("./Galaxy"), {
 //   4.4's blurred CSS blobs). It's already a valid static/reduced-motion
 //   treatment on its own (see its `prefers-reduced-motion` handling in
 //   globals.css) using the exact same indigo/violet/pink palette, so it
-//   doubles as Galaxy's fallback with zero new code — see Galaxy.tsx's own
-//   comment on why it doesn't duplicate this reduced-motion/WebGL gating.
-// - otherwise: the restrained Galaxy star field, which becomes the hero's
-//   primary atmosphere (replacing the old flowing-ribbon shader — see
-//   Galaxy.tsx and galaxy.frag.ts for why and how).
+//   doubles as the shader's fallback with zero new code.
+// - otherwise: the GLSL shader, which becomes the hero's primary
+//   atmosphere.
+//
+// (A Galaxy/star-field alternative to this shader was prototyped and
+// committed at 3d86966, then explicitly rolled back by request — "fix the
+// existing shader, do not replace it yet" — so ShaderScene is the active
+// implementation again; see ShaderScene.tsx's own comment for the resize
+// jank fix that prompted this pass. The Galaxy prototype's files were
+// removed from the tree rather than left dead/unreferenced, but remain
+// fully recoverable from that commit if revisited later.)
 //
 // A soft radial scrim sits between whichever background renders and the
 // real hero content, so the heading/description/CTA stay readable without
@@ -39,7 +45,7 @@ export default function HeroShaderBackground() {
 
   return (
     <>
-      {showShader ? <Galaxy /> : <AuroraBackground />}
+      {showShader ? <ShaderScene /> : <AuroraBackground />}
 
       {/*
         A soft, centered fade toward the page's own background color,

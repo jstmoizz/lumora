@@ -1,0 +1,107 @@
+/*
+ * A restrained 3D flip card — the main visual interaction Practice's
+ * Flashcards activity is built around. Front and back are both always in
+ * the DOM (needed so the flip itself has something to rotate between);
+ * `backface-visibility: hidden` is what keeps whichever face is turned
+ * away from ever being visible, and Flashcard.tsx marks it `aria-hidden`
+ * too so it's not exposed to assistive tech either — see that file's own
+ * comment for the accessible-state announcement this pairs with.
+ *
+ * Every color here is an existing Lumora token (--card/--secondary/
+ * --border/--foreground/--muted-foreground/--ring) — nothing new, so this
+ * is automatically correct in both themes without a single dark:/light:
+ * override anywhere in this file.
+ */
+.flashcard-scene {
+  width: 100%;
+  perspective: 1600px;
+}
+
+.flashcard-inner {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 11rem;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transform-style: preserve-3d;
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.flashcard-inner:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+
+.flashcard-inner--flipped {
+  transform: rotateY(180deg);
+}
+
+/* Respects prefers-reduced-motion (media query below) AND an explicit
+ * useReducedMotion() read in Flashcard.tsx (this class) — the class
+ * covers the case where the OS setting changes mid-session, since a CSS
+ * media query alone already reacts live, but keeping both keeps this
+ * component consistent with how every other reduced-motion check in this
+ * codebase is done (a live hook, not just a media query) . */
+.flashcard-inner--instant {
+  transition: none;
+}
+
+.flashcard-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.5rem;
+  overflow-y: auto;
+  border-radius: inherit;
+  border: 1px solid var(--border);
+  padding: 1.25rem 1.5rem;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.flashcard-face--front {
+  background: var(--card);
+  color: var(--foreground);
+}
+
+.flashcard-face--back {
+  background: var(--secondary);
+  color: var(--foreground);
+  transform: rotateY(180deg);
+}
+
+.flashcard-eyebrow {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.flashcard-text {
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.flashcard-explanation {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flashcard-inner {
+    transition: none;
+  }
+}
