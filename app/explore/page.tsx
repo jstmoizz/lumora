@@ -18,7 +18,7 @@ export default async function ExplorePage() {
           <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
             Explore your knowledge space
           </h1>
-          <p className="max-w-md text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="max-w-md text-sm text-muted-foreground">
             Every topic here connects back to Lumora. Select one to see how it
             fits.
           </p>

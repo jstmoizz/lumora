@@ -4,6 +4,17 @@
 
 @source "../node_modules/streamdown/dist/*.js";
 
+/*
+ * Class-based dark mode (Tailwind v4's documented override recipe),
+ * replacing the default `@media (prefers-color-scheme: dark)` variant.
+ * Every existing `dark:` utility across the app keeps working exactly as
+ * before — only *what drives it* changes, from "ask the OS" to "whatever
+ * ThemeScript/ThemeListener decided" (see app/components/theme/), which is
+ * what makes an explicit Light/Dark override (as opposed to just System)
+ * possible at all. `.dark` is applied to <html>.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -48,25 +59,41 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/*
+ * Lumora's existing grayscale identity — no site-wide brand hue, same as
+ * before. Dark mode is reachable via an explicit `.dark` class (for the
+ * Light/Dark/System control) in addition to the OS preference, with
+ * pixel-identical values either way.
+ *
+ * Light mode's surface/border/muted/ring values were nudged apart from
+ * `--background` slightly further than shadcn's defaults (e.g. --card
+ * 1.0->0.99, --border 0.922->0.87, --muted/--secondary/--accent 0.97->
+ * ~0.93-0.94) — dark mode's card/border already sit noticeably apart from
+ * its background, light mode's didn't (0.922 border on a 1.0 background is
+ * a ~9% lightness gap; dark's border-vs-card gap reads much stronger via
+ * alpha over a near-black base). This only widens existing grayscale gaps
+ * for separation/hover-state legibility — no new hue, no darker overall
+ * feel, dark mode's tokens are untouched.
+ */
 :root {
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
+  --card: oklch(0.99 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
   --primary: oklch(0.205 0 0);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
+  --secondary: oklch(0.94 0 0);
   --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
+  --muted: oklch(0.94 0 0);
+  --muted-foreground: oklch(0.53 0 0);
+  --accent: oklch(0.93 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: oklch(0.87 0 0);
+  --input: oklch(0.87 0 0);
+  --ring: oklch(0.62 0 0);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -83,8 +110,51 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+/*
+ * Only the very first paint, before ThemeScript's inline script (see
+ * app/components/theme/ThemeScript.tsx) has run, and only for a visitor
+ * with no stored preference yet — an honest "avoid FOUC where practical"
+ * rather than a guarantee for literally every scenario (a fresh device
+ * before any explicit choice or Settings visit). Removed the instant
+ * ThemeScript runs, so this never fights a resolved `.dark` class. Values
+ * match `.dark` above exactly.
+ */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not(.light):not(.dark) {
     --background: oklch(0.145 0 0);
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.205 0 0);
@@ -99,23 +169,9 @@
     --muted-foreground: oklch(0.708 0 0);
     --accent: oklch(0.269 0 0);
     --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
   }
 }
 
@@ -128,6 +184,37 @@
   }
   html {
     @apply font-sans;
+  }
+
+  /*
+   * A very faint, fixed tonal wash near the top of the viewport (using the
+   * existing neutral --primary token, not a new color), fading into
+   * `--background` well before mid-page. A single, restrained, whole-app
+   * treatment so every page shares the same quiet sense of depth instead
+   * of only the homepage getting a "special" background. `fixed` + `-z-10`
+   * keeps it out of document flow and off the paint-cost path of anything
+   * that scrolls; a flat radial-gradient, not a blur/canvas, so it costs
+   * nothing beyond a single composited layer.
+   */
+  body {
+    position: relative;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -10;
+    pointer-events: none;
+    background: radial-gradient(
+        60rem 32rem at 50% -10%,
+        color-mix(in oklch, var(--primary) 10%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        40rem 24rem at 100% 0%,
+        color-mix(in oklch, var(--primary) 5%, transparent),
+        transparent 65%
+      );
   }
 
   /*
@@ -201,10 +288,18 @@
 }
 
 /*
- * Slow ambient drift for the hero's aurora glow (AuroraBackground.tsx).
- * Each blob shares one keyframe but offsets its duration/delay so the
- * three never move in lockstep. Disabled outright under reduced motion
- * rather than merely shortened, since the effect is purely decorative.
+ * React Bits' BorderGlow, Dock, and Carousel CSS now live colocated with
+ * their components (app/components/home/{BorderGlow,Dock,Carousel}.css,
+ * imported directly by each .tsx) rather than here — this file no longer
+ * duplicates them.
+ */
+
+/*
+ * Slow ambient drift for the hero's aurora glow (AuroraBackground.tsx) and
+ * History's empty-state icon backdrop. Each blob shares one keyframe but
+ * offsets its duration/delay so multiple blobs never move in lockstep.
+ * Disabled outright under reduced motion rather than merely shortened,
+ * since the effect is purely decorative.
  */
 @layer utilities {
   .aurora-blob {

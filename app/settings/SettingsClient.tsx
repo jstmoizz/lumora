@@ -23,6 +23,12 @@ import {
   type UpdatableSettingField,
 } from "@/lib/supabase/settings-actions";
 import type { UserSettings } from "@/lib/supabase/settings";
+import {
+  applyThemePreference,
+  getStoredThemePreference,
+  isThemePreference,
+  type ThemePreference,
+} from "../components/theme/theme";
 
 export interface SettingsAccount {
   email: string;
@@ -39,9 +45,10 @@ function prefersReducedMotion() {
 }
 
 // A settings section: small icon badge + title/description, then whatever
-// preview content the section wants. Kept local to this file rather than
-// extracted to app/components/settings/ since it's a thin, single-use
-// wrapper around the section cards that all live on this one page.
+// preview content the section wants. No border/background/radius of its
+// own — sections live inside one shared panel (see SettingsClient's return
+// below) and are separated by that panel's `divide-y`, not by stacking
+// five identical cards on top of each other.
 function SettingsSection({
   sectionRef,
   icon: Icon,
@@ -56,19 +63,14 @@ function SettingsSection({
   children: ReactNode;
 }) {
   return (
-    <section
-      ref={sectionRef}
-      className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-card p-5 dark:border-zinc-800 sm:p-6"
-    >
+    <section ref={sectionRef} className="flex flex-col gap-4 px-5 py-6 sm:px-6">
       <div className="flex items-start gap-3">
         <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-foreground">
           <Icon aria-hidden="true" className="size-4" />
         </div>
         <div className="flex flex-col gap-1">
           <h2 className="text-base font-semibold text-foreground">{title}</h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            {description}
-          </p>
+          <p className="text-sm text-muted-foreground">{description}</p>
         </div>
       </div>
       <div className="flex flex-col gap-3">{children}</div>
@@ -78,12 +80,10 @@ function SettingsSection({
 
 // A real, persisted study preference: label on top, a small group of
 // mutually-exclusive options below — same "outline/secondary + CheckIcon"
-// button-group pattern the Appearance section already established for
-// "choose one of several options", just wired up for real here instead of
-// disabled. Clicking an option calls the `updateUserSetting` Server Action
-// directly; there's no separate "Save" button; a still-empty
-// isPending/error/justSaved cycle is the only feedback, which is why it's
-// its own component rather than an inline "coming soon" row.
+// button-group pattern the Appearance row below uses, just for free-text
+// preferences instead of the fixed theme enum. Clicking an option calls the
+// `updateUserSetting` Server Action directly; there's no separate "Save"
+// button, an isPending/error/justSaved cycle is the only feedback.
 function StudyPreferenceRow({
   label,
   field,
@@ -128,7 +128,7 @@ function StudyPreferenceRow({
   const statusId = `${field}-status`;
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-transparent px-3 py-2.5 transition-colors duration-150 ease-out hover:border-zinc-200 hover:bg-muted/40 dark:hover:border-zinc-800">
+    <div className="flex flex-col gap-2 rounded-lg border border-transparent px-3 py-2.5 transition-colors duration-150 ease-out hover:border-border hover:bg-muted/40">
       <span className="text-sm font-medium text-foreground">{label}</span>
       <div
         role="group"
@@ -147,7 +147,7 @@ function StudyPreferenceRow({
               disabled={isPending}
               aria-current={isSelected ? "true" : undefined}
               onClick={() => handleSelect(option)}
-              className={isSelected ? "border-foreground/15" : undefined}
+              className={isSelected ? "border-primary/30" : undefined}
             >
               {option}
               {isSelected && (
@@ -159,13 +159,123 @@ function StudyPreferenceRow({
       </div>
       <div id={statusId} className="min-h-4 text-xs">
         {isPending && (
-          <span className="text-zinc-500 dark:text-zinc-500">Saving…</span>
+          <span className="text-muted-foreground">Saving…</span>
         )}
         {!isPending && error && (
           <span
             role="alert"
-            className="flex items-center gap-1 text-red-600 dark:text-red-400"
+            className="flex items-center gap-1 text-destructive"
           >
+            <CircleAlertIcon aria-hidden="true" className="size-3.5" />
+            {error}
+          </span>
+        )}
+        {!isPending && !error && justSaved && (
+          <span
+            role="status"
+            className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400"
+          >
+            <CheckIcon aria-hidden="true" className="size-3.5" />
+            Saved
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const THEME_OPTIONS: { value: ThemePreference; label: string; icon: typeof MonitorIcon }[] = [
+  { value: "system", label: "System", icon: MonitorIcon },
+  { value: "light", label: "Light", icon: SunIcon },
+  { value: "dark", label: "Dark", icon: MoonIcon },
+];
+
+// The now-functional Appearance control. Applies instantly and locally
+// (`applyThemePreference`, no round trip needed to see the change) and
+// separately persists to `user_settings.theme` for cross-device durability
+// — the two are independent, so a slow or failed save never blocks the
+// theme from actually changing on screen. See theme.ts's own comment and
+// the Phase 4.4 report for the full source-of-truth rationale.
+function AppearanceRow({ initialTheme }: { initialTheme: ThemePreference }) {
+  const [current, setCurrent] = useState<ThemePreference>(initialTheme);
+  const [error, setError] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  // Reconciles the durable (database) value into this browser's local
+  // storage/DOM once, on mount — the one place DB and localStorage are
+  // compared. `current` (React state) already starts equal to
+  // `initialTheme`, so there's nothing to update there; this effect only
+  // ever needs to synchronize the *external* systems (localStorage, the
+  // `.dark`/`.light` class) to match, exactly the kind of effect body
+  // React's docs recommend. If they already agree (the common case: same
+  // browser, returning visit) this is a no-op; if they disagree (a fresh
+  // browser that already has an account-level preference from elsewhere)
+  // the database wins, since it represents the most recent explicit choice.
+  useEffect(() => {
+    if (getStoredThemePreference() !== initialTheme) {
+      applyThemePreference(initialTheme);
+    }
+    // Only ever meant to run once, against the value Settings loaded with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!justSaved) return;
+    const timeout = setTimeout(() => setJustSaved(false), SAVED_CONFIRMATION_MS);
+    return () => clearTimeout(timeout);
+  }, [justSaved]);
+
+  function handleSelect(option: ThemePreference) {
+    if (option === current || isPending) return;
+    setError(null);
+    setJustSaved(false);
+    applyThemePreference(option);
+    setCurrent(option);
+    startTransition(async () => {
+      const result = await updateUserSetting("theme", option);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      setJustSaved(true);
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div
+        role="group"
+        aria-label="Appearance"
+        aria-describedby={error || justSaved ? "theme-status" : undefined}
+        className="flex flex-wrap gap-2"
+      >
+        {THEME_OPTIONS.map(({ value, label, icon: Icon }) => {
+          const isSelected = value === current;
+          return (
+            <Button
+              key={value}
+              type="button"
+              variant={isSelected ? "secondary" : "outline"}
+              size="sm"
+              disabled={isPending}
+              aria-current={isSelected ? "true" : undefined}
+              onClick={() => handleSelect(value)}
+              className={isSelected ? "border-primary/30" : undefined}
+            >
+              <Icon aria-hidden="true" className="size-3.5" />
+              {label}
+              {isSelected && (
+                <CheckIcon aria-hidden="true" className="size-3.5" />
+              )}
+            </Button>
+          );
+        })}
+      </div>
+      <div id="theme-status" className="min-h-4 text-xs">
+        {isPending && <span className="text-muted-foreground">Saving…</span>}
+        {!isPending && error && (
+          <span role="alert" className="flex items-center gap-1 text-destructive">
             <CircleAlertIcon aria-hidden="true" className="size-3.5" />
             {error}
           </span>
@@ -191,9 +301,7 @@ function StudyPreferenceRow({
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-4 py-2">
-      <span className="text-sm text-zinc-500 dark:text-zinc-400">
-        {label}
-      </span>
+      <span className="text-sm text-muted-foreground">{label}</span>
       <span className="text-sm font-medium text-foreground">{value}</span>
     </div>
   );
@@ -269,6 +377,11 @@ export default function SettingsClient({
     { scope: pageRef, dependencies: [] },
   );
 
+  const initialTheme: ThemePreference =
+    preferences && isThemePreference(preferences.theme)
+      ? preferences.theme
+      : "system";
+
   return (
     <main ref={pageRef} className="flex flex-1 justify-center px-6 py-16 sm:py-20">
       <div className="flex w-full max-w-2xl flex-col gap-10">
@@ -279,15 +392,12 @@ export default function SettingsClient({
           >
             Settings
           </h1>
-          <p
-            ref={subtitleRef}
-            className="text-sm text-zinc-500 dark:text-zinc-400"
-          >
+          <p ref={subtitleRef} className="text-sm text-muted-foreground">
             Customize your Lumora experience.
           </p>
         </div>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col divide-y divide-border rounded-xl border border-border bg-card">
           {account && (
             <SettingsSection
               sectionRef={accountRef}
@@ -295,10 +405,10 @@ export default function SettingsClient({
               title="Account"
               description="The account you're signed in with."
             >
-              <div className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
+              <div className="flex flex-col divide-y divide-border">
                 <InfoRow label="Email" value={account.email} />
                 <div className="flex items-center justify-between gap-4 py-2">
-                  <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                  <span className="text-sm text-muted-foreground">
                     Status
                   </span>
                   <span
@@ -324,36 +434,7 @@ export default function SettingsClient({
             title="Appearance"
             description="Choose how Lumora looks across your device."
           >
-            <div
-              role="group"
-              aria-label="Appearance (preview only)"
-              className="flex flex-wrap gap-2"
-            >
-              <Button type="button" variant="outline" size="sm" disabled>
-                <MonitorIcon aria-hidden="true" className="size-3.5" />
-                System
-              </Button>
-              <Button type="button" variant="outline" size="sm" disabled>
-                <SunIcon aria-hidden="true" className="size-3.5" />
-                Light
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled
-                aria-current="true"
-                className="border-foreground/15"
-              >
-                <MoonIcon aria-hidden="true" className="size-3.5" />
-                Dark
-                <CheckIcon aria-hidden="true" className="size-3.5" />
-              </Button>
-            </div>
-            <p className="text-xs text-zinc-500 dark:text-zinc-500">
-              Appearance controls are coming soon. Lumora currently uses its
-              dark, primary appearance.
-            </p>
+            <AppearanceRow initialTheme={initialTheme} />
           </SettingsSection>
 
           <SettingsSection
@@ -384,7 +465,7 @@ export default function SettingsClient({
                 />
               </>
             ) : (
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              <p className="text-sm text-muted-foreground">
                 Couldn&apos;t load your study preferences. Try refreshing the
                 page.
               </p>
@@ -397,7 +478,7 @@ export default function SettingsClient({
             title="AI & Model"
             description="Information about the model powering your study sessions."
           >
-            <div className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
+            <div className="flex flex-col divide-y divide-border">
               <InfoRow label="Provider" value="Groq" />
               <InfoRow label="Model" value={CHAT_MODEL_ID} />
             </div>
@@ -409,11 +490,11 @@ export default function SettingsClient({
             title="About Lumora"
             description="A little more about the product."
           >
-            <p className="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
+            <p className="text-sm leading-relaxed text-muted-foreground">
               Lumora is an AI-powered study companion designed to make
               learning clearer, more focused, and more personal.
             </p>
-            <p className="text-xs text-zinc-500 dark:text-zinc-500">
+            <p className="text-xs text-muted-foreground">
               Lumora &middot; Study smarter.
             </p>
           </SettingsSection>

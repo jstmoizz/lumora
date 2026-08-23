@@ -20,7 +20,7 @@ export default async function VerifyPage({
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             Email verified
           </h1>
-          <p className="max-w-xs text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="max-w-xs text-sm text-muted-foreground">
             Your account is confirmed and you&apos;re signed in.
           </p>
         </div>
@@ -37,19 +37,19 @@ export default async function VerifyPage({
   if (status === "error") {
     return (
       <div className="flex flex-col items-center gap-4 text-center">
-        <div className="flex size-12 items-center justify-center rounded-full bg-red-500/10 text-red-600 dark:bg-red-500/15 dark:text-red-400">
+        <div className="flex size-12 items-center justify-center rounded-full bg-destructive/10 text-destructive">
           <CircleAlertIcon aria-hidden="true" className="size-6" />
         </div>
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             Link invalid or expired
           </h1>
-          <p className="max-w-xs text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="max-w-xs text-sm text-muted-foreground">
             This verification link is invalid, expired, or has already been
             used. If you&apos;re already verified, you can sign in directly.
           </p>
         </div>
-        <div className="w-full rounded-2xl border border-zinc-200 bg-card p-6 dark:border-zinc-800">
+        <div className="w-full rounded-xl border border-border bg-card p-6">
           <ResendVerificationForm defaultEmail={email} />
         </div>
         <Link
@@ -71,7 +71,7 @@ export default async function VerifyPage({
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           Check your email
         </h1>
-        <p className="max-w-xs text-sm text-zinc-500 dark:text-zinc-400">
+        <p className="max-w-xs text-sm text-muted-foreground">
           {email ? (
             <>
               We sent a verification link to{" "}
@@ -83,12 +83,12 @@ export default async function VerifyPage({
           Click it to activate your account.
         </p>
       </div>
-      <div className="w-full rounded-2xl border border-zinc-200 bg-card p-6 dark:border-zinc-800">
+      <div className="w-full rounded-xl border border-border bg-card p-6">
         <ResendVerificationForm defaultEmail={email} />
       </div>
       <Link
         href="/login"
-        className="text-sm text-zinc-500 underline-offset-4 hover:text-foreground hover:underline dark:text-zinc-400"
+        className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
       >
         Back to login
       </Link>

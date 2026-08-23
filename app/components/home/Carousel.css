@@ -1,0 +1,150 @@
+/*
+ * React Bits' Carousel (https://reactbits.dev/components/carousel), ported
+ * verbatim from the official source (DavidHDev/react-bits,
+ * src/ts-default/Components/Carousel) for Home's "How it works" section.
+ * The drag/spring/perspective/loop mechanics (Carousel.tsx) are untouched;
+ * every color below was adapted from the demo's hardcoded #555/#0d0d0d/
+ * #fff/#333 to Lumora's existing semantic tokens, and both the container
+ * and each item now carry a translucent + backdrop-blur "glass" surface
+ * (the demo had no glass treatment at all — a plain #0d0d0d fill) to match
+ * the same language as Home's feature cards and Dock.
+ */
+.carousel-container {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2xl);
+  padding: 16px;
+  background: color-mix(in oklch, var(--card) 55%, transparent);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 12px 32px -16px rgba(0, 0, 0, 0.25);
+  --outer-r: var(--radius-2xl);
+  --p-distance: 12px;
+}
+
+.carousel-track {
+  display: flex;
+}
+
+.carousel-item {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--outer-r) - var(--p-distance));
+  background-color: color-mix(in oklch, var(--card) 70%, transparent);
+  backdrop-filter: blur(8px);
+  overflow: hidden;
+  cursor: grab;
+}
+
+.carousel-item:active {
+  cursor: grabbing;
+}
+
+.carousel-container.round {
+  border: 1px solid var(--border);
+}
+
+.carousel-item.round {
+  background-color: color-mix(in oklch, var(--card) 70%, transparent);
+  position: relative;
+  bottom: 0.1em;
+  border: 1px solid var(--border);
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+.carousel-item-header.round {
+  padding: 0;
+  margin: 0;
+}
+
+.carousel-indicators-container.round {
+  position: absolute;
+  z-index: 2;
+  bottom: 3em;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.carousel-item-header {
+  margin-bottom: 16px;
+  padding: 20px;
+  padding-top: 20px;
+}
+
+.carousel-icon-container {
+  display: flex;
+  height: 28px;
+  width: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background-color: var(--secondary);
+}
+
+.carousel-icon {
+  height: 16px;
+  width: 16px;
+  color: var(--foreground);
+}
+
+.carousel-item-content {
+  padding: 20px;
+  padding-bottom: 20px;
+}
+
+.carousel-item-title {
+  margin-bottom: 4px;
+  font-weight: 600;
+  font-size: 18px;
+  color: var(--foreground);
+}
+
+.carousel-item-description {
+  font-size: 14px;
+  color: var(--muted-foreground);
+}
+
+.carousel-indicators-container {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+}
+
+.carousel-indicators {
+  margin-top: 16px;
+  display: flex;
+  width: 150px;
+  justify-content: space-between;
+  padding: 0 32px;
+}
+
+.carousel-indicator {
+  height: 8px;
+  width: 8px;
+  border: none;
+  padding: 0;
+  appearance: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background-color 150ms;
+}
+
+.carousel-indicator:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.carousel-indicator.active {
+  background-color: var(--primary);
+}
+
+.carousel-indicator.inactive {
+  background-color: var(--border);
+}

@@ -89,7 +89,7 @@ export default function AboutPage() {
           </h1>
           <p
             ref={subtitleRef}
-            className="max-w-md text-sm text-zinc-500 dark:text-zinc-400"
+            className="max-w-md text-sm text-muted-foreground"
           >
             Lumora is an AI-powered study companion, built to help you learn
             with focus and clarity.
@@ -98,9 +98,9 @@ export default function AboutPage() {
 
         <div
           ref={introCardRef}
-          className="w-full rounded-2xl border border-zinc-200 bg-card p-6 dark:border-zinc-800 sm:p-8"
+          className="w-full rounded-xl border border-border bg-card p-6 sm:p-8"
         >
-          <p className="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm leading-relaxed text-muted-foreground">
             Lumora is built around a simple idea: understanding something
             well takes more than reading it once. Ask a question, work
             through a concept, or check what you&apos;ve learned — Lumora
@@ -113,7 +113,7 @@ export default function AboutPage() {
           {PRINCIPLES.map(({ icon: Icon, title, description }) => (
             <div
               key={title}
-              className="flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-card p-5 transition-colors duration-150 ease-out hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700"
+              className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5 transition-colors duration-150 ease-out hover:border-primary/40"
             >
               <div className="flex size-9 items-center justify-center rounded-lg bg-secondary text-foreground">
                 <Icon aria-hidden="true" className="size-4" />
@@ -121,9 +121,7 @@ export default function AboutPage() {
               <h2 className="text-sm font-semibold text-foreground">
                 {title}
               </h2>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                {description}
-              </p>
+              <p className="text-sm text-muted-foreground">{description}</p>
             </div>
           ))}
         </div>
@@ -136,7 +134,7 @@ export default function AboutPage() {
           >
             <Link href="/generate">Start studying</Link>
           </Button>
-          <p className="text-xs text-zinc-500 dark:text-zinc-500">
+          <p className="text-xs text-muted-foreground">
             Lumora &middot; Study smarter.
           </p>
         </div>

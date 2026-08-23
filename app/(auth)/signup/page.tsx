@@ -15,16 +15,16 @@ export default async function SignupPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           Create your account
         </h1>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+        <p className="text-sm text-muted-foreground">
           Start studying with Lumora.
         </p>
       </div>
 
-      <div className="rounded-2xl border border-zinc-200 bg-card p-6 dark:border-zinc-800">
+      <div className="rounded-xl border border-border bg-card p-6">
         <SignupForm />
       </div>
 
-      <p className="text-center text-sm text-zinc-500 dark:text-zinc-400">
+      <p className="text-center text-sm text-muted-foreground">
         Already have an account?{" "}
         <Link
           href="/login"

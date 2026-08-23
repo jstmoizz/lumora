@@ -10,6 +10,8 @@ import { updateUserSetting } from "@/lib/supabase/settings-actions";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.localStorage.clear();
+  document.documentElement.classList.remove("light", "dark");
 });
 
 const preferences = {
@@ -147,6 +149,66 @@ describe("SettingsClient — Study Preferences", () => {
     expect(group.querySelector('[aria-current="true"]')).toHaveTextContent(
       "Clear and concise",
     );
+  });
+
+  test("renders the persisted theme as the active Appearance option", () => {
+    render(<SettingsClient account={null} preferences={preferences} />);
+
+    const group = screen.getByRole("group", { name: "Appearance" });
+    expect(group.querySelector('[aria-current="true"]')).toHaveTextContent(
+      "System",
+    );
+  });
+
+  test("selecting a theme applies it instantly and persists it", async () => {
+    vi.mocked(updateUserSetting).mockResolvedValue({ error: null });
+    render(<SettingsClient account={null} preferences={preferences} />);
+
+    const group = screen.getByRole("group", { name: "Appearance" });
+    fireEvent.click(within(group).getByRole("button", { name: "Dark" }));
+
+    // Applied locally without waiting on the server round trip.
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(updateUserSetting).toHaveBeenCalledWith("theme", "dark");
+
+    await waitFor(() => {
+      expect(
+        within(group.parentElement!).getByText("Saved"),
+      ).toBeInTheDocument();
+    });
+    expect(group.querySelector('[aria-current="true"]')).toHaveTextContent(
+      "Dark",
+    );
+  });
+
+  test("a failed theme save keeps the theme applied but shows an error", async () => {
+    vi.mocked(updateUserSetting).mockResolvedValue({
+      error: "Couldn't save that change. Please try again.",
+    });
+    render(<SettingsClient account={null} preferences={preferences} />);
+
+    const group = screen.getByRole("group", { name: "Appearance" });
+    fireEvent.click(within(group).getByRole("button", { name: "Light" }));
+
+    expect(document.documentElement.classList.contains("light")).toBe(true);
+    await waitFor(() => {
+      expect(
+        within(group.parentElement!).getByText(
+          "Couldn't save that change. Please try again.",
+        ),
+      ).toBeInTheDocument();
+    });
+  });
+
+  test("reconciles a mismatched local theme to the persisted value on load", () => {
+    window.localStorage.setItem("lumora-theme", "dark");
+    document.documentElement.classList.add("dark");
+
+    render(<SettingsClient account={null} preferences={preferences} />);
+
+    // preferences.theme is "system" — the persisted value should win over
+    // whatever this browser had stored locally.
+    expect(window.localStorage.getItem("lumora-theme")).toBe("system");
   });
 
   test("each preference row is independent", async () => {

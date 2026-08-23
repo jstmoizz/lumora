@@ -69,7 +69,7 @@ export default function QuizToolPart({ part }: { part: CreateQuizUIPart }) {
 function QuizSkeleton() {
   return (
     <div
-      className="flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-card p-5 dark:border-zinc-800"
+      className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5"
       role="status"
       aria-label="Preparing a quiz"
     >
@@ -89,7 +89,7 @@ function QuizSkeleton() {
           />
         </div>
       </div>
-      <p className="text-xs text-zinc-500 dark:text-zinc-500">
+      <p className="text-xs text-muted-foreground">
         Lumora is preparing a quiz&hellip;
       </p>
     </div>
@@ -98,14 +98,14 @@ function QuizSkeleton() {
 
 function QuizBuilding({ topic }: { topic: string }) {
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-card p-5 dark:border-zinc-800">
+    <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-5">
       <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-foreground">
         <SparklesIcon
           aria-hidden="true"
           className="size-4 motion-safe:animate-pulse"
         />
       </div>
-      <p className="text-sm text-zinc-500 dark:text-zinc-400">
+      <p className="text-sm text-muted-foreground">
         Building your quiz on{" "}
         <span className="font-medium text-foreground">{topic}</span>
         &hellip;
@@ -116,16 +116,16 @@ function QuizBuilding({ topic }: { topic: string }) {
 
 function QuizErrorCard({ message }: { message: string }) {
   return (
-    <div className="flex flex-col gap-2 rounded-2xl border border-red-500/20 bg-red-500/5 p-5 dark:border-red-500/25 dark:bg-red-500/10">
+    <div className="flex flex-col gap-2 rounded-xl border border-destructive/20 bg-destructive/5 p-5">
       <div className="flex items-center gap-2">
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-red-500/10 text-red-600 dark:bg-red-500/15 dark:text-red-400">
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
           <CircleAlertIcon aria-hidden="true" className="size-4" />
         </div>
         <p className="text-sm font-semibold text-foreground">
           Couldn&apos;t build this quiz
         </p>
       </div>
-      <p className="text-sm text-zinc-500 dark:text-zinc-400">{message}</p>
+      <p className="text-sm text-muted-foreground">{message}</p>
     </div>
   );
 }
@@ -137,13 +137,13 @@ function QuizCard({ quiz }: { quiz: CreateQuizOutput }) {
   const [selections, setSelections] = useState<Record<string, number>>({});
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-card p-5 dark:border-zinc-800">
+    <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5">
       <div className="flex items-center gap-2">
         <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-foreground">
           <SparklesIcon aria-hidden="true" className="size-4" />
         </div>
         <div className="flex flex-col">
-          <p className="text-xs font-medium tracking-wide text-zinc-500 uppercase dark:text-zinc-500">
+          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
             Quiz
           </p>
           {/*

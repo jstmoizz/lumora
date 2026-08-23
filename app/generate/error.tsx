@@ -49,9 +49,9 @@ export default function GenerateError({
     <main className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 py-6 sm:px-6">
       <div
         ref={cardRef}
-        className="flex w-full max-w-sm flex-col items-center gap-3 rounded-2xl border border-zinc-200 bg-card p-6 text-center dark:border-zinc-800"
+        className="flex w-full max-w-sm flex-col items-center gap-3 rounded-xl border border-border bg-card p-6 text-center"
       >
-        <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-red-500/10 text-red-600 dark:bg-red-500/15 dark:text-red-400">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
           <CircleAlertIcon aria-hidden="true" className="size-5" />
         </div>
         {/*
@@ -63,7 +63,7 @@ export default function GenerateError({
           <h1 className="text-lg font-semibold tracking-tight text-foreground">
             Something went wrong
           </h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm text-muted-foreground">
             We couldn&apos;t load this part of Lumora. Try again, or refresh
             the page if it keeps happening.
           </p>

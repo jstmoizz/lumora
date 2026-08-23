@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import NavBar from "./components/NavBar";
+import ThemeListener from "./components/theme/ThemeListener";
+import ThemeScript from "./components/theme/ThemeScript";
 import { getServerUser } from "@/lib/supabase/server";
 import "./globals.css";
 
@@ -32,19 +34,35 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
-      <body className="h-full flex flex-col">
-        <header className="flex flex-col items-center justify-between gap-3 border-b border-zinc-200 px-6 py-4 sm:flex-row dark:border-zinc-800">
-          <Link
-            href="/"
-            className="text-lg font-semibold tracking-tight text-foreground"
-          >
-            Lumora
-          </Link>
-          <NavBar userEmail={user?.email ?? null} />
+      <head>
+        {/*
+          Must run before <body> paints — see ThemeScript's own comment.
+          suppressHydrationWarning above covers the `class` attribute this
+          adds to <html> before React ever gets to it.
+        */}
+        <ThemeScript />
+      </head>
+      <body className="flex h-full flex-col">
+        <ThemeListener />
+        <header className="sticky top-0 z-40 border-b border-border/60 bg-background/85 backdrop-blur-md">
+          <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-3 px-6 py-4 sm:flex-row">
+            <Link
+              href="/"
+              className="flex items-center gap-2 text-lg font-semibold tracking-tight text-foreground"
+            >
+              <span
+                aria-hidden="true"
+                className="size-1.5 rounded-full bg-primary"
+              />
+              Lumora
+            </Link>
+            <NavBar userEmail={user?.email ?? null} />
+          </div>
         </header>
         {children}
-        <footer className="flex items-center justify-center border-t border-zinc-200 px-6 py-4 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-500">
+        <footer className="border-t border-border/60 px-6 py-6 text-center text-sm text-muted-foreground">
           &copy; {new Date().getFullYear()} Lumora
         </footer>
       </body>

@@ -1,21 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import { useRef } from "react";
+import { useRouter } from "next/navigation";
+import { useRef, useState, useSyncExternalStore } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import {
   ArrowRightIcon,
   BrainIcon,
+  CompassIcon,
   HelpCircleIcon,
+  HistoryIcon,
+  HomeIcon,
+  InfoIcon,
   ListChecksIcon,
   MessageCircleQuestionIcon,
   RepeatIcon,
+  SettingsIcon,
   TrophyIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import AuroraBackground from "./components/home/AuroraBackground";
+import BorderGlow from "./components/home/BorderGlow";
+import Carousel, { type CarouselItem } from "./components/home/Carousel";
+import Dock, { type DockItemData } from "./components/home/Dock";
 
 if (typeof window !== "undefined") {
   gsap.registerPlugin(ScrollTrigger);
@@ -25,6 +34,38 @@ function prefersReducedMotion() {
   if (typeof window === "undefined") return true;
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
+
+// Carousel's `baseWidth` is a plain pixel prop rendered straight into an
+// inline style, so a naive useState(lazyInitializer) here would compute
+// 520 on the server and (correctly) something narrower on the client —
+// but React's hydration doesn't force-patch a mismatched inline style, so
+// the server's 520px would silently stick past hydration on any screen
+// narrower than that, overflowing the viewport. useSyncExternalStore is
+// the documented fix for exactly this "value only knowable on the
+// client" shape (same pattern already used in ChatInterface.tsx for its
+// example prompts): the server snapshot (520, matching SSR) is used for
+// hydration itself, then React re-checks the real snapshot immediately
+// after and reconciles it as an ordinary update — no manual effect,
+// no mismatch.
+function subscribeToResize(callback: () => void) {
+  window.addEventListener("resize", callback);
+  return () => window.removeEventListener("resize", callback);
+}
+function getCarouselWidthSnapshot() {
+  return Math.min(340, window.innerWidth - 48);
+}
+function getServerCarouselWidth() {
+  return 340;
+}
+
+// Darker variants of Aurora's own hues (AuroraBackground.tsx uses
+// indigo-500/violet-500/pink-400 — no blue). Deliberately one step darker
+// (the 600-weight) than the hero blobs themselves: at the blobs' own
+// lightness the glow read as a pale wash, especially in light mode. Same
+// hue family, richer tone, in both themes (the glow doesn't switch per
+// theme, so darkening it here fixes both at once).
+const GLOW_COLORS = ["#4f46e5", "#db2777", "#7c3aed"];
+const GLOW_HSL = "262 83 58"; // violet-600, for BorderGlow's outer edge-light halo
 
 const FEATURES = [
   {
@@ -45,25 +86,29 @@ const FEATURES = [
   },
 ];
 
-const STEPS = [
+const STEPS: CarouselItem[] = [
   {
-    icon: HelpCircleIcon,
+    id: 1,
+    icon: <HelpCircleIcon className="carousel-icon" />,
     title: "Ask",
     description: "Bring a question, a topic, or a whole set of notes.",
   },
   {
-    icon: BrainIcon,
+    id: 2,
+    icon: <BrainIcon className="carousel-icon" />,
     title: "Understand",
     description: "Get explanations that break it down until it clicks.",
   },
   {
-    icon: TrophyIcon,
+    id: 3,
+    icon: <TrophyIcon className="carousel-icon" />,
     title: "Master",
     description: "Quiz yourself and reinforce it until it sticks.",
   },
 ];
 
 export default function Home() {
+  const router = useRouter();
   const heroRef = useRef<HTMLDivElement>(null);
   const heroEyebrowRef = useRef<HTMLSpanElement>(null);
   const heroHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -71,7 +116,25 @@ export default function Home() {
   const heroCtaRef = useRef<HTMLDivElement>(null);
 
   const featuresRef = useRef<HTMLDivElement>(null);
-  const stepsRef = useRef<HTMLDivElement>(null);
+
+  // Read via a lazy initializer rather than an effect: Dock's
+  // `magnification`/`distance` props need a stable value at render time,
+  // and computing it here (once, on first render) avoids a setState-in-
+  // effect render cascade for what's really just derived initial state.
+  // `typeof window === "undefined"` (the server render pass) defaults to
+  // "reduced", matching the `prefersReducedMotion()` helper's own default
+  // elsewhere on this page.
+  const [reducedMotion] = useState(() =>
+    typeof window === "undefined"
+      ? true
+      : window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+
+  const carouselWidth = useSyncExternalStore(
+    subscribeToResize,
+    getCarouselWidthSnapshot,
+    getServerCarouselWidth,
+  );
 
   // One-time cascading entrance for the hero (eyebrow -> heading ->
   // description -> CTA), same pattern as the Generate page's empty state.
@@ -121,155 +184,190 @@ export default function Home() {
     { scope: featuresRef, dependencies: [] },
   );
 
-  // "How it works" steps animate in on scroll, same once-only trigger.
-  useGSAP(
-    () => {
-      if (prefersReducedMotion() || !stepsRef.current) return;
-      const steps = Array.from(stepsRef.current.children);
-
-      gsap.from(steps, {
-        opacity: 0,
-        y: 24,
-        duration: 0.5,
-        ease: "power2.out",
-        stagger: 0.15,
-        clearProps: "all",
-        scrollTrigger: {
-          trigger: stepsRef.current,
-          start: "top 80%",
-          once: true,
-        },
-      });
-    },
-    { scope: stepsRef, dependencies: [] },
-  );
+  const dockItems: DockItemData[] = [
+    { icon: <HomeIcon className="size-5" />, label: "Home", onClick: () => router.push("/") },
+    { icon: <MessageCircleQuestionIcon className="size-5" />, label: "Generate", onClick: () => router.push("/generate") },
+    { icon: <CompassIcon className="size-5" />, label: "Explore", onClick: () => router.push("/explore") },
+    { icon: <HistoryIcon className="size-5" />, label: "History", onClick: () => router.push("/history") },
+    { icon: <InfoIcon className="size-5" />, label: "About", onClick: () => router.push("/about") },
+    { icon: <SettingsIcon className="size-5" />, label: "Settings", onClick: () => router.push("/settings") },
+  ];
 
   return (
-    <main className="flex flex-1 flex-col">
-      {/* Hero */}
-      <section
-        ref={heroRef}
-        className="relative flex flex-col items-center justify-center gap-6 overflow-hidden px-6 py-28 text-center sm:py-36"
-      >
-        <AuroraBackground />
-
-        <span
-          ref={heroEyebrowRef}
-          className="rounded-full border border-zinc-300 px-4 py-1 text-xs font-medium tracking-wide text-zinc-500 uppercase dark:border-zinc-700 dark:text-zinc-400"
+    <>
+      {/*
+        `overflow-x-clip` (not -hidden — clip never creates a scroll
+        container, so it can't disable `position: sticky` for anything)
+        contains BorderGlow's outer-glow bleed: `.edge-light` deliberately
+        extends past its card/button via a negative inset to render the
+        halo, which pushes a few pixels past the true viewport edge for
+        any card sitting flush against it. `<main>` is a sibling of the
+        root layout's sticky header, not an ancestor of it, so this can't
+        affect the header's own stickiness either way.
+      */}
+      <main className="flex flex-1 flex-col overflow-x-clip pb-24">
+        {/* Hero */}
+        <section
+          ref={heroRef}
+          className="relative flex flex-col items-center justify-center gap-6 overflow-hidden px-6 py-28 text-center sm:py-36"
         >
-          AI Study Companion
-        </span>
+          <AuroraBackground />
 
-        <h1
-          ref={heroHeadingRef}
-          className="max-w-3xl text-5xl font-semibold tracking-tight text-balance text-foreground sm:text-6xl"
-        >
-          Learn smarter with Lumora.
-        </h1>
-
-        <p
-          ref={heroDescriptionRef}
-          className="max-w-xl text-lg text-balance text-zinc-600 dark:text-zinc-400"
-        >
-          Lumora is an AI study companion that explains concepts clearly,
-          quizzes you on what you&apos;ve learned, and helps it stick.
-        </p>
-
-        <div ref={heroCtaRef}>
-          <Button
-            asChild
-            size="lg"
-            className="h-12 gap-2 rounded-xl px-6 text-base font-semibold transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]"
+          <span
+            ref={heroEyebrowRef}
+            className="rounded-full border border-border px-4 py-1 text-xs font-medium tracking-wide text-muted-foreground uppercase"
           >
-            <Link href="/generate">
-              Start studying
-              <ArrowRightIcon aria-hidden="true" className="size-4" />
-            </Link>
-          </Button>
-        </div>
-      </section>
+            AI Study Companion
+          </span>
 
-      {/* Feature cards */}
-      <section className="px-6 py-20 sm:py-24">
-        <div className="mx-auto flex max-w-5xl flex-col gap-10">
-          <h2 className="text-center text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
-            Everything you need to study smarter
-          </h2>
+          <h1
+            ref={heroHeadingRef}
+            className="max-w-3xl text-5xl font-semibold tracking-tight text-balance text-foreground sm:text-6xl"
+          >
+            Learn smarter with Lumora.
+          </h1>
 
-          <div ref={featuresRef} className="grid gap-4 sm:grid-cols-3">
-            {FEATURES.map(({ icon: Icon, title, description }) => (
-              <div
-                key={title}
-                className="group flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-card p-6 transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-1 hover:scale-[1.02] hover:border-zinc-300 hover:shadow-lg dark:border-zinc-800 dark:hover:border-zinc-600 dark:hover:shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_12px_32px_-8px_rgba(0,0,0,0.5)]"
+          <p
+            ref={heroDescriptionRef}
+            className="max-w-xl text-lg text-balance text-muted-foreground"
+          >
+            Lumora is an AI study companion that explains concepts clearly,
+            quizzes you on what you&apos;ve learned, and helps it stick.
+          </p>
+
+          <div ref={heroCtaRef}>
+            <BorderGlow
+              className="group/cta border-glow-button"
+              edgeSensitivity={15}
+              glowColor={GLOW_HSL}
+              backgroundColor="transparent"
+              borderRadius={14}
+              glowRadius={18}
+              glowIntensity={0.65}
+              coneSpread={30}
+              animated={false}
+              colors={GLOW_COLORS}
+              fillOpacity={0.2}
+            >
+              <Button
+                asChild
+                size="lg"
+                className="h-12 gap-2 rounded-xl px-6 text-base font-semibold motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-[1.03] active:scale-[0.98]"
               >
-                <div className="flex size-10 items-center justify-center rounded-xl bg-secondary text-foreground transition-colors duration-200 group-hover:bg-primary group-hover:text-primary-foreground">
-                  <Icon aria-hidden="true" className="size-5" />
-                </div>
-                <h3 className="text-base font-semibold text-foreground">
-                  {title}
-                </h3>
-                <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                  {description}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* How it works */}
-      <section className="px-6 py-20 sm:py-24">
-        <div className="mx-auto flex max-w-4xl flex-col gap-10">
-          <h2 className="text-center text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
-            How it works
-          </h2>
-
-          <div ref={stepsRef} className="grid gap-8 sm:grid-cols-3">
-            {STEPS.map(({ icon: Icon, title, description }, index) => (
-              <div
-                key={title}
-                className="relative flex flex-col items-center gap-3 text-center"
-              >
-                {index < STEPS.length - 1 && (
+                <Link href="/generate">
+                  Start studying
                   <ArrowRightIcon
                     aria-hidden="true"
-                    className="absolute top-6 -right-4 hidden size-5 text-zinc-300 sm:block dark:text-zinc-700"
+                    className="size-4 motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:group-hover/cta:translate-x-0.5"
                   />
-                )}
-                <div className="flex size-12 items-center justify-center rounded-full border border-zinc-200 bg-card text-foreground dark:border-zinc-800">
-                  <Icon aria-hidden="true" className="size-5" />
-                </div>
-                <h3 className="text-base font-semibold text-foreground">
-                  {title}
-                </h3>
-                <p className="max-w-56 text-sm text-zinc-500 dark:text-zinc-400">
-                  {description}
-                </p>
-              </div>
-            ))}
+                </Link>
+              </Button>
+            </BorderGlow>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* Final CTA */}
-      <section className="flex flex-col items-center gap-4 px-6 py-24 text-center sm:py-28">
-        <h2 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-          Ready to study?
-        </h2>
-        <p className="max-w-md text-lg text-zinc-600 dark:text-zinc-400">
-          Your next breakthrough is one question away.
-        </p>
-        <Button
-          asChild
-          size="lg"
-          className="mt-2 h-12 gap-2 rounded-xl px-6 text-base font-semibold transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]"
-        >
-          <Link href="/generate">
-            Start studying
-            <ArrowRightIcon aria-hidden="true" className="size-4" />
-          </Link>
-        </Button>
-      </section>
-    </main>
+        {/* Feature cards */}
+        <section className="px-6 py-20 sm:py-24">
+          <div className="mx-auto flex max-w-5xl flex-col gap-10">
+            <h2 className="text-center text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+              Everything you need to study smarter
+            </h2>
+
+            <div ref={featuresRef} className="grid gap-4 sm:grid-cols-3">
+              {FEATURES.map(({ icon: Icon, title, description }) => (
+                <BorderGlow
+                  key={title}
+                  className="group backdrop-blur-md"
+                  edgeSensitivity={30}
+                  glowColor={GLOW_HSL}
+                  backgroundColor="color-mix(in oklch, var(--card) 72%, transparent)"
+                  borderRadius={20}
+                  glowRadius={32}
+                  glowIntensity={0.65}
+                  coneSpread={25}
+                  animated={false}
+                  colors={GLOW_COLORS}
+                  fillOpacity={0.22}
+                >
+                  <div className="flex flex-col gap-3 p-6">
+                    <div className="flex size-10 items-center justify-center rounded-lg bg-secondary text-foreground transition-colors duration-200 group-hover:bg-primary group-hover:text-primary-foreground">
+                      <Icon aria-hidden="true" className="size-5" />
+                    </div>
+                    <h3 className="text-base font-semibold text-foreground">
+                      {title}
+                    </h3>
+                    <p className="text-sm text-muted-foreground">
+                      {description}
+                    </p>
+                  </div>
+                </BorderGlow>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* How it works */}
+        <section className="px-6 py-20 sm:py-24">
+          <div className="mx-auto flex max-w-4xl flex-col items-center gap-10">
+            <h2 className="text-center text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+              How it works
+            </h2>
+
+            <Carousel
+              items={STEPS}
+              baseWidth={carouselWidth}
+              autoplay={false}
+              pauseOnHover
+              loop
+              round
+            />
+          </div>
+        </section>
+
+        {/* Final CTA */}
+        <section className="flex flex-col items-center gap-4 px-6 py-24 text-center sm:py-28">
+          <h2 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+            Ready to study?
+          </h2>
+          <p className="max-w-md text-lg text-muted-foreground">
+            Your next breakthrough is one question away.
+          </p>
+          <BorderGlow
+            className="group/cta border-glow-button mt-2"
+            edgeSensitivity={15}
+            glowColor={GLOW_HSL}
+            backgroundColor="transparent"
+            borderRadius={14}
+            glowRadius={18}
+            glowIntensity={0.65}
+            coneSpread={30}
+            animated={false}
+            colors={GLOW_COLORS}
+            fillOpacity={0.2}
+          >
+            <Button
+              asChild
+              size="lg"
+              className="h-12 gap-2 rounded-xl px-6 text-base font-semibold motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-[1.03] active:scale-[0.98]"
+            >
+              <Link href="/generate">
+                Start studying
+                <ArrowRightIcon
+                  aria-hidden="true"
+                  className="size-4 motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:group-hover/cta:translate-x-0.5"
+                />
+              </Link>
+            </Button>
+          </BorderGlow>
+        </section>
+      </main>
+      <Dock
+        items={dockItems}
+        baseItemSize={44}
+        panelHeight={56}
+        magnification={reducedMotion ? 44 : 66}
+        distance={reducedMotion ? 0 : 150}
+      />
+    </>
   );
 }

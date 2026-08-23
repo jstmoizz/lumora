@@ -49,10 +49,16 @@ function ConversationRow({
   return (
     <Link
       href={`/generate?conversationId=${conversation.id}`}
-      className="flex items-center justify-between gap-4 rounded-xl border border-zinc-200 bg-card px-4 py-3 transition-colors duration-150 ease-out hover:border-zinc-300 hover:bg-muted/40 dark:border-zinc-800 dark:hover:border-zinc-700"
+      className="group flex items-center justify-between gap-4 rounded-lg border border-transparent px-4 py-3 transition-colors duration-150 ease-out hover:border-border hover:bg-card"
     >
-      <span className="min-w-0 truncate text-sm font-medium text-foreground">
-        {conversation.title}
+      <span className="flex min-w-0 items-center gap-3">
+        <span
+          aria-hidden="true"
+          className="size-1 shrink-0 rounded-full bg-border transition-colors duration-150 ease-out group-hover:bg-primary"
+        />
+        <span className="min-w-0 truncate text-sm font-medium text-foreground">
+          {conversation.title}
+        </span>
       </span>
       {/*
         The formatted string depends on the current time, not just
@@ -64,7 +70,7 @@ function ConversationRow({
       */}
       <span
         suppressHydrationWarning
-        className="shrink-0 text-xs text-zinc-500 dark:text-zinc-500"
+        className="shrink-0 text-xs text-muted-foreground"
       >
         {formatRelativeTime(conversation.updatedAt)}
       </span>
@@ -142,7 +148,7 @@ export default function HistoryClient({
         </h1>
         <p
           ref={subtitleRef}
-          className="text-sm text-zinc-500 dark:text-zinc-400"
+          className="text-sm text-muted-foreground"
         >
           Your study sessions, all in one place.
         </p>
@@ -156,15 +162,15 @@ export default function HistoryClient({
           >
             {/*
               Small, static-position ambient glow behind the icon, reusing
-              the same aurora-drift keyframes and indigo tone as Home's
-              AuroraBackground for a consistent (but much smaller/calmer)
-              ambient treatment. Purely decorative.
+              the same aurora-drift keyframes as the global atmosphere for a
+              consistent (but much smaller/calmer) ambient treatment.
+              Purely decorative.
             */}
             <div
               aria-hidden="true"
-              className="aurora-blob absolute inset-0 rounded-full bg-indigo-500/15 blur-2xl dark:bg-indigo-500/20"
+              className="aurora-blob absolute inset-0 rounded-full bg-primary/15 blur-2xl"
             />
-            <div className="relative z-10 flex size-16 items-center justify-center rounded-2xl border border-zinc-200 bg-card text-foreground dark:border-zinc-800">
+            <div className="relative z-10 flex size-16 items-center justify-center rounded-xl border border-border bg-card text-foreground">
               <HistoryIcon aria-hidden="true" className="size-7" />
             </div>
           </div>
@@ -178,7 +184,7 @@ export default function HistoryClient({
             </h2>
             <p
               ref={emptyDescriptionRef}
-              className="max-w-sm text-sm text-zinc-500 dark:text-zinc-400"
+              className="max-w-sm text-sm text-muted-foreground"
             >
               Once you start studying with Lumora, your sessions will show up
               here so you can pick up where you left off.

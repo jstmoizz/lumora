@@ -8,16 +8,16 @@ export default function ForgotPasswordPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           Forgot password
         </h1>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+        <p className="text-sm text-muted-foreground">
           Enter your email and we&apos;ll send you a reset link.
         </p>
       </div>
 
-      <div className="rounded-2xl border border-zinc-200 bg-card p-6 dark:border-zinc-800">
+      <div className="rounded-xl border border-border bg-card p-6">
         <ForgotPasswordForm />
       </div>
 
-      <p className="text-center text-sm text-zinc-500 dark:text-zinc-400">
+      <p className="text-center text-sm text-muted-foreground">
         Remembered it after all?{" "}
         <Link
           href="/login"

@@ -20,13 +20,20 @@ import { createClient, getServerUser } from "./server";
 export type UpdatableSettingField =
   | "response_style"
   | "explanation_depth"
-  | "learning_focus";
+  | "learning_focus"
+  | "theme";
 
 const UPDATABLE_FIELDS: readonly UpdatableSettingField[] = [
   "response_style",
   "explanation_depth",
   "learning_focus",
+  "theme",
 ];
+
+// `theme` is a fixed enum, not free text — validated against this exact
+// set rather than the generic length check below (see the branch in
+// updateUserSetting).
+const THEME_VALUES = ["system", "light", "dark"] as const;
 
 const MAX_VALUE_LENGTH = 100;
 
@@ -44,6 +51,12 @@ export async function updateUserSetting(
 
   const trimmedValue = value.trim();
   if (!trimmedValue || trimmedValue.length > MAX_VALUE_LENGTH) {
+    return { error: "That value isn't valid." };
+  }
+  if (
+    field === "theme" &&
+    !THEME_VALUES.includes(trimmedValue as (typeof THEME_VALUES)[number])
+  ) {
     return { error: "That value isn't valid." };
   }
 
@@ -64,7 +77,9 @@ export async function updateUserSetting(
       ? { response_style: trimmedValue }
       : field === "explanation_depth"
         ? { explanation_depth: trimmedValue }
-        : { learning_focus: trimmedValue };
+        : field === "learning_focus"
+          ? { learning_focus: trimmedValue }
+          : { theme: trimmedValue as "system" | "light" | "dark" };
 
   // `upsert` rather than a plain `update`: the row is created up front by
   // `getOrCreateUserSettings()` on page load, so this should always be an

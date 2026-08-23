@@ -17,10 +17,10 @@ export default function NavBar({ userEmail }: { userEmail: string | null }) {
   const pathname = usePathname();
 
   return (
-    <div className="flex flex-col items-center gap-3 sm:flex-row sm:gap-6">
+    <div className="flex flex-col items-center gap-3 sm:flex-row sm:gap-5">
       <nav
         aria-label="Main"
-        className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2"
+        className="flex flex-wrap items-center justify-center gap-x-1 gap-y-1"
       >
         {links.map(({ href, label }) => {
           const isActive = pathname === href;
@@ -31,11 +31,24 @@ export default function NavBar({ userEmail }: { userEmail: string | null }) {
               aria-current={isActive ? "page" : undefined}
               className={
                 isActive
-                  ? "text-sm font-semibold text-foreground"
-                  : "text-sm text-zinc-500 transition-colors hover:text-foreground dark:text-zinc-400"
+                  ? "rounded-md px-2.5 py-1.5 text-sm font-medium text-foreground"
+                  : "rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-foreground"
               }
             >
-              {label}
+              {/*
+                A short underline anchored to the accent color, not a
+                filled pill or a bare font-weight/color swap — reads as
+                "you are here" at a glance without looking like a button.
+              */}
+              <span
+                className={
+                  isActive
+                    ? "border-b-2 border-primary pb-0.5"
+                    : "border-b-2 border-transparent pb-0.5"
+                }
+              >
+                {label}
+              </span>
             </Link>
           );
         })}
@@ -43,12 +56,12 @@ export default function NavBar({ userEmail }: { userEmail: string | null }) {
 
       <div
         aria-label="Account"
-        className="flex items-center gap-3 border-t border-zinc-200 pt-3 text-sm sm:border-t-0 sm:border-l sm:pt-0 sm:pl-6 dark:border-zinc-800"
+        className="flex items-center gap-3 border-t border-border pt-3 text-sm sm:border-t-0 sm:border-l sm:pt-0 sm:pl-5"
       >
         {userEmail ? (
           <>
             <span
-              className="max-w-32 truncate text-zinc-500 dark:text-zinc-400"
+              className="max-w-32 truncate text-muted-foreground"
               title={userEmail}
             >
               {userEmail}
@@ -56,7 +69,7 @@ export default function NavBar({ userEmail }: { userEmail: string | null }) {
             <form action={signOut}>
               <button
                 type="submit"
-                className="text-zinc-500 transition-colors hover:text-foreground dark:text-zinc-400"
+                className="text-muted-foreground transition-colors duration-150 ease-out hover:text-foreground"
               >
                 Log out
               </button>
@@ -66,11 +79,14 @@ export default function NavBar({ userEmail }: { userEmail: string | null }) {
           <>
             <Link
               href="/login"
-              className="text-zinc-500 transition-colors hover:text-foreground dark:text-zinc-400"
+              className="text-muted-foreground transition-colors duration-150 ease-out hover:text-foreground"
             >
               Log in
             </Link>
-            <Link href="/signup" className="font-semibold text-foreground">
+            <Link
+              href="/signup"
+              className="font-medium text-foreground transition-opacity duration-150 ease-out hover:opacity-80"
+            >
               Sign up
             </Link>
           </>

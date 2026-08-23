@@ -21,16 +21,16 @@ export default async function LoginPage({
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           Log in
         </h1>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+        <p className="text-sm text-muted-foreground">
           Welcome back to Lumora.
         </p>
       </div>
 
-      <div className="rounded-2xl border border-zinc-200 bg-card p-6 dark:border-zinc-800">
+      <div className="rounded-xl border border-border bg-card p-6">
         <LoginForm redirectTo={redirectTo} />
       </div>
 
-      <p className="text-center text-sm text-zinc-500 dark:text-zinc-400">
+      <p className="text-center text-sm text-muted-foreground">
         Don&apos;t have an account?{" "}
         <Link
           href="/signup"

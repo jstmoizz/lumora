@@ -30,7 +30,7 @@ export default function TopicControls({
                 className={
                   isSelected
                     ? "rounded-lg border border-indigo-400/60 bg-indigo-500/10 px-3 py-1.5 text-sm font-medium text-foreground"
-                    : "rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-500 transition-colors hover:border-zinc-400 hover:text-foreground dark:border-zinc-700 dark:hover:border-zinc-600"
+                    : "rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
                 }
               >
                 {node.label}

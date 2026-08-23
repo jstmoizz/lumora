@@ -124,21 +124,19 @@ function ChatErrorCard({
   const { title, description } = getChatErrorCopy(error);
 
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-red-500/20 bg-red-500/5 p-4 dark:border-red-500/25 dark:bg-red-500/10">
+    <div className="flex flex-col gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4">
       {/*
         This card appears mid-conversation with no navigation to cue a
         screen reader user that something changed — `role="alert"` announces
         it the moment it mounts, same as it would be seen appear visually.
       */}
       <div role="alert" className="flex items-center gap-2.5">
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-red-500/10 text-red-600 dark:bg-red-500/15 dark:text-red-400">
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
           <CircleAlertIcon aria-hidden="true" className="size-4" />
         </div>
         <div className="flex flex-col">
           <p className="text-sm font-semibold text-foreground">{title}</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            {description}
-          </p>
+          <p className="text-xs text-muted-foreground">{description}</p>
         </div>
       </div>
       <Button
@@ -449,7 +447,7 @@ export default function ChatInterface({
   const composer = (
     <form
       onSubmit={handleSubmit}
-      className="flex w-full items-end gap-2 rounded-2xl border border-zinc-300 bg-background p-2 shadow-sm transition-[border-color,box-shadow] duration-200 ease-out focus-within:border-ring focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/30 dark:border-zinc-700"
+      className="flex w-full items-end gap-2 rounded-xl border border-border bg-card p-2 shadow-sm transition-[border-color,box-shadow] duration-200 ease-out focus-within:border-ring focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/30"
     >
       <textarea
         value={input}
@@ -459,7 +457,7 @@ export default function ChatInterface({
         placeholder="Ask anything..."
         rows={1}
         aria-label="Message"
-        className="max-h-40 flex-1 resize-none bg-transparent px-2 py-2.5 text-base leading-6 text-foreground placeholder:text-zinc-500 focus:outline-none disabled:opacity-50 dark:placeholder:text-zinc-500"
+        className="max-h-40 flex-1 resize-none bg-transparent px-2 py-2.5 text-base leading-6 text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
       />
       {isGenerating ? (
         <Button
@@ -498,7 +496,7 @@ export default function ChatInterface({
             </h2>
             <p
               ref={emptyDescriptionRef}
-              className="max-w-sm text-sm text-zinc-500 dark:text-zinc-400"
+              className="max-w-sm text-sm text-muted-foreground"
             >
               Ask a question, work through a concept, or try one of these to
               get started.
@@ -528,7 +526,7 @@ export default function ChatInterface({
                 size="sm"
                 disabled={status !== "ready"}
                 onClick={() => handleExampleClick(prompt)}
-                className="rounded-full border-zinc-300 font-normal text-zinc-600 transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03] dark:border-zinc-700 dark:text-zinc-400"
+                className="rounded-full border-border font-normal text-muted-foreground transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]"
               >
                 {prompt}
               </Button>
@@ -598,7 +596,7 @@ export default function ChatInterface({
                           {isPending ? (
                             <span
                               role="status"
-                              className="text-zinc-500 motion-safe:animate-pulse dark:text-zinc-500"
+                              className="text-muted-foreground motion-safe:animate-pulse"
                             >
                               Thinking&hellip;
                             </span>
@@ -647,7 +645,7 @@ export default function ChatInterface({
                   <div className="flex justify-start">
                     <span
                       role="status"
-                      className="text-[15px] text-zinc-500 motion-safe:animate-pulse dark:text-zinc-500"
+                      className="text-[15px] text-muted-foreground motion-safe:animate-pulse"
                     >
                       Thinking&hellip;
                     </span>
@@ -678,7 +676,7 @@ export default function ChatInterface({
                   variant="secondary"
                   size="sm"
                   onClick={handleJumpToLatest}
-                  className="pointer-events-auto gap-1 rounded-full border border-zinc-200 shadow-md transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03] dark:border-zinc-700"
+                  className="pointer-events-auto gap-1 rounded-full border border-border shadow-md transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]"
                 >
                   <ArrowDownIcon aria-hidden="true" className="size-3.5" />
                   Jump to latest

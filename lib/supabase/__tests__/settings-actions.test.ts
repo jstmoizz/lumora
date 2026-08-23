@@ -105,4 +105,30 @@ describe("updateUserSetting", () => {
     expect(result).toEqual({ error: "That value isn't valid." });
     expect(fromMock).not.toHaveBeenCalled();
   });
+
+  describe("theme (Phase 4.4)", () => {
+    test("accepts each of the three valid theme values", async () => {
+      for (const value of ["system", "light", "dark"]) {
+        const result = await updateUserSetting("theme", value);
+        expect(result).toEqual({ error: null });
+      }
+    });
+
+    test("updates exactly the theme column", async () => {
+      await updateUserSetting("theme", "dark");
+
+      const [payload] = upsertMock.mock.calls[0];
+      expect(payload).toMatchObject({ theme: "dark" });
+      expect(payload).not.toHaveProperty("response_style");
+      expect(payload).not.toHaveProperty("explanation_depth");
+      expect(payload).not.toHaveProperty("learning_focus");
+    });
+
+    test("rejects a value outside the fixed theme enum, unlike the free-text preference fields", async () => {
+      const result = await updateUserSetting("theme", "solarized");
+
+      expect(result).toEqual({ error: "That value isn't valid." });
+      expect(fromMock).not.toHaveBeenCalled();
+    });
+  });
 });
