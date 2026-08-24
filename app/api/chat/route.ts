@@ -40,13 +40,10 @@ function extractText(message: LumoraUIMessage): string | null {
   return text || null;
 }
 
-// The minimal shape every message must have before it's safe to pass to
-// titleFromMessage()/extractText() (both do `message.parts.filter(...)`) or
-// convertToModelMessages() below. `messages` being an array is checked
-// separately, before this; this only guards each element within it — a
-// `null` entry, or an object with no `parts` array, would otherwise throw
-// deep inside title/extraction before ever reaching the try/catch already
-// wrapping the model-message conversion.
+// Guards each message element (the array itself is already checked) before
+// title/extraction or convertToModelMessages() run `.parts.filter(...)` on
+// it — a null entry or missing `parts` would otherwise throw deep inside
+// those, past the try/catch around model-message conversion.
 function hasValidMessageShape(message: unknown): message is LumoraUIMessage {
   return (
     typeof message === "object" &&
@@ -157,21 +154,13 @@ export async function POST(req: Request) {
     conversationId = created.id;
   }
 
-  // Persist the user's turn as soon as it's accepted, independent of
-  // whether the assistant's response below succeeds. Skipped on a retry of
-  // an *established* conversation (`trigger: "regenerate-message"` with a
-  // known `requestedConversationId`), since that resends the same
-  // already-persisted user message rather than a new one — the AI SDK sets
-  // this field itself, not something the client crafts by hand.
-  //
-  // A retry of the very *first* message of a session is different: if that
-  // original request failed before the client ever learned a
-  // conversationId (a network failure, a missing-API-key 500, etc.), the
-  // client has nothing to send back as `conversationId` — so this request
-  // lands here as `regenerate-message` with none. Nothing could already be
-  // persisted in that case (the failed attempt never got far enough to
-  // insert it), so it has to be treated like an initial submission or the
-  // user's message is silently lost.
+  // Persisted independent of whether the assistant's response below
+  // succeeds. Skipped on a retry of an *established* conversation
+  // (`trigger: "regenerate-message"` with a known conversationId) — that
+  // resends an already-persisted message, not a new one. A retry of the
+  // very first message is different: if the original request failed before
+  // the client ever learned a conversationId, nothing was persisted yet, so
+  // it must still be treated as an initial submission or the message is lost.
   const newUserMessage = messages[messages.length - 1];
   const isRetryOfEstablishedConversation =
     trigger === "regenerate-message" && requestedConversationId !== null;
@@ -207,21 +196,13 @@ export async function POST(req: Request) {
     // short acknowledgment rather than restating the activity it just
     // generated, since the activity itself renders in the Resources panel.
     stopWhen: stepCountIs(2),
-    // Groq's inference is fast enough that, without this, a whole response
-    // can arrive across only one or two real network chunks — technically
-    // "streamed" but visually indistinguishable from the message just
-    // appearing all at once. This re-chunks the model's raw output into a
-    // steady word-by-word stream on the server, independent of how bursty
-    // the underlying provider chunks actually are, so the client always
-    // sees a genuine progressive reveal (and its own auto-scroll-while-
-    // streaming behavior has something to follow).
+    // Groq is fast enough that a whole response can arrive in one or two
+    // real network chunks — this re-chunks it into a steady word-by-word
+    // stream so the client sees a genuine progressive reveal.
     //
-    // Deliberately `smoothTextStream` (ours), not the AI SDK's own
-    // `smoothStream` — that one paces `reasoning-delta` chunks at the same
-    // rate as text, and reasoning models (qwen3.6-27b included) emit a full
-    // "thinking" trace before every step. ChatInterface.tsx never renders
-    // reasoning parts, so smoothing them only adds wall-clock latency to a
-    // stream nobody sees; this variant passes reasoning straight through.
+    // Ours, not the AI SDK's `smoothStream`: that paces `reasoning-delta`
+    // chunks at the same rate as text, but ChatInterface.tsx never renders
+    // reasoning parts, so smoothing them would just add latency nobody sees.
     experimental_transform: smoothTextStream({ chunking: "word", delayInMs: 20 }),
     ...GENERATION_CONFIG,
   });
@@ -234,12 +215,9 @@ export async function POST(req: Request) {
     // (never replaced), so this doesn't need repeating below.
     messageMetadata: ({ part }) =>
       part.type === "start" ? { conversationId } : undefined,
-    // Runs once the assistant's turn is done — success, error, or abort.
-    // (`onEnd`, not the deprecated `onFinish` alias.) Persistence
-    // deliberately happens around the existing stream rather than
-    // replacing it, so the client keeps seeing tokens the moment they're
-    // generated; only once nothing more will change do we write the
-    // finished message to the database.
+    // Runs once the assistant's turn is done (success, error, or abort) —
+    // `onEnd`, not the deprecated `onFinish`. Persistence happens after the
+    // stream, not in place of it, so the client keeps seeing tokens live.
     onEnd: async ({ responseMessage, isAborted, finishReason }) => {
       // No `finish` event ever arrived (the model call itself failed) or
       // the user hit Stop — either way, there's no complete assistant turn
@@ -260,12 +238,10 @@ export async function POST(req: Request) {
         return;
       }
 
-      // Feeds Explore's knowledge graph: every quiz/flashcard set (or direct
-      // addKnowledgeTopic call) the model actually made this turn becomes
-      // (or updates) a node. Wrapped in try/catch on top of
-      // upsertKnowledgeNodeActivity's own internal error handling (belt-and-
-      // suspenders) — a failed write here must never affect the chat
-      // response already streamed to the client.
+      // Feeds Explore's knowledge graph: each quiz/flashcard/addKnowledgeTopic
+      // call this turn becomes (or updates) a node. try/catch on top of
+      // upsertKnowledgeNodeActivity's own handling — a failed write here must
+      // never affect the chat response already streamed to the client.
       for (const part of responseMessage.parts) {
         try {
           if (part.type === "tool-createQuiz" && part.state === "output-available") {

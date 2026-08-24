@@ -140,10 +140,10 @@ export default function Scene({ nodes, selectedNodeId, onSelect }: SceneProps) {
         // +1.8x margin matches CameraRig's own portrait aspect-fit cap, so a
         // tall/narrow window's pulled-back overview never bumps this ceiling.
         maxDistance={MAX_OVERVIEW_DISTANCE * 1.8 + 6}
-        // Free look: nearly the full vertical range (not the old ±45°
-        // band), so orbiting can look down over the top of the graph or up
-        // from underneath it. Kept just short of the exact poles (0/π) —
-        // OrbitControls' own up-vector handling degenerates there.
+        // Free look: nearly the full vertical range, so orbiting can look
+        // down over the top of the graph or up from underneath it. Kept
+        // just short of the exact poles (0/π) — OrbitControls' own
+        // up-vector handling degenerates there.
         minPolarAngle={0.05}
         maxPolarAngle={Math.PI - 0.05}
       />

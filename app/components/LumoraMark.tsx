@@ -3,20 +3,13 @@ import { cn } from "@/lib/utils";
 import "./LumoraMark.css";
 
 /**
- * Lumora's icon mark: a small five-node network/flower glyph — a center
- * node shared by two curved petals, each bounded by an outer arc and an
- * inner curve that passes through center. Colors come entirely from
- * LumoraMark.css's custom properties (indigo -> violet -> pink, the app's
- * existing accent progression — see that file's comment), so this component
- * itself
- * never branches on theme; `.dark` in globals.css does that, the same way
- * every other themed color in the app works. Those properties are defined
- * on the `.lumora-brand` ancestor (the header's Link), not here, so the
- * "Lumora" wordmark text next to it can share them too — this must render
- * inside a `.lumora-brand` element to pick up the accent colors.
+ * Lumora's icon mark: a five-node network/flower glyph. Colors come from
+ * LumoraMark.css's custom properties (indigo -> violet -> pink), defined on
+ * the `.lumora-brand` ancestor so the wordmark text next to it can share
+ * them too — this must render inside a `.lumora-brand` element.
  *
  * `useId()` keeps the gradient's id collision-safe if this ever renders
- * more than once on a page (today it only appears once, in the header).
+ * more than once on a page.
  */
 export default function LumoraMark({ className }: { className?: string }) {
   const gradientId = useId();

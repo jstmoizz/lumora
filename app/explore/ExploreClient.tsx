@@ -51,21 +51,14 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
   // Remembers whichever HTML control triggered a selection (a 3D-node click
   // has none) so "Back to overview" can return focus to it.
   const lastTriggerRef = useRef<HTMLElement | null>(null);
-  // A stable, always-rendered focus target for the one case
-  // `lastTriggerRef` can't serve: deleting the currently selected node. That
-  // trigger is about to disappear from the DOM once `router.refresh()`
-  // commits the updated graph, so focusing it would land nowhere. This graph
-  // region exists regardless of node count and regardless of which
-  // topic-list layout (desktop wheel vs. mobile chip row) is currently
-  // visible, so it's usable no matter what's rendered.
+  // Fallback focus target for the one case lastTriggerRef can't serve:
+  // deleting the currently selected node, whose trigger disappears from the
+  // DOM once `router.refresh()` commits. Always rendered regardless of node
+  // count or topic-list layout.
   const graphRegionRef = useRef<HTMLDivElement>(null);
-  // `isPending` is derived React state — it doesn't update synchronously
-  // within the same event-handling pass, so two Confirm clicks fired before
-  // React commits a render (a fast double-click, or one landing during the
-  // dialog's own close animation — see ConfirmDialog's `confirmDisabled`
-  // comment) can both read it as still `false` and both start a delete. This
-  // ref closes that window; it's an additional synchronous layer on top of
-  // `isPending`, not a replacement for it — same pattern as
+  // `isPending` doesn't update synchronously within the same event-handling
+  // pass, so two Confirm clicks before React commits a render can both
+  // start a delete. This ref closes that window — same pattern as
   // `isSubmittingRef` in ChatInterface.tsx.
   const isDeletingRef = useRef(false);
 
@@ -139,24 +132,16 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
       try {
         const result = await deleteKnowledgeNode(id);
         if (!result.ok) {
-          // Deletion failed server-side — leave the node selected and the
-          // graph untouched, exactly as if the delete had never been
-          // requested, and surface why instead of quietly refreshing as if
-          // it had succeeded (the previous behavior: closing the dialog and
-          // refreshing regardless of the result made a failed delete look
-          // successful until the "deleted" node reappeared with no
-          // explanation). The dialog itself already closed on confirm (see
-          // ConfirmDialog), so the user's natural retry path is just
-          // clicking Delete Topic again.
+          // Deletion failed server-side — leave the node and graph
+          // untouched and surface why, instead of refreshing as if it had
+          // succeeded. Retry path is just clicking Delete Topic again.
           setDeleteError("Couldn't delete this topic. Please try again.");
           return;
         }
         if (selectedNodeId === id) {
-          // Deliberately not `handleBack()` here: that focuses
-          // `lastTriggerRef`, but the trigger that opened this node is the
-          // very thing that just got deleted — it won't survive the
-          // `router.refresh()` below. Close the panel the same way, but
-          // send focus to the stable graph region instead.
+          // Not `handleBack()`: its trigger is the node that just got
+          // deleted and won't survive `router.refresh()` below — send
+          // focus to the stable graph region instead.
           setSelectedNodeId(null);
           setPreviewLabel(null);
           lastTriggerRef.current = null;
@@ -204,12 +189,10 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
         </p>
       </div>
 
-      {/* A fixed-height row, vertically centered in whatever's left (not
-          flex-1 stretching all the way down) — the graph and the list both
-          used to reach right down to the bottom of the viewport, where the
-          floating dock sits, so on shorter windows the list's lower items
-          ended up visually behind/under it. min(560px,100%) keeps that
-          height on tall viewports but still shrinks to fit short ones. */}
+      {/* Fixed-height row, vertically centered — the graph/list used to
+          stretch to the viewport bottom, where the floating dock sits,
+          hiding the list's lower items on short windows. min(560px,100%)
+          caps that height while still shrinking to fit. */}
       <div className="flex min-h-0 flex-1 items-center justify-center">
         <div className="flex h-[min(560px,100%)] w-full gap-4">
           {/* flex-1 + min-w-0: stretches to fill essentially the whole width
@@ -257,13 +240,10 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
               suggestions live in a selected node's Related list instead. */}
           <aside aria-label="Topics" className="hidden min-h-0 w-72 shrink-0 md:flex md:flex-col">
             {/*
-              OptionWheel's own prop defaults (fontSize 3rem, inset 80px) are
-              sized for a full-bleed demo layout, not a ~288px (w-72)
-              sidebar — text at 3rem would overflow the column entirely.
-              textColor/activeColor are plain CSS color values as far as the
-              component's concerned, so passing theme variables here (rather
-              than literal hex) is enough to get automatic light/dark
-              support with zero changes inside the component itself.
+              OptionWheel's own defaults (fontSize 3rem, inset 80px) are
+              sized for a full-bleed demo, not this ~288px sidebar. Passing
+              CSS variables for textColor/activeColor gets automatic
+              light/dark support with no changes inside the component.
             */}
             <OptionWheel
               items={allTopicLabels}

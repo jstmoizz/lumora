@@ -34,15 +34,9 @@
   perspective: 500px;
   transform: translate3d(0, 0, 0.1px);
   position: relative;
-  /* The card renders as normal vertical content on the /about page (not a
-     drag-to-tilt surface — device-orientation tilt is gated behind
-     `enableMobileTilt`, which the only production usage leaves off).
-     `touch-action: none` blocked the browser's native vertical-scroll
-     gesture from ever starting on the card, trapping a touchscreen swipe
-     that began there. `pan-y` keeps that native scroll working while still
-     leaving horizontal pan/pinch-zoom for the pointer-driven tilt effect,
-     which continues to work identically since it's driven by pointer
-     events, not by what touch-action allows. */
+  /* `none` blocked native vertical scroll past this card on touch devices.
+     `pan-y` restores it; the pointer-driven tilt effect is unaffected since
+     it isn't gated by touch-action. */
   touch-action: pan-y;
 }
 

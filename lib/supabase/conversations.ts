@@ -1,11 +1,10 @@
 /**
- * Read-side data access for History (Phase 3.2) — the write side
- * (creating conversations, persisting messages, bumping `updated_at`)
- * already lives in `app/api/chat/route.ts` from Phase 3.1. Both go through
- * the same RLS-scoped server client as everything else in `lib/supabase/` —
- * ownership is enforced by Postgres itself, never by an application-level
- * check, so these functions can't be used to read another user's data no
- * matter what id they're called with.
+ * Read-side data access for History — the write side (creating
+ * conversations, persisting messages, bumping `updated_at`) lives in
+ * `app/api/chat/route.ts`. Both go through the same RLS-scoped server
+ * client as everything else in `lib/supabase/` — ownership is enforced by
+ * Postgres itself, never an application-level check, so these functions
+ * can't be used to read another user's data no matter what id is passed.
  */
 
 import { createClient } from "./server";

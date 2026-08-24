@@ -12,19 +12,13 @@ import { CHAT_MODEL_ID } from "./model";
 export { CHAT_MODEL_ID };
 
 /**
- * The Groq model Lumora's chat feature uses, instantiated from
- * `CHAT_MODEL_ID` (see `lib/ai/model.ts` for the identifier itself and why
- * it lives in its own module). Some models on this route emit a separate
- * reasoning stream alongside the chat text; the AI SDK surfaces that as its
- * own message part, ChatInterface.tsx doesn't render it (only `text` and
- * the tool parts are handled there), and the existing streaming setup here
- * doesn't need any changes either way — a model that emits one just has
- * that part silently skipped on the client.
+ * The Groq model Lumora's chat feature uses (see `lib/ai/model.ts` for the
+ * identifier and why it lives in its own module). Some models emit a
+ * separate reasoning stream alongside chat text; ChatInterface.tsx doesn't
+ * render it, so it's silently skipped on the client.
  *
- * The `groq()` provider reads the API key from the `GROQ_API_KEY`
- * environment variable automatically — the key is never read, stored, or
- * hardcoded in this file, and this module must only ever be imported by
- * server-side code (route handlers, server components).
+ * The `groq()` provider reads `GROQ_API_KEY` automatically — never read,
+ * stored, or hardcoded here. This module must only be imported server-side.
  */
 export const chatModel = groq(CHAT_MODEL_ID);
 

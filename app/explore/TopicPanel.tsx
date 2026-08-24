@@ -64,19 +64,14 @@ export default function TopicPanel({
       className="absolute inset-x-3 bottom-3 z-10 rounded-xl border border-zinc-800 bg-[#0c0b12]/95 p-4 backdrop-blur-sm sm:inset-x-auto sm:top-4 sm:right-4 sm:bottom-4 sm:w-72 sm:overflow-y-auto"
     >
       {/*
-        Fixed light colors, not the `text-foreground`/`text-zinc-*` theme
-        tokens used elsewhere in the app: this panel's background is always
-        dark (it sits on the canvas's fixed dark clear color), regardless of
-        whether the rest of Lumora is in light or dark mode, so its text
-        must stay fixed-light too rather than flipping to near-black in
-        light mode.
+        Fixed light colors, not `text-foreground`: this panel sits on the
+        canvas's fixed-dark background regardless of site theme, so its
+        text must stay fixed-light rather than flipping to near-black.
       */}
       {/*
-        This heading takes programmatic focus on every selection change (see
-        the effect above), so it needs its own visible focus style — the
-        default outline is suppressed because it doesn't read well against
-        this panel's fixed-dark background, not because focus should be
-        invisible here.
+        Takes programmatic focus on every selection change (see the effect
+        above), so it needs its own visible focus style — the default
+        outline doesn't read well against this fixed-dark background.
       */}
       <h2
         ref={headingRef}

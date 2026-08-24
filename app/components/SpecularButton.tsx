@@ -15,27 +15,17 @@ import { useReducedMotion } from "./useReducedMotion";
 import "./SpecularButton.css";
 
 // A faithful port of React Bits' SpecularButton component
-// (https://reactbits.dev/components/specular-button, source:
-// DavidHDev/react-bits, src/ts-default/Components/SpecularButton). The
-// shader (a rounded-rect SDF with a pointer-steered specular rim) is
-// reproduced as-is, GLSL comments included. What changed for Lumora:
+// (https://reactbits.dev/components/specular-button). Shader (a
+// rounded-rect SDF with a pointer-steered specular rim) reproduced as-is.
+// What changed for Lumora:
 //
-// - `lineColor`/`baseColor` (the two colors the shader itself consumes)
-//   can't be plain CSS vars — ogl's `Color` parses a literal CSS color
-//   string, not a custom property — so when the caller doesn't override
-//   them, they're now resolved from the live theme via useIsDarkTheme()
-//   instead of upstream's single hardcoded white-on-dark pair. `textColor`
-//   and `tint` stay real CSS vars (`--primary-foreground`/`--primary`),
-//   resolved by the browser like any other CSS, since those only ever
-//   reach `style`/CSS, never ogl's color parser.
-// - `href`: renders through next/link instead of a plain `<button>` when
-//   given, so the primary use (a CTA that navigates) gets real link
-//   semantics — ctrl/cmd-click, "open in new tab", prefetch-on-hover —
-//   instead of a JS-driven `onClick`. Not part of upstream's API.
-// - The render loop now pauses via IntersectionObserver + document
-//   visibility, the same technique this codebase's WarpText.tsx uses —
-//   upstream ran its rAF loop unconditionally for the component's entire
-//   mounted lifetime, including while scrolled out of view.
+// - `lineColor`/`baseColor` resolve from the live theme via
+//   useIsDarkTheme() when unset — ogl's `Color` needs a literal CSS color
+//   string, not a custom property, unlike upstream's hardcoded pair.
+// - `href` renders through next/link instead of a plain `<button>`, for
+//   real link semantics (ctrl/cmd-click, open in new tab, prefetch).
+// - The render loop pauses via IntersectionObserver + document visibility
+//   (same technique as WarpText.tsx) instead of running unconditionally.
 type ButtonSize = "sm" | "md" | "lg";
 
 export interface SpecularButtonProps {
@@ -177,11 +167,9 @@ const SpecularButton = ({
   const isDark = useIsDarkTheme();
   const reducedMotion = useReducedMotion();
 
-  // ogl's Color parses a literal CSS color string, not a custom property,
-  // so an unset lineColor/baseColor is resolved here from the live theme —
-  // "restrained white/indigo" in dark mode (visible against Lumora's dark
-  // page background), "restrained indigo/slate" in light mode (the
-  // upstream white default would be invisible against a light page).
+  // ogl's Color needs a literal CSS string, not a custom property — unset
+  // colors resolve from the live theme instead of upstream's hardcoded
+  // white, which would be invisible against a light page.
   const resolvedLineColor = lineColor ?? (isDark ? "#c7d2fe" : "#4f46e5");
   const resolvedBaseColor = baseColor ?? (isDark ? "#3f3f46" : "#a1a1aa");
 

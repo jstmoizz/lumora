@@ -32,11 +32,9 @@ export default function ResetGraphControl() {
       try {
         const result = await resetKnowledgeGraph();
         if (!result.ok) {
-          // Reset failed server-side — leave the graph exactly as it was
-          // instead of refreshing as though it had been cleared. The
-          // dialog itself already closed on confirm (see ConfirmDialog),
-          // so the user's natural retry path is just clicking Reset
-          // Knowledge Graph again.
+          // Reset failed server-side — leave the graph untouched instead of
+          // refreshing as if it had been cleared. Retry path is just
+          // clicking Reset Knowledge Graph again.
           setError("Couldn't reset your knowledge graph. Please try again.");
           return;
         }

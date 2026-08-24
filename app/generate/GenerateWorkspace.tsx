@@ -25,15 +25,13 @@ import MobilePanelDrawer from "./MobilePanelDrawer";
 import PracticePanel from "./PracticePanel";
 import RecentChatsPanel from "./RecentChatsPanel";
 
-// Radix's Dialog (which MobilePanelDrawer builds on) renders its content
-// through a Portal straight into `document.body` — outside this component's
-// own DOM subtree, so a `data-generate-accent` attribute on the workspace's
-// root div never cascades to it (CSS custom properties inherit through the
-// real DOM tree, not the React tree, and a portal breaks that containment
-// even though it doesn't break React context). Wrapping each drawer's
-// `children` in this re-scopes the accent locally for exactly the portaled
-// content that needs it. `contents` keeps the wrapper itself out of layout
-// entirely, so it can't affect MobilePanelDrawer's own flex sizing.
+// Radix's Dialog (MobilePanelDrawer's base) portals its content straight
+// into `document.body`, outside this component's DOM subtree, so
+// `data-generate-accent` on the workspace root never cascades to it — CSS
+// vars inherit through the real DOM tree, which a portal breaks even
+// though React context survives it. Wrapping each drawer's `children`
+// re-scopes the accent locally. `contents` keeps the wrapper out of
+// layout so it can't affect MobilePanelDrawer's own flex sizing.
 function AccentScope({
   accent,
   children,
@@ -175,34 +173,25 @@ export default function GenerateWorkspace({
   // — null the rest of the time. Kept separate from `loadingConversationId`
   // since a failure needs to stay visible after loading clears.
   const [selectionError, setSelectionError] = useState<string | null>(null);
-  // Identifies the most recently *started* Recent Chat selection, bumped on
-  // every call to handleSelectConversation regardless of which row it's
-  // for. A ref, not state: two clicks fired synchronously in the same tick
-  // (a fast double-click, or two different rows clicked before either
-  // fetch resolves) must be distinguishable the instant the second one
-  // starts, not after React gets around to re-rendering — state read from
-  // a closure would still see the first click's value in that window. Each
-  // in-flight request captures its own id and checks it against this ref
-  // before touching any state, so only the *latest* selection's response
-  // (success or failure) is ever allowed to apply — an earlier one that
-  // resolves late is silently ignored instead of overwriting whatever the
-  // newer selection already produced.
+  // Identifies the most recently *started* Recent Chat selection, bumped
+  // on every call to handleSelectConversation. A ref, not state: two
+  // clicks in the same tick must be distinguishable the instant the second
+  // starts, not after a re-render. Each in-flight request captures its own
+  // id and checks it against this ref before touching state, so only the
+  // *latest* selection's response is ever applied — a late-resolving
+  // earlier one is silently ignored.
   const selectionRequestIdRef = useRef(0);
   // True only while restoring a conversation this tab was already on before
   // an away-and-back navigation (see the mount effect below) — never true
   // when the server already resolved a conversation from the URL.
   const [isRestoringSession, setIsRestoringSession] = useState(false);
 
-  // Defaults to indigo (matching generateAccent.ts's DEFAULT_GENERATE_ACCENT)
-  // so server and first client render agree — localStorage only exists on
-  // the client, so the real stored choice (set from Settings; see
-  // SettingsClient.tsx's GenerateAccentRow) is picked up a moment later in
-  // the effect below, same "correct after mount, not before" tradeoff
-  // AppearanceRow accepts for its own non-blocking preferences. No
-  // storage-event listener: Settings and Generate are never mounted at the
-  // same time (different routes), so there's nothing to live-sync — the
-  // next time this component mounts, it simply reads whatever was last
-  // saved.
+  // Defaults to indigo so server and first client render agree —
+  // localStorage only exists client-side, so the real stored choice (set
+  // via SettingsClient.tsx's GenerateAccentRow) is picked up a moment
+  // later in the effect below. No storage-event listener: Settings and
+  // Generate are never mounted at the same time, so there's nothing to
+  // live-sync.
   const [accent, setAccent] = useState<GenerateAccent>(DEFAULT_GENERATE_ACCENT);
 
   useEffect(() => {
@@ -225,12 +214,10 @@ export default function GenerateWorkspace({
     }
   }, []);
 
-  // On a bare `/generate` load (no ?conversationId=, so the server didn't
-  // resolve one) with a conversation this tab already had active — e.g. the
-  // user navigated to Explore/Settings and back via the Dock, which links
-  // to plain "/generate" — pick that conversation back up instead of
-  // starting a fresh one. A real `?conversationId=` in the URL always wins
-  // (that's an explicit link, e.g. from History) and skips this entirely.
+  // On a bare `/generate` load with a conversation this tab already had
+  // active (e.g. navigating to Explore/Settings and back via the Dock),
+  // pick it back up instead of starting fresh. A real `?conversationId=`
+  // in the URL always wins and skips this entirely.
   useEffect(() => {
     if (initialConversationId) {
       writeActiveConversationId(initialConversationId);
@@ -296,23 +283,18 @@ export default function GenerateWorkspace({
 
       try {
         const response = await fetch(`/api/conversations/${id}`);
-        // A newer selection has already started — this response no longer
-        // describes what the user is currently looking at (or waiting
-        // for), success or failure alike. Discard it entirely rather than
-        // letting it touch activeConversationId/messages/the URL/the error
-        // message/anything else belonging to whichever selection *is* now
-        // current.
+        // A newer selection has already started — discard this response
+        // entirely rather than letting it touch state belonging to
+        // whichever selection is now current.
         if (isStale()) return;
 
         if (!response.ok) {
           if (response.status === 404) {
             setSelectionError("This conversation is no longer available.");
-            // Best-effort: drops the now-gone conversation from the list so
-            // it can't be selected again. A failure here just means the
-            // list stays stale until the next successful refresh (same
-            // tradeoff refreshConversations already accepts elsewhere) —
-            // never something this selection's own error should also fail
-            // over.
+            // Best-effort: drops the now-gone conversation from the list.
+            // A failure here just leaves the list stale until the next
+            // successful refresh — never something this selection's own
+            // error should also fail over.
             void refreshConversations();
           } else {
             setSelectionError("Couldn't load this conversation. Please try again.");

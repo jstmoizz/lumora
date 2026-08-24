@@ -5,32 +5,21 @@ import { useIsDarkTheme } from "./useIsDarkTheme";
 import { useReducedMotion } from "./useReducedMotion";
 
 // Adapted from React Bits' ClickSpark component
-// (https://reactbits.dev/animations/click-spark, source: DavidHDev/react-
-// bits, src/ts-default/Animations/ClickSpark). The spark math (radial burst
-// of fading lines, eased outward) is reproduced as-is; the surrounding
-// integration is rebuilt for "global interaction layer" rather than
-// upstream's "wrap one card" use case:
+// (https://reactbits.dev/animations/click-spark). Spark math (radial burst
+// of fading lines, eased outward) reproduced as-is; integration rebuilt for
+// a global interaction layer rather than upstream's "wrap one card":
 //
-// - Upstream sizes its canvas to its own wrapping div (via ResizeObserver)
-//   and reads click coordinates relative to that div. Wrapping the *whole
-//   app* in that div would mean a canvas resized to the full, ever-changing
-//   document height (Generate's chat grows/shrinks constantly) — expensive
-//   to keep in sync, and exactly the kind of "wrapping creates problems"
-//   risk the brief calls out. Instead this renders a `position: fixed`,
-//   viewport-sized canvas as a sibling of `children` (no wrapping DOM
-//   element at all — see the Fragment below), so there's nothing to affect
-//   stacking contexts, scrolling, or any descendant's layout.
-// - Click coordinates come from a single `window`-level click listener
-//   (bubble phase, never preventDefault/stopPropagation) instead of an
-//   onClick on the wrapper — works identically whether the click originated
-//   on Home, inside a dialog, or inside the Generate chat, and can't
-//   intercept or block anything it didn't dispatch itself.
-// - Keyboard-activated clicks (Enter/Space on a button) report
-//   clientX/clientY as 0 in every browser tested — falls back to the
-//   activated element's own center so keyboard users get a spark in a
-//   sensible place instead of the viewport corner.
-// - The rAF loop only runs while at least one spark is alive, and doesn't
-//   start at all under prefers-reduced-motion.
+// - A `position: fixed`, viewport-sized canvas as a sibling of `children`
+//   (no wrapping element — see the Fragment below), instead of upstream's
+//   own-div ResizeObserver sizing, which would track the full, ever-
+//   growing document height here.
+// - Click coordinates come from one `window`-level click listener (bubble
+//   phase, no preventDefault/stopPropagation), so it works from anywhere
+//   and can't intercept clicks it didn't dispatch itself.
+// - Keyboard-activated clicks (Enter/Space) report clientX/clientY as 0 —
+//   falls back to the activated element's center instead of the corner.
+// - The rAF loop only runs while a spark is alive, and never starts under
+//   prefers-reduced-motion.
 interface Spark {
   x: number;
   y: number;

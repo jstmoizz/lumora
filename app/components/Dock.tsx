@@ -24,12 +24,9 @@ export type DockItemData = {
   label: React.ReactNode;
   onClick: () => void;
   className?: string;
-  // Not part of upstream React Bits' API — Dock is now Lumora's global
-  // navigation (see GlobalDock.tsx), so it needs a route-aware "you are
-  // here" indicator, the same thing the old top-nav's underline provided.
-  // Kept as a boolean prop rather than baking route logic into this
-  // component: Dock itself stays a generic, reusable dock with no opinion
-  // about routing.
+  // Not part of upstream Dock's API — a route-aware "you are here"
+  // indicator, kept as a plain boolean so this component stays a generic,
+  // reusable dock with no routing opinion of its own.
   isActive?: boolean;
 };
 

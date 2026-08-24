@@ -11,10 +11,8 @@ interface KnowledgeNodeProps {
   node: KnowledgeGraphNode;
   position: [number, number, number];
   // 0 = top-level (studied directly), 1+ = a child of another studied
-  // topic — drives the same two-shape/two-size vocabulary the old `tier`
-  // field used to (icosahedron+larger for the "foundational" ring, octahedron
-  // +smaller for everything nested under it), just derived from the graph's
-  // own shape instead of a hand-picked field.
+  // topic — drives the icosahedron+larger vs octahedron+smaller shape/size
+  // pairing below, derived from the graph's own shape.
   depth: number;
   accent: AccentId;
   isSelected: boolean;
@@ -34,11 +32,10 @@ const HOVER_SCALE = 1.15;
 const SELECTED_SCALE = 1.3;
 const SCALE_LERP = 0.15;
 
-// Two-shape vocabulary: top-level topics get the rounder icosahedron (closer
-// in spirit to CentralNode's smoother form), nested topics keep the
-// sharper-faceted octahedron. Kept deliberately small — a star-point, not a
-// UI sphere — with the Glow below doing the work of making each one read as
-// a soft source of light rather than a small solid shape.
+// Top-level topics get the rounder icosahedron (closer to CentralNode's
+// form); nested topics keep the sharper octahedron. Kept deliberately
+// small — a star-point, not a UI sphere — with Glow doing the work of
+// making each read as a light source rather than a solid shape.
 const CORE_RADIUS = 0.34;
 const SECONDARY_RADIUS = 0.24;
 
@@ -160,20 +157,15 @@ export default function KnowledgeNode({
           opacityOuter={glowOpacity * 0.25}
         />
       </mesh>
-      {/* A plain HTML overlay, not 3D text — every node shows its own name
-          directly on the graph so identifying a topic never requires
-          clicking it first. Sits on the outer group (not inside the bobbing
-          mesh) so the label itself stays still while its node breathes.
+      {/* A plain HTML overlay, not 3D text — shows the node's name directly
+          on the graph. Sits on the outer group, not the bobbing mesh, so
+          the label stays still while the node breathes.
 
-          Pointer-operable only, same as StaticFallback's equivalent overlay
-          buttons: the Topics list (OptionWheel on desktop, a chip row on
-          mobile) renders this exact same set of topics as real, accessible
-          controls, so this label would otherwise be a second, redundant tab
-          stop with the same accessible name. `tabIndex={-1}` + `aria-hidden`
-          keep it clickable for mouse/touch (and still a valid target for
-          `.focus()` — a `-1` tabIndex only removes an element from the
-          natural Tab sequence, it doesn't make it unfocusable) while
-          removing that duplication for keyboard and screen-reader users. */}
+          `tabIndex={-1}` + `aria-hidden`: the Topics list (OptionWheel/chip
+          row) already renders this same set as real, accessible controls,
+          so this would otherwise be a redundant tab stop. Still clickable
+          and a valid `.focus()` target — `-1` only removes it from the
+          natural Tab sequence. */}
       <Html center position={[0, -(radius + 0.24), 0]} zIndexRange={[10, 0]} occlude={false}>
         <button
           type="button"

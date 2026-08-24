@@ -31,17 +31,13 @@ export default async function GeneratePage({
         metadata in the root layout) and the Dock's own "Generate" label.
       */}
       {/*
-        Deliberately NOT keyed by conversation here anymore — GenerateWorkspace
-        now switches conversations itself (New Chat, selecting a Recent
-        Chat) via its own internal remount key, and keeps the URL in sync
-        via router.replace as that happens. Keying this from searchParams
-        would fight that: our own `router.replace` calls would re-trigger
-        this server component and force an unwanted remount, discarding
-        the very state we just navigated to preserve. `?conversationId=`
-        in the URL now only matters for the *first* load of this page
-        (a direct link/refresh) — see GenerateWorkspace's mount effect for
-        how it picks a conversation back up when the URL doesn't have one
-        (e.g. returning from Explore/Settings via the Dock).
+        Deliberately NOT keyed by conversation — GenerateWorkspace switches
+        conversations itself via its own internal remount key and keeps the
+        URL in sync via router.replace. Keying this from searchParams would
+        fight that: our own router.replace calls would re-trigger this
+        server component and discard the state we just navigated to
+        preserve. `?conversationId=` only matters for the first load of
+        this page — see GenerateWorkspace's mount effect for the rest.
       */}
       <GenerateWorkspace
         initialConversationId={resolvedConversationId}

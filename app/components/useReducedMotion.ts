@@ -21,13 +21,11 @@ function getServerSnapshot() {
   return false;
 }
 
-// Shared across the app shell: the global Dock (GlobalDock.tsx) uses this
-// to disable its magnification/distance interaction, and Home's
-// HeroShaderBackground uses it to swap to the static AuroraBackground.
-// (Explore keeps its own copy, app/explore/useReducedMotion.ts — same tiny
-// mechanism, left alone rather than migrated, since Explore's module tree
-// is otherwise untouched this phase.) Reactive, not a one-time read, so a
-// user who toggles the OS setting mid-session is picked up immediately.
+// Shared across the app shell: GlobalDock disables its magnification via
+// this, HeroShaderBackground swaps to AuroraBackground via this. (Explore
+// keeps its own copy, app/explore/useReducedMotion.ts, left unmigrated.)
+// Reactive, not a one-time read, so a mid-session OS toggle is picked up
+// immediately.
 export function useReducedMotion(): boolean {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

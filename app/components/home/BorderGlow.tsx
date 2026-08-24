@@ -11,16 +11,10 @@ import {
 import "./BorderGlow.css";
 
 // A faithful port of React Bits' BorderGlow component
-// (https://reactbits.dev/components/border-glow, source:
-// DavidHDev/react-bits, src/ts-default/Components/BorderGlow). The glow
-// mechanics — mesh-gradient colors, edge/cone masking, outer glow, intro
-// sweep — are reproduced as-is. Only two adaptations were made, both in
-// BorderGlow.css, to keep the demo from overwriting Lumora's own identity:
-// the hardcoded dark backdrop (#120F17) and white-at-15%-opacity border
-// now fall back to Lumora's --card/--border tokens, and the integration
-// site (Home) is the one deciding the actual glowColor/colors — which are
-// drawn from Aurora's own palette, not the demo's arbitrary purple/pink/
-// blue trio.
+// (https://reactbits.dev/components/border-glow). Glow mechanics reproduced
+// as-is. Adapted only in BorderGlow.css: the hardcoded dark backdrop/border
+// now fall back to Lumora's --card/--border tokens, and glowColor/colors
+// are drawn from Aurora's palette instead of the demo's arbitrary trio.
 interface BorderGlowProps {
   children?: ReactNode;
   className?: string;
@@ -185,12 +179,9 @@ export default function BorderGlow({
     [getEdgeProximity, getCursorAngle],
   );
 
-  // Reduced motion: skip the multi-second intro sweep entirely (a real,
-  // autoplaying animation independent of user input). The pointer-follow
-  // glow itself is left intact under reduced motion — it only moves in
-  // direct response to the user's own cursor, and its CSS fade transitions
-  // (0.25s/0.75s opacity) are the same brief kind already left unguarded
-  // elsewhere in this codebase (button/link hover transitions).
+  // Reduced motion: skip the multi-second intro sweep (an autoplaying
+  // animation independent of input). The pointer-follow glow stays intact —
+  // it only moves in direct response to the cursor.
   useEffect(() => {
     if (!animated || prefersReducedMotion() || !cardRef.current) return;
     const card = cardRef.current;

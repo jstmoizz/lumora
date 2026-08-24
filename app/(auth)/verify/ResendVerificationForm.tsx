@@ -11,9 +11,8 @@ import {
 
 const initialState: ResendVerificationState = { error: null, success: false };
 
-// A client-side cooldown after a successful send, on top of Supabase's own
-// server-side rate limiting — belt and suspenders against turning this
-// button into a way to spam someone's inbox.
+// Client-side cooldown after a successful send, on top of Supabase's own
+// server-side rate limit — stops the button from being used to spam an inbox.
 const COOLDOWN_SECONDS = 30;
 
 export default function ResendVerificationForm({
@@ -27,12 +26,9 @@ export default function ResendVerificationForm({
   );
   const [cooldown, setCooldown] = useState(0);
 
-  // Starts the cooldown the moment a new successful result arrives — done
-  // during render (React's own documented alternative to an effect for
-  // "adjust state when a value changes": track the previous value in state,
-  // not a ref, and update both together when it changes) rather than in a
-  // `useEffect`, so it doesn't cost an extra render cycle just to react to
-  // `state` changing.
+  // Starts the cooldown the moment a new result arrives, using React's
+  // "adjust state during render" pattern instead of a useEffect — avoids an
+  // extra render cycle just to react to `state` changing.
   const [lastHandledState, setLastHandledState] = useState(initialState);
   if (state !== lastHandledState) {
     setLastHandledState(state);

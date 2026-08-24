@@ -3,8 +3,7 @@
 /**
  * The two client-invoked mutations on `knowledge_nodes` — kept narrowly
  * scoped and separate from `lib/supabase/knowledge-graph.ts`'s read/route-
- * handler-write access, same split as `topic-progress-actions.ts` vs.
- * `topic-progress.ts` before it.
+ * handler-write access.
  *
  * Identity always comes from `getServerUser()`, never from an argument —
  * RLS also enforces this at the database level, but both layers agree on

@@ -18,19 +18,14 @@ interface QuizPanelProps {
   quizzes: CreateQuizOutput[];
 }
 
-// The Quizzes half of Practice (see PracticePanel.tsx) — the *only* place
-// the interactive quiz (question navigation, answer selection, scoring)
-// renders. See PracticeToolPart.tsx for why: the in-chat tool-call UI only
-// ever shows a non-interactive status/notice, specifically so the quiz
-// itself isn't duplicated between the conversation and here.
+// The Quizzes half of Practice — the *only* place the interactive quiz
+// (navigation, answers, scoring) renders. The in-chat tool-call UI only
+// shows a non-interactive status (see PracticeToolPart.tsx), so the quiz
+// itself is never duplicated.
 //
-// Every quiz generated this session gets its own row — requesting another
-// quiz no longer replaces/loses the last one (GenerateWorkspace accumulates
-// `quizzes` instead of holding one `activeQuiz`), and each row is its own
-// Disclosure so a growing study session doesn't turn into a permanently-
-// open wall of questions: only the most recently generated quiz starts
-// expanded, everything older starts collapsed but stays reachable — see
-// useAutoCollapseList.ts (shared with FlashcardsPanel) for exactly how.
+// Every generated quiz gets its own row, each its own Disclosure — only
+// the most recent starts expanded, everything older starts collapsed but
+// stays reachable. See useAutoCollapseList.ts (shared with FlashcardsPanel).
 export default function QuizPanel({ quizzes }: QuizPanelProps) {
   const { isOpen, setOpen } = useAutoCollapseList(quizzes[0]?.quizId);
 
@@ -68,14 +63,11 @@ export default function QuizPanel({ quizzes }: QuizPanelProps) {
   );
 }
 
-// Live generation can't produce a quiz with zero questions —
-// createQuizInputSchema requires at least one — but a quiz resumed from a
-// persisted conversation is loaded straight from the database with no
-// re-validation against that schema, so this shape has to be handled
-// defensively rather than assumed impossible. Same visual language as
-// PracticeToolPart's ActivityErrorCard (the in-chat equivalent for a quiz
-// that failed to *generate*), scaled to sit inside a Disclosure row instead
-// of a standalone chat message.
+// Live generation can't produce a zero-question quiz (the schema requires
+// at least one), but one resumed from a persisted conversation loads
+// straight from the database with no re-validation, so this has to be
+// handled defensively. Same visual language as PracticeToolPart's
+// ActivityErrorCard, scaled for a Disclosure row.
 function EmptyQuizFallback() {
   return (
     <div
@@ -108,10 +100,8 @@ function ActiveQuiz({ quiz }: { quiz: CreateQuizOutput }) {
 
   const total = quiz.questions.length;
 
-  // Guards every access below `quiz.questions[index]` at once, rather than
-  // patching just the one that happens to crash first — with zero
-  // questions there is no valid index at all (0 is already out of bounds),
-  // so nothing past this point may run.
+  // Guards every access below `quiz.questions[index]` at once — with zero
+  // questions there's no valid index at all (0 is already out of bounds).
   if (total === 0) {
     return <EmptyQuizFallback />;
   }

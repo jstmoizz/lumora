@@ -110,12 +110,10 @@ function StudyPreferenceRow({
   const [error, setError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
-  // `isPending`/`current` are React state — two clicks fired in the same
-  // synchronous pass (before React commits a render) both still see the
-  // pre-click values, so `option === current || isPending` alone can't stop
-  // both from starting a save. This ref closes that window; it's an
-  // additional synchronous layer on top of that check, not a replacement
-  // for it — same pattern as `isSubmittingRef` in ChatInterface.tsx.
+  // `isPending`/`current` are React state — two clicks in the same
+  // synchronous pass both still see the pre-click values, so the check
+  // alone can't stop both from starting a save. This ref closes that
+  // window — same pattern as `isSubmittingRef` in ChatInterface.tsx.
   const isSavingRef = useRef(false);
 
   // Clears the transient "Saved" confirmation a couple seconds after it
@@ -214,12 +212,10 @@ const THEME_OPTIONS: { value: ThemePreference; label: string; icon: typeof Monit
   { value: "dark", label: "Dark", icon: MoonIcon },
 ];
 
-// The now-functional Appearance control. Applies instantly and locally
-// (`applyThemePreference`, no round trip needed to see the change) and
-// separately persists to `user_settings.theme` for cross-device durability
-// — the two are independent, so a slow or failed save never blocks the
-// theme from actually changing on screen. See theme.ts's own comment and
-// the Phase 4.4 report for the full source-of-truth rationale.
+// Applies instantly and locally (`applyThemePreference`, no round trip
+// needed) and separately persists to `user_settings.theme` for cross-
+// device durability — the two are independent, so a slow or failed save
+// never blocks the theme from actually changing on screen. See theme.ts.
 function AppearanceRow({ initialTheme }: { initialTheme: ThemePreference }) {
   const [current, setCurrent] = useState<ThemePreference>(initialTheme);
   const [error, setError] = useState<string | null>(null);
@@ -230,20 +226,12 @@ function AppearanceRow({ initialTheme }: { initialTheme: ThemePreference }) {
   // pattern, applied to this row's own separate theme mutation.
   const isSavingRef = useRef(false);
 
-  // Reconciles the durable (database) value into this browser's local
-  // storage/DOM, but ONLY on a browser that has never made a local theme
-  // choice at all — the cross-device bootstrap case (a fresh browser that
-  // already has an account-level preference saved from elsewhere). This
-  // used to fire whenever the two merely *disagreed*, on the theory that
-  // the database always represents the more recent explicit choice — but
-  // that isn't actually true: `initialTheme` falls back to "system"
-  // whenever `preferences`/`preferences.theme` isn't set yet (e.g. this
-  // account has never saved a theme before), and comparing against that
-  // fallback as if it were authoritative meant any explicit Light/Dark
-  // pick could get silently overwritten back to "system" the next time
-  // this component mounted — this was the theme-reverts-on-navigation bug.
-  // A real local choice, once made, is authoritative for this browser from
-  // then on; nothing here should ever second-guess it again.
+  // Reconciles the durable (database) value into local storage/DOM, but
+  // ONLY on a browser that's never made a local theme choice — the
+  // cross-device bootstrap case. A real local choice, once made, is
+  // authoritative for this browser from then on; nothing here should ever
+  // second-guess it again (comparing against a merely-disagreeing database
+  // value caused theme to silently revert to "system" on navigation).
   useEffect(() => {
     if (!hasStoredThemePreference()) {
       applyThemePreference(initialTheme);
@@ -332,19 +320,13 @@ function AppearanceRow({ initialTheme }: { initialTheme: ThemePreference }) {
   );
 }
 
-// A small dropdown, not a button row like AppearanceRow above — 10 options
-// don't fit a Settings row as buttons without wrapping awkwardly, and this
-// preference only ever affects one page. localStorage-only (see
-// generateAccent.ts's own comment on why): there's no server round trip to
-// wait on or fail, so unlike AppearanceRow this never shows a
-// pending/error/"Saved" state — the selection just applies instantly and
-// stays applied.
+// A dropdown, not a button row like AppearanceRow — 10 options don't fit
+// as buttons without wrapping. localStorage-only (see generateAccent.ts):
+// no server round trip, so unlike AppearanceRow this never shows a
+// pending/error/"Saved" state — the selection just applies instantly.
 //
-// No `initial*` prop the way AppearanceRow gets `initialTheme` from the
-// server: nothing durable backs this value (it's client-only by design), so
-// it starts at the default and corrects itself from localStorage in an
-// effect, same "briefly default, then correct after mount" tradeoff
-// GenerateWorkspace.tsx's own copy of this pattern accepts.
+// No `initial*` prop: nothing durable backs this value, so it starts at
+// the default and corrects itself from localStorage in an effect.
 function GenerateAccentRow() {
   const [accent, setAccent] = useState<GenerateAccent>(DEFAULT_GENERATE_ACCENT);
 
@@ -467,8 +449,7 @@ export default function SettingsClient({
   // (staggered together). Short fade + small upward move, matching the
   // recipe already established on Home/History. `clearProps: "all"` on
   // every tween so GSAP's inline transforms don't linger and block the
-  // section rows' CSS hover transitions afterward — the exact bug hit and
-  // fixed during the Home redesign.
+  // section rows' CSS hover transitions afterward.
   useGSAP(
     () => {
       if (prefersReducedMotion()) return;

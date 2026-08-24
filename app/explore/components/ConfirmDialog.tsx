@@ -18,10 +18,9 @@ interface ConfirmDialogProps {
   confirmLabel: string;
   onConfirm: () => void;
   // True while the caller's mutation from a previous confirm is still in
-  // flight. Radix keeps this dialog (and its Confirm button) mounted for its
-  // exit animation after `onOpenChange(false)` fires below, so without this
-  // the button stays clickable — and thus able to fire a second mutation —
-  // for that entire animation window, not just for one JS tick.
+  // flight. Radix keeps the Confirm button mounted (and clickable) through
+  // its exit animation after `onOpenChange(false)`, so without this it
+  // could fire a second mutation during that window.
   confirmDisabled?: boolean;
 }
 

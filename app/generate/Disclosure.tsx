@@ -19,28 +19,19 @@ interface DisclosureProps {
   className?: string;
 }
 
-// The W3C APG Disclosure pattern (https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/)
-// — the same pattern already demonstrated in
-// app/playground/disclosure/Disclosure.tsx — reimplemented here against
-// this app's own design tokens (border/card/accent/ring, matching
-// QuizPanel's existing option-button styling) instead of that playground
-// demo's fixed zinc colors and `max-w-md`, plus the `defaultOpen`/`meta`
-// (a secondary muted line under the label) this usage needs that the demo
-// didn't. A plain `<button>` + `aria-expanded`/`aria-controls` gives this
-// native keyboard support (Enter/Space, Tab order) for free — no listbox/
-// roving-tabindex machinery needed for a single toggle per card.
+// The W3C APG Disclosure pattern, reimplemented against this app's own
+// design tokens instead of app/playground/disclosure/Disclosure.tsx's fixed
+// demo colors, plus the `defaultOpen`/`meta` (a secondary muted line) this
+// usage needs. A plain `<button>` + `aria-expanded`/`aria-controls` gives
+// native keyboard support for free — no listbox/roving-tabindex needed for
+// a single toggle per card.
 //
 // Collapsed content stays mounted, hidden via the native `hidden` attribute
-// rather than being removed from the tree — deliberately different from
-// the playground demo this is based on. This backs a *list* of these (one
-// per generated quiz/flashcard set), and each one owns real interaction
-// state (which question a quiz is on, what's been answered, which
-// flashcard is showing and which side is up) that must survive being
-// collapsed and reopened — unmounting on collapse would silently reset all
-// of that the moment a card closed. `hidden` still removes the content
-// from the accessibility tree and from tab order, so this costs nothing
-// for assistive tech; it only keeps the (usually small) React/DOM subtree
-// alive underneath.
+// rather than removed — this backs a *list* of these (one per generated
+// quiz/flashcard set), and each owns real interaction state (which question
+// it's on, which flashcard side is up) that must survive collapsing and
+// reopening. `hidden` still removes the content from the accessibility
+// tree and tab order, so this costs nothing for assistive tech.
 export default function Disclosure({
   label,
   meta,

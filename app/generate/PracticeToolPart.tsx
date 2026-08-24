@@ -127,14 +127,10 @@ function ActivityErrorCard({
   );
 }
 
-// Deliberately non-interactive and deliberately not a second copy of the
-// activity's own content (no questions/cards rendered here at all) — see
-// QuizPanel.tsx/FlashcardsPanel.tsx, which already have this same data by
-// the time this renders (via ChatInterface's onQuizGenerated/
-// onFlashcardsGenerated) and are the *only* place either activity is
-// actually interactive. This notice exists only so the conversation has a
-// visible, compact record that something was generated and roughly what
-// it covers — never the full payload as chat text.
+// Deliberately non-interactive, not a copy of the activity's own content —
+// QuizPanel.tsx/FlashcardsPanel.tsx are the only place either is actually
+// interactive. This exists only so the conversation has a compact record
+// that something was generated, never the full payload as chat text.
 function ActivityReadyNotice({
   title,
   detail,
@@ -244,11 +240,9 @@ export function FlashcardsToolPart({ part }: { part: CreateFlashcardsUIPart }) {
   );
 }
 
-// Not a Practice activity (no quiz/flashcard content) but the same
-// "compact status card for a tool call in the conversation" shape as
-// QuizToolPart/FlashcardsToolPart above, so it reuses their wrapper/
-// skeleton/building/notice/error-card components rather than duplicating
-// them in a separate file for one more tool.
+// Not a Practice activity, but the same "compact status card for a tool
+// call" shape as QuizToolPart/FlashcardsToolPart above, reusing their
+// wrapper/skeleton/notice/error-card components.
 export function AddKnowledgeTopicToolPart({ part }: { part: AddKnowledgeTopicUIPart }) {
   return (
     <ToolPartWrapper>

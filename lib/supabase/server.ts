@@ -38,10 +38,8 @@ export async function createClient() {
           } catch {
             // `cookieStore.set` throws when called from a Server Component
             // (only Server Actions/route handlers can write cookies) — safe
-            // to ignore here as long as middleware refreshes the session on
-            // every request. No middleware exists yet (Phase 2 concern), so
-            // until it does, a session nearing expiry won't auto-refresh
-            // when only rendered through Server Components.
+            // to ignore since middleware.ts refreshes the session on every
+            // request instead.
           }
         },
       },
@@ -51,10 +49,8 @@ export async function createClient() {
 
 /**
  * The currently authenticated user for this request, or `null` if no one's
- * signed in. Thin wrapper around `auth.getUser()` (which re-validates the
- * session against Supabase rather than trusting a possibly-stale cookie) —
- * this is the "server-side authenticated user retrieval" building block;
- * nothing calls it yet since there's no auth flow to sign anyone in.
+ * signed in. Thin wrapper around `auth.getUser()`, which re-validates the
+ * session against Supabase rather than trusting a possibly-stale cookie.
  */
 export async function getServerUser() {
   const supabase = await createClient();

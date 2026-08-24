@@ -50,10 +50,9 @@ const LERP_SPEED = 3.2;
 
 interface CameraRigProps {
   selectedNodeId: string | null;
-  // Every focusable id's absolute 3D position — core topics and (Phase 4.3)
-  // revealed expanded concepts alike. A plain position lookup rather than
-  // typed node objects, since this rig only ever needs a place to look at,
-  // not anything else about what's selected.
+  // Every focusable id's absolute 3D position. A plain position lookup
+  // rather than typed node objects, since this rig only ever needs a
+  // place to look at, not anything else about what's selected.
   focusPositions: Record<string, [number, number, number]>;
   // Where "back to overview" returns to — computed by Scene.tsx from the
   // graph's own extent, not a fixed constant, so the framing fits whatever
@@ -84,13 +83,10 @@ export default function CameraRig({
   const scratchRight = useRef(new Vector3());
   const selectedPositionRef = useRef<[number, number, number] | undefined>(undefined);
 
-  // True only while this rig is actively flying the camera to a target
-  // (just after a selection changes, or the graph's overview framing
-  // changes) — false the rest of the time, so OrbitControls' own drag/zoom
-  // fully owns the camera and free-look actually sticks instead of being
-  // fought every frame. Starts false: the Canvas's initial `camera` prop
-  // already places it at the overview position, so there's nothing to fly
-  // to on mount.
+  // True only while actively flying the camera to a target; false the rest
+  // of the time so OrbitControls' drag/zoom fully owns the camera and
+  // free-look actually sticks. Starts false — the Canvas's initial camera
+  // prop already places it at the overview position.
   const isAnimating = useRef(false);
 
   useEffect(() => {
@@ -127,12 +123,10 @@ export default function CameraRig({
 
     const selectedPosition = selectedPositionRef.current;
 
-    // `overviewPosition`/`overviewDistance` are sized to fit the graph
-    // vertically (Scene.tsx's fov is a vertical fov). On a portrait canvas
-    // (aspect < 1) the horizontal field of view is narrower than the
-    // vertical one, so a graph that fits top-to-bottom can still clip
-    // left/right — pull back further by the same factor a horizontal fit
-    // would need, so nothing (least of all a node's label) crosses the edge.
+    // Sized to fit the graph vertically (Scene.tsx's fov is vertical). On a
+    // portrait canvas (aspect < 1) the horizontal fov is narrower, so a
+    // graph that fits top-to-bottom can still clip left/right — pull back
+    // further by the same factor a horizontal fit would need.
     const perspectiveCamera = camera as unknown as { aspect?: number };
     const aspectScale =
       typeof perspectiveCamera.aspect === "number" && perspectiveCamera.aspect < 1
@@ -150,12 +144,10 @@ export default function CameraRig({
         .copy(OVERVIEW_TARGET)
         .lerp(scratchNode.current, TARGET_FOCUS);
 
-      // Lean the composition away from whichever side TopicPanel occupies,
-      // so it doesn't end up covering the node it's describing. Desktop:
-      // panel is a right-side card, so aim slightly right of the subject
-      // (camera's own local right, since OrbitControls lets the user orbit
-      // freely) to push it left, toward the open side. Mobile: panel is a
-      // bottom sheet, so aim slightly below the subject to push it upward.
+      // Lean the composition away from whichever side TopicPanel occupies.
+      // Desktop: aim slightly right of the subject (camera's own local
+      // right) to push the panel left. Mobile: aim slightly below to push
+      // it upward, since the panel is a bottom sheet.
       if (typeof window !== "undefined" && window.innerWidth >= DESKTOP_PANEL_BREAKPOINT_PX) {
         scratchRight.current.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
         desiredTarget.current.addScaledVector(scratchRight.current, PANEL_BIAS_HORIZONTAL);

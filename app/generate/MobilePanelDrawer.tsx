@@ -13,16 +13,11 @@ interface MobilePanelDrawerProps {
   children: React.ReactNode;
 }
 
-// A side-anchored variant of the project's Dialog (components/ui/dialog.tsx
-// is a centered modal — overriding its positioning/animation utilities for
-// a drawer would fight nearly every default it sets), built directly on
-// the same underlying `radix-ui` Dialog primitive that component already
-// wraps, so this still reuses the project's existing dialog dependency
-// rather than adding a new one. Radix's Dialog gives this focus trapping,
-// Escape-to-close, backdrop-click-to-close, and focus-return to the
-// trigger for free — see `open`/`onOpenChange` at the call site
-// (GenerateWorkspace) for how the mobile "Recent"/"Quiz" toggle buttons
-// drive this.
+// A side-anchored variant of the project's Dialog — that one's a centered
+// modal, so overriding its positioning/animation would fight nearly every
+// default it sets. Built directly on the same underlying `radix-ui` Dialog
+// primitive it wraps, reusing the existing dependency. Radix gives this
+// focus trapping, Escape-to-close, and focus-return for free.
 export default function MobilePanelDrawer({
   open,
   onOpenChange,

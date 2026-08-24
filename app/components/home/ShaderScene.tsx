@@ -31,11 +31,10 @@ interface ShaderPlaneProps {
 // <Canvas>) sit right next to the JSX that needs them.
 function ShaderPlane({ isDark, mouseRef, wrapperRef }: ShaderPlaneProps) {
   const meshRef = useRef<Mesh>(null);
-  // Holds the live three.js material instance. Only ever read/written
-  // inside effects and useFrame — never in the render body/JSX — which is
-  // what React Compiler's ref/immutability rules actually require; a
-  // plain `useRef` is otherwise exactly the right tool for "an object that
-  // mutates every frame but shouldn't trigger a re-render".
+  // Holds the live three.js material instance. Only read/written inside
+  // effects and useFrame, never render body/JSX — what React Compiler's
+  // ref rules require, and the right tool anyway for "mutates every frame,
+  // shouldn't trigger a re-render".
   const materialRef = useRef<ShaderMaterial | null>(null);
 
   // Constructed once, before paint, and attached directly to the mesh —
@@ -91,17 +90,13 @@ function ShaderPlane({ isDark, mouseRef, wrapperRef }: ShaderPlaneProps) {
     const dpr = state.viewport.dpr;
     material.uniforms.u_resolution.value.set(state.size.width * dpr, state.size.height * dpr);
 
-    // u_resolution above tracks R3F's measured size, which is debounced
-    // (see the Canvas `resize` prop below) and so goes stale for up to
-    // 500ms while HeroScrollShell's MotionValues animate this wrapper's
-    // box every scroll tick. Reading the wrapper's live box here — once
-    // per frame, no separate ResizeObserver/state/effect — keeps the
-    // shader's aspect correction (used in the fragment shader) always
-    // matching the box it's actually being displayed in, so the CSS
-    // stretch from ShaderScene.css never visibly squishes the ribbons
-    // mid-scroll. u_resolution itself is left untouched: it still only
-    // needs to normalize gl_FragCoord into 0..1 UV space, which staying
-    // debounced doesn't visibly affect.
+    // u_resolution tracks R3F's debounced measured size (stale for up to
+    // 500ms during HeroScrollShell's scroll-linked resize) — reading the
+    // wrapper's live box here instead keeps the shader's aspect correction
+    // matching what's actually displayed, so the CSS stretch never visibly
+    // squishes the ribbons mid-scroll. u_resolution itself stays debounced;
+    // it only normalizes gl_FragCoord into UV space, which doesn't need to
+    // be live.
     const wrapper = wrapperRef.current;
     if (wrapper) {
       const rect = wrapper.getBoundingClientRect();
@@ -157,48 +152,23 @@ export default function ShaderScene() {
       <Canvas
         dpr={getDpr()}
         gl={{ antialias: false, alpha: false }}
-        // "never" fully stops R3F's render loop (and every useFrame
-        // callback inside it, including the one advancing u_time) whenever
-        // either condition isn't met: tab backgrounded (useTabVisible) or
-        // the hero has scrolled out of the viewport (useElementVisible) —
-        // HeroScrollShell keeps this section pinned only for a bounded
-        // scroll range, then lets it scroll away normally like any other
-        // section, at which point there's no reason left to keep paying for
-        // a WebGL frame every tick. Toggling this prop only changes the
-        // frameloop mode on the existing Canvas/renderer/program — nothing
-        // here ever unmounts or recreates them, so a hero leaving/re-
-        // entering the viewport is a pause/resume, never a reinit.
+        // "never" fully stops R3F's render loop (including u_time) whenever
+        // the tab is backgrounded or the hero has scrolled out of view —
+        // HeroScrollShell only pins this section for a bounded scroll
+        // range, so there's no reason to keep paying for a WebGL frame past
+        // that. Only changes frameloop mode on the existing Canvas/renderer;
+        // nothing here ever unmounts or recreates them.
         frameloop={tabVisible && heroVisible ? "always" : "never"}
-        // R3F measures this wrapper via react-use-measure and calls
-        // renderer.setSize on every reported change. Counter-intuitively,
-        // react-use-measure's ResizeObserver callback itself — the one that
-        // fires when *this element's own box* resizes, exactly what
-        // HeroScrollShell's scroll-linked shrink does every animation frame
-        // while mid-transition — is wired to the `scroll` debounce value,
-        // not `resize` (`resize`'s debounce only governs actual
-        // window-resize events; see react-use-measure's source).
-        //
-        // That debounce alone turned out not to be enough: three.js's
-        // renderer.setSize() also rewrites the <canvas> element's own CSS
-        // pixel width/height (see ShaderScene.css), so for the length of
-        // this debounce window the canvas sits at its *previous* size while
-        // its actual (ordinary-CSS, instantly correct) parent has already
-        // shrunk or grown with the scroll — and when the debounced resize
-        // finally fires, both the CSS box and the WebGL buffer snap to the
-        // new size at once, which is the visible "hitch" reported when
-        // scrolling back into the hero. ShaderScene.css now forces the
-        // canvas's *visual* size to always be 100% of its parent (decoupled
-        // from how stale the measured size is), so that snap is gone
-        // regardless of this debounce's length — which means the debounce
-        // itself can now be tuned purely for reallocation cost (how often
-        // the actual WebGL framebuffer gets rebuilt) with zero visual
-        // downside, so it's raised further here: from ~37 ResizeObserver
-        // fires / ~75 buffer resizes across one slow scroll through the
-        // hero at the original 50ms default, down to a handful at 200ms,
-        // down further still at 500ms — the browser just bitmap-scales the
-        // existing frame to fit in between, imperceptible on a soft
-        // gradient shader, while the actual expensive buffer resize now
-        // only happens once scrolling has properly stopped.
+        // react-use-measure's resize callback is wired to the `scroll`
+        // debounce (not `resize`, which only covers real window resizes),
+        // since HeroScrollShell's scroll-linked shrink resizes this
+        // wrapper every animation frame. ShaderScene.css forces the
+        // canvas's *visual* size to always match its parent regardless of
+        // how stale the measured size is, so a long debounce here has zero
+        // visual downside (the browser just bitmap-scales the existing
+        // frame in between) and only trades off how often the actual WebGL
+        // framebuffer gets reallocated — raised to 500ms so that only
+        // happens once scrolling has stopped.
         resize={{ debounce: { scroll: 500, resize: 0 } }}
       >
         <ShaderPlane isDark={isDark} mouseRef={mouseRef} wrapperRef={wrapperRef} />

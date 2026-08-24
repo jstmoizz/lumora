@@ -43,12 +43,10 @@ export function computeGraphLayout(nodes: KnowledgeGraphNode[]): LayoutEntry[] {
     // rather than surrounding the whole graph.
     const arc = depth === 0 ? Math.PI * 2 : Math.PI * 1.1;
     // Offset a quarter-turn off 0, not starting exactly there: the default
-    // camera looks straight down the z=0 axis (Scene.tsx's OVERVIEW_DIRECTION
-    // has x=0), so a top-level ring starting at angle 0 puts pairs of
-    // siblings (2, 4, ...) exactly toward and directly away from the camera
-    // — the "away" one lands squarely behind Lumora Core and reads as
-    // missing until the user manually orbits. This offset keeps every
-    // top-level node off that axis instead.
+    // camera looks straight down the z=0 axis (OVERVIEW_DIRECTION has
+    // x=0), so a top-level ring starting at angle 0 would put one sibling
+    // directly behind Lumora Core, reading as missing until the user
+    // orbits manually. This keeps every top-level node off that axis.
     const start = depth === 0 ? Math.PI / 4 : parentAngle - arc / 2;
     const step = siblings.length === 1 ? 0 : arc / siblings.length;
 

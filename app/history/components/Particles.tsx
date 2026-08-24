@@ -102,20 +102,16 @@ const fragment = /* glsl */ `
   }
 `;
 
-// TS/React-Compiler-compliant port of React Bits' Particles (JS + CSS
-// variant). Two deliberate deviations from the original source, both
-// required for this call site (a full-page decorative background sitting
-// behind real, clickable page content — see HistoryParticlesBackground):
+// TS/React-Compiler-compliant port of React Bits' Particles. Two
+// deliberate deviations, both required for this call site (a full-page
+// decorative background behind real, clickable content — see
+// HistoryParticlesBackground):
 //
-// 1. Pointer tracking is bound to `window`, not the container, mirroring
-//    Home's ShaderScene (see ShaderScene.tsx) — the container is rendered
-//    with `pointer-events: none` so it never steals clicks meant for the
-//    page underneath it, which also means it would never receive its own
-//    `mousemove` events.
-// 2. The render loop pauses (stops scheduling new frames) while the tab is
-//    backgrounded (`document.visibilitychange`), same restraint as
-//    ShaderScene's `frameloop="never"` — there's no reason to keep paying
-//    for a WebGL frame every tick when nobody can see it.
+// 1. Pointer tracking is bound to `window`, not the container (same as
+//    Home's ShaderScene) — the container has `pointer-events: none` so it
+//    never receives its own `mousemove` events.
+// 2. The render loop pauses while the tab is backgrounded, same restraint
+//    as ShaderScene's `frameloop="never"`.
 export default function Particles({
   particleCount = 200,
   particleSpread = 10,

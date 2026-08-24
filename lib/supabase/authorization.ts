@@ -1,8 +1,8 @@
 /**
  * Server-side authorization building blocks. Nothing in the app calls
- * `requireAdmin()` yet — there's no admin functionality to protect —
- * this is deliberately just the foundation section 7 of the Phase 2 spec
- * asked for, ready for whichever future route/action needs it.
+ * `requireAdmin()` yet — there's no admin functionality to protect — this
+ * is deliberately just the foundation, ready for whichever future
+ * route/action needs it.
  *
  * All three read identity from the authenticated Supabase session (via
  * `getServerUser()`, which re-validates against Supabase rather than

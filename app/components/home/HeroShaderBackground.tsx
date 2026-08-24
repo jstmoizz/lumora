@@ -14,29 +14,16 @@ const ShaderScene = dynamic(() => import("./ShaderScene"), {
 });
 
 // The hero's background layer. Renders exactly one of two things, never
-// both — this is the "don't stack two competing Aurora systems" call from
-// the Phase 4.5 brief:
+// both:
 //
-// - reduced motion, or no WebGL: the original AuroraBackground (Phase
-//   4.4's blurred CSS blobs). It's already a valid static/reduced-motion
-//   treatment on its own (see its `prefers-reduced-motion` handling in
-//   globals.css) using the exact same indigo/violet/pink palette, so it
-//   doubles as the shader's fallback with zero new code.
-// - otherwise: the GLSL shader, which becomes the hero's primary
-//   atmosphere.
-//
-// (A Galaxy/star-field alternative to this shader was prototyped and
-// committed at 3d86966, then explicitly rolled back by request — "fix the
-// existing shader, do not replace it yet" — so ShaderScene is the active
-// implementation again; see ShaderScene.tsx's own comment for the resize
-// jank fix that prompted this pass. The Galaxy prototype's files were
-// removed from the tree rather than left dead/unreferenced, but remain
-// fully recoverable from that commit if revisited later.)
+// - reduced motion, or no WebGL: AuroraBackground's blurred CSS blobs,
+//   already a valid static/reduced-motion treatment on its own (same
+//   indigo/violet/pink palette), so it doubles as the shader's fallback.
+// - otherwise: the GLSL shader, as the hero's primary atmosphere.
 //
 // A soft radial scrim sits between whichever background renders and the
 // real hero content, so the heading/description/CTA stay readable without
-// a giant opaque rectangle blocking the shader — see the comment on the
-// scrim div below.
+// a giant opaque rectangle blocking the shader — see the scrim div below.
 export default function HeroShaderBackground() {
   const reducedMotion = useReducedMotion();
   const webglSupported = useWebglSupported();

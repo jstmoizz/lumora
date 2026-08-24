@@ -6,27 +6,18 @@ import { useIsDarkTheme } from "../useIsDarkTheme";
 import "./WarpText.css";
 
 // A faithful port of React Bits' WarpText component
-// (https://reactbits.dev/text-animations/warp-text, source: DavidHDev/
-// react-bits, src/ts-default/TextAnimations/WarpText). The shader (an fbm-
-// driven ambient warp plus a pointer-steered lens/ripple, sampled from a
-// canvas-rasterized text texture with a small RGB channel split for
-// refraction) is reproduced as-is — it already handles everything the perf
-// brief for this codebase's shaders asks for (DPR cap, IntersectionObserver
-// + document-visibility gating on its own rAF loop, prefers-reduced-motion,
-// full WebGL resource cleanup on unmount), so nothing needed rebuilding
-// there. Two real additions on top of upstream:
+// (https://reactbits.dev/text-animations/warp-text). Shader (an fbm-driven
+// ambient warp plus a pointer-steered lens/ripple, sampled from a
+// canvas-rasterized text texture with an RGB channel split for refraction)
+// reproduced as-is — DPR cap, visibility-gated rAF loop, reduced-motion, and
+// WebGL cleanup all came with it. Two additions on top of upstream:
 //
-// - `color` defaults to a theme-aware value via useIsDarkTheme() when the
-//   caller doesn't override it — upstream's single hardcoded near-white
-//   default would go unreadable in light mode.
-// - `text` now also accepts an array of runs (`WarpTextRun[]`), each with
-//   its own optional `fontFamily`/`fontWeight`, so a single warped phrase
-//   can mix fonts (Home uses this for the "Lumora" word in the brand's own
-//   wordmark font — see app/page.tsx). Everything else (color, size,
-//   letter-spacing, line-height, the shader itself) still applies
-//   uniformly across the whole phrase; only the font can vary per run. A
-//   plain string keeps behaving exactly as before — this is purely
-//   additive.
+// - `color` defaults to a theme-aware value via useIsDarkTheme() instead of
+//   upstream's hardcoded near-white, which would be unreadable in light mode.
+// - `text` also accepts an array of runs (`WarpTextRun[]`), each with its
+//   own optional `fontFamily`/`fontWeight`, so a phrase can mix fonts (Home
+//   uses this for "Lumora" in the brand's wordmark font). A plain string
+//   still behaves exactly as before.
 export interface WarpTextRun {
   text: string;
   fontFamily?: string;
@@ -231,13 +222,11 @@ const drawLine = (
   });
 };
 
-// Resolves every distinct (fontFamily, fontWeight) pair actually used
-// across the runs to its real, computed font — same hidden-probe technique
-// upstream already used for its one, single font, just done once per
-// distinct pair instead of once overall. `fontSize`/`letterSpacing`/
-// `lineHeight` are resolved from the *first* run's probe only: they come
-// from explicit rem/vw-based props, not anything font-metric-dependent, so
-// they're the same regardless of which font measures them.
+// Resolves every distinct (fontFamily, fontWeight) pair used across the
+// runs via the same hidden-probe technique upstream used for its one font,
+// just once per distinct pair. `fontSize`/`letterSpacing`/`lineHeight` come
+// from the first run's probe only — they're explicit rem/vw props, not
+// font-metric-dependent, so they're the same regardless of font.
 function resolveRuns(
   container: HTMLElement,
   runs: WarpTextRun[],

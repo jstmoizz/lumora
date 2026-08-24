@@ -22,13 +22,10 @@ interface RecentChatsPanelProps {
 }
 
 // Generate's left panel: a compact conversation switcher, not a full
-// history browser (that's still /history — this is "enough to get back to
-// something you were just working on," same scope the old Recent Prompts
-// panel had, just backed by real conversations instead of a session-only
-// prompt-text log). Selecting a row hands its id up to GenerateWorkspace,
-// which fetches that conversation's messages and swaps the active session;
-// see GenerateWorkspace.tsx for why that's a remount rather than a
-// setMessages call.
+// history browser (that's still /history) — "enough to get back to
+// something you were just working on." Selecting a row hands its id up to
+// GenerateWorkspace, which fetches that conversation's messages and swaps
+// the active session.
 export default function RecentChatsPanel({
   conversations,
   activeConversationId,

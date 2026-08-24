@@ -12,10 +12,7 @@ import {
 import Dock, { type DockItemData } from "./Dock";
 import { useReducedMotion } from "./useReducedMotion";
 
-// The single source of truth for the app's primary navigation routes —
-// previously duplicated as NavBar's own `links` array (now removed) and
-// Home's page-local `dockItems`. Every nav surface in the app now reads
-// from here instead of hand-rolling its own list.
+// Single source of truth for the app's primary navigation routes.
 const ROUTES = [
   { href: "/", label: "Home", icon: HomeIcon },
   { href: "/generate", label: "Generate", icon: MessageCircleQuestionIcon },
@@ -25,12 +22,10 @@ const ROUTES = [
   { href: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
-// Lumora's primary, site-wide navigation (formerly the header's top nav —
-// see NavBar.tsx, now account-controls-only). Mounted once in the root
-// layout so it's present on every route. Uses the exact React Bits Dock
-// implementation from app/components/Dock.tsx — this component only
-// supplies the app-specific bits Dock itself has no opinion about: which
-// routes exist, which one is current, and how motion should behave.
+// Lumora's primary, site-wide navigation. Mounted once in the root layout.
+// Uses the React Bits Dock implementation in Dock.tsx — this component only
+// supplies the app-specific bits: which routes exist, which is current, and
+// how motion should behave.
 export default function GlobalDock() {
   const pathname = usePathname();
   const router = useRouter();
@@ -48,10 +43,9 @@ export default function GlobalDock() {
       items={items}
       baseItemSize={44}
       panelHeight={56}
-      // Reduced motion: magnification collapses to baseItemSize (no zoom)
-      // and distance to 0 (no falloff to compute), rather than unmounting
-      // the Dock — it's the app's primary navigation now, so it must stay
-      // fully present and usable either way.
+      // Reduced motion: collapse magnification/distance to no-op values
+      // rather than unmounting the Dock — it's primary navigation, so it
+      // must stay present and usable either way.
       magnification={reducedMotion ? 44 : 66}
       distance={reducedMotion ? 0 : 150}
     />

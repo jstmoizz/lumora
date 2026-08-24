@@ -98,15 +98,11 @@ function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-// The AI SDK surfaces every chat failure as a plain `Error`, whether it's a
-// network drop, an HTTP/API error, or a mid-stream failure — there's no
-// discriminated error type to switch on. We only special-case the one kind
-// we can safely detect client-side (a fetch that never reached the server,
-// which the SDK itself throws as a TypeError) so we can point the user at
-// their connection; everything else — HTTP failures, rate limits, mid-stream
-// errors — collapses into one generic message. `error.message` itself is
-// never rendered: it may contain provider/internal detail we don't want to
-// expose.
+// The AI SDK surfaces every chat failure as a plain `Error` with no
+// discriminated type. Only network errors (detectable as a TypeError from
+// a fetch that never reached the server) get their own copy; everything
+// else collapses into one generic message. `error.message` itself is never
+// rendered — it may contain provider/internal detail.
 function getChatErrorCopy(error: Error | undefined) {
   const isNetworkError =
     error instanceof TypeError && /fetch|network/i.test(error.message);
@@ -214,46 +210,37 @@ export default function ChatInterface({
       transport: new DefaultChatTransport({ api: "/api/chat" }),
     });
 
-  // Two ways this becomes known, covering the two ways a chat starts:
-  // resuming from History arrives already knowing it (`initialConversationId`,
-  // read server-side from the URL); starting fresh only learns it once the
+  // Two ways this becomes known: resuming from History arrives already
+  // knowing it (`initialConversationId`); starting fresh learns it once the
   // server creates a conversation and reports it back via the assistant
-  // message's metadata (see `messageMetadata` in app/api/chat/route.ts) —
-  // never generated or chosen client-side either way. Once known, every
-  // later request in this session (a new send, or a retry) includes it as
-  // `body.conversationId` so the server continues the same conversation
-  // instead of starting another one.
+  // message's metadata (see `messageMetadata` in app/api/chat/route.ts).
+  // Never chosen client-side. Once known, every later request includes it
+  // as `body.conversationId` so the server continues the same conversation.
   const conversationId =
     initialConversationId ??
     messages.find((message) => message.metadata?.conversationId)?.metadata
       ?.conversationId;
 
-  // Only passes a second argument at all once there's a conversation to
-  // continue — omitting it (rather than passing `body: undefined`) keeps
-  // the very first request in a session identical to before this feature
-  // existed. The single choke point every send path (composer submit,
-  // example-prompt click) routes through.
+  // Only passes a second argument once there's a conversation to continue,
+  // keeping the first request in a session unchanged. The single choke
+  // point every send path routes through.
   function sendChatMessage(message: { text: string }) {
     return conversationId
       ? sendMessage(message, { body: { conversationId } })
       : sendMessage(message);
   }
 
-  // Reports `conversationId` up the moment it's known — for a resumed
-  // conversation that's immediately (it only ever repeats the same value
-  // `initialConversationId` already gave the parent); for a brand-new one
-  // it fires mid-stream, the instant the server's `start` metadata reaches
-  // `messages`, well before the turn actually finishes.
+  // Reports `conversationId` up the moment it's known — immediately for a
+  // resumed conversation, or mid-stream for a new one, the instant the
+  // server's `start` metadata reaches `messages`.
   useEffect(() => {
     if (conversationId) onConversationIdKnown?.(conversationId);
   }, [conversationId, onConversationIdKnown]);
 
-  // Reports every time a turn finishes — success or failure — so
-  // GenerateWorkspace can re-fetch Recent Chats (new conversation now
-  // exists / an existing one just moved to the top). Comparing against the
-  // previous status (not just checking `status === "ready"` directly) is
-  // what limits this to real transitions rather than firing on every
-  // unrelated re-render while already idle.
+  // Reports every turn end (success or failure) so GenerateWorkspace can
+  // re-fetch Recent Chats. Comparing against the previous status (not just
+  // `status === "ready"`) limits this to real transitions, not every
+  // re-render while already idle.
   const previousStatusRef = useRef(status);
   useEffect(() => {
     const previousStatus = previousStatusRef.current;
@@ -264,11 +251,11 @@ export default function ChatInterface({
     }
   }, [status, onTurnSettled]);
 
-  // Reports each quiz exactly once, the moment its tool call's output
-  // becomes available — scans every message rather than just the latest,
-  // since a resumed conversation (from History) can already contain a
-  // finished quiz on first render. `seenQuizIdsRef` (not state) makes this
-  // a pure "notify once" side effect with nothing to re-render for.
+  // Reports each quiz exactly once, when its tool call's output becomes
+  // available — scans every message, not just the latest, since a resumed
+  // conversation can already contain a finished quiz on first render.
+  // `seenQuizIdsRef` (not state) keeps this a pure "notify once" side
+  // effect with nothing to re-render for.
   const seenQuizIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!onQuizGenerated) return;
@@ -306,14 +293,12 @@ export default function ChatInterface({
     }
   }, [messages, onFlashcardsGenerated]);
 
-  // Randomized once per mount (cached in the ref, computed lazily on first
-  // read) and never recomputed afterward — a fresh visit remounts this
-  // component and gets a new subset. `useSyncExternalStore`'s server
-  // snapshot keeps this hydration-safe: React renders the deterministic
-  // `getServerExamplePrompts()` value through hydration to match the
-  // server-rendered HTML, then swaps to the real random snapshot right
-  // after — no `Math.random()` call ever runs during render itself, so
-  // there's nothing for React to mismatch against.
+  // Randomized once per mount, cached in the ref, never recomputed
+  // afterward. `useSyncExternalStore`'s server snapshot keeps this
+  // hydration-safe: React renders the deterministic
+  // `getServerExamplePrompts()` value through hydration, then swaps to the
+  // real random snapshot right after — no `Math.random()` ever runs during
+  // render itself, so there's nothing to mismatch.
   const randomExamplePromptsRef = useRef<string[] | null>(null);
   const examplePrompts = useSyncExternalStore(
     subscribeToNothing,
@@ -341,13 +326,11 @@ export default function ChatInterface({
   const isRetryingRef = useRef(false);
   const [isRetrying, setIsRetrying] = useState(false);
 
-  // Same principle as `isRetryingRef` above, for the composer's own submit
-  // path: `canSend` is derived from `status`, a piece of React state, so two
-  // submissions fired in the same synchronous event-handling pass (a double
-  // click, Enter pressed twice fast) can both read `canSend` as still true —
-  // neither has had a render in between to see `status` move off "ready".
-  // This ref closes that window; it's an additional synchronous layer on
-  // top of the `canSend` check, not a replacement for it.
+  // Same principle as `isRetryingRef` above, for the composer's submit
+  // path: `canSend` is derived from `status`, so two submissions in the
+  // same synchronous pass can both read it as still true before either
+  // sees a render. This ref closes that window on top of the `canSend`
+  // check, not in place of it.
   const isSubmittingRef = useRef(false);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -402,15 +385,13 @@ export default function ChatInterface({
     el.scrollTo({ top: 0, behavior });
   }
 
-  // A conversation that already has history when this component mounts —
-  // resumed from History, from a Recent Chat, or simply still here after a
-  // refresh — starts at the *top* of that history instead of jumping
-  // straight to the latest message (a fresh, empty conversation has no
-  // history to start at the top of, so this never touches that case: the
-  // scroll container isn't even rendered yet — see `isEmpty` below). "Go to
-  // latest" (below) is how the user reaches the bottom from here; whether
-  // it's shown is computed the same way the scroll-tracking effect already
-  // computes it, from the real post-scroll position, not assumed.
+  // A conversation that already has history on mount (resumed from
+  // History, a Recent Chat, or a refresh) starts at the *top* of it
+  // instead of jumping to the latest message — a fresh conversation has no
+  // history and never reaches this (the scroll container isn't rendered
+  // yet, see `isEmpty`). "Go to latest" is how the user reaches the
+  // bottom; whether it's shown is computed from the real post-scroll
+  // position, not assumed.
   const hasAppliedInitialScrollRef = useRef(false);
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -452,14 +433,13 @@ export default function ChatInterface({
     }
   }
 
-  // Track the user's own scrolling. Passive + only updates state on an
+  // Tracks the user's own scrolling. Passive + only updates state on an
   // actual near/away transition, so this doesn't re-render on every pixel
-  // of scroll while the list is (for example) being auto-followed.
+  // scrolled while the list is being auto-followed.
   //
-  // The scroll container only exists in the DOM once the conversation has
-  // started (see `isEmpty` below), so this must re-run when that mounts —
-  // an empty dep array would attach to nothing on first render and never
-  // pick the container up once it appears.
+  // The scroll container only exists once the conversation has started
+  // (see `isEmpty`), so this must re-run when that mounts — an empty dep
+  // array would never pick the container up once it appears.
   useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
@@ -469,17 +449,14 @@ export default function ChatInterface({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- updateScrollEdgeState is recreated every render; only isEmpty (the container mounting) should re-attach the listener.
   }, [isEmpty]);
 
-  // Auto-follow new content (streamed tokens or newly added messages), but
-  // only while the user hasn't scrolled away from the bottom. Instant
-  // ("auto") rather than smooth, since this can fire once per token and a
-  // smooth-scroll animation restarting on every chunk looks janky; smooth
-  // scrolling is reserved for the explicit "Go to latest" action below.
+  // Auto-follows new content, but only while the user hasn't scrolled away
+  // from the bottom. Instant ("auto"), not smooth — this can fire once per
+  // token and a restarting smooth-scroll looks janky; smooth is reserved
+  // for the explicit "Go to latest" action below.
   //
-  // As a long response streams in (or a long conversation just grows), the
-  // top of the conversation scrolls out of view even though the user never
-  // touched the scrollbar — `updateScrollEdgeState()` here is what notices
-  // that and brings "Go to top" up, since the growth itself never fires a
-  // native `scroll` event on its own (only an actual position change does).
+  // `updateScrollEdgeState()` here catches the top scrolling out of view as
+  // content grows, since that growth never fires a native `scroll` event
+  // on its own.
   useEffect(() => {
     if (isNearBottomRef.current) scrollToBottom("auto");
     // Reflects the real, just-applied scroll position (including the
@@ -646,13 +623,10 @@ export default function ChatInterface({
     }
   }
 
-  // Re-requests the failed turn via the SDK's own `regenerate` — it drops
-  // the failed (possibly partial) assistant message and resends from the
-  // last user message already in `messages`, so this never appends a
-  // duplicate user message. The ref guard makes rapid double-clicks a
-  // no-op; `regenerate` resolves rather than throws even if the retry
-  // itself fails, since AbstractChat routes retry failures into `status`
-  // instead.
+  // Re-requests the failed turn via the SDK's own `regenerate` — drops the
+  // failed assistant message and resends from the last user message, never
+  // appending a duplicate. `regenerate` resolves rather than throws even on
+  // a failed retry, since AbstractChat routes that into `status` instead.
   async function handleRetry() {
     if (isRetryingRef.current || status !== "error") return;
     isRetryingRef.current = true;
@@ -674,12 +648,10 @@ export default function ChatInterface({
   const lastMessage = messages[messages.length - 1];
   const awaitingAssistantMessage =
     status === "submitted" && (!lastMessage || lastMessage.role === "user");
-  // A failure that happened before any assistant content ever appeared for
-  // this turn — network failure, or an HTTP/API error returned before the
-  // stream started. The failed turn has no assistant message to attach an
-  // inline error to, so it renders as its own row instead (mirrors
-  // `awaitingAssistantMessage` above, which handles the same "no assistant
-  // message yet" gap for the pending case).
+  // A failure before any assistant content appeared for this turn (network
+  // failure, or an HTTP/API error before the stream started). No assistant
+  // message exists to attach an inline error to, so it renders as its own
+  // row — mirrors `awaitingAssistantMessage` above.
   const erroredBeforeAssistantMessage =
     hasError && (!lastMessage || lastMessage.role === "user");
 
@@ -776,15 +748,11 @@ export default function ChatInterface({
         <>
           <div className="relative min-h-0 flex-1">
             {/*
-              Plain scroll container: no border/background/fixed height. It
-              only establishes the scrollable region — `scrollContainerRef`,
-              and the scrollHeight/scrollTop/clientHeight math the existing
-              near-bottom + auto-follow effects above read from it, are
-              untouched. `justify-end` lives on the inner wrapper below
-              (not here) specifically so a short conversation rests at the
-              bottom without relying on justify-content on the
-              overflow:auto element itself, which is a known source of
-              scroll-position quirks.
+              Plain scroll container — only establishes the scrollable
+              region the near-bottom/auto-follow effects read from.
+              `justify-end` lives on the inner wrapper, not here, since
+              justify-content on the overflow:auto element itself is a
+              known source of scroll-position quirks.
             */}
             <div
               ref={scrollContainerRef}

@@ -15,23 +15,17 @@ interface FlashcardProps {
   total: number;
 }
 
-// A single flip card — the main visual interaction Practice's Flashcards
-// activity is built around. A real <button> (not a div with onClick), so
-// Enter/Space flip it the same way any other control in this codebase
-// works, with no dependency on hover; ArrowLeft/ArrowRight navigation is
-// wired by the caller (ActiveFlashcardSet in FlashcardsPanel.tsx) via
-// onKeyDown on the same interaction, not a separate hidden control.
+// A single flip card. A real <button> (not a div with onClick), so
+// Enter/Space flip it like any other control in this codebase; Arrow
+// navigation is wired by the caller (ActiveFlashcardSet in
+// FlashcardsPanel.tsx) via onKeyDown on the same interaction.
 //
-// Both faces are always in the DOM — the 3D flip needs both to rotate
-// between (see Flashcard.css) — but the face that's turned away is marked
-// `aria-hidden` so it's never exposed to assistive tech, and a `role=
-// "status"` line below (the same live-region pattern QuizPanel's own
-// "Correct!"/"Not quite" feedback already uses) announces the current
-// side's actual content in words. That's what satisfies "don't rely
-// solely on the animation to communicate state" — the rotation itself is
-// purely decorative, and is skipped entirely under reduced motion (see
-// Flashcard.css's own media query + the `reducedMotion` class below) while
-// the announced state changes exactly the same either way.
+// Both faces stay in the DOM (the 3D flip rotates between them — see
+// Flashcard.css), but the turned-away face is `aria-hidden`, and a
+// `role="status"` line below (same live-region pattern as QuizPanel's
+// feedback) announces the current side in words — the rotation itself is
+// purely decorative and skipped under reduced motion, while the announced
+// state changes exactly the same either way.
 export default function Flashcard({
   front,
   back,

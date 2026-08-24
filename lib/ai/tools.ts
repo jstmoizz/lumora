@@ -235,17 +235,14 @@ const addKnowledgeTopicInputSchema = z.object({
   // attached.
   relatedTopics: z.array(z.string().min(1).max(60)).min(3).max(6).optional(),
   category: z.string().min(1).max(80).optional(),
-  // Explore's TopicPanel shows this when present (see
-  // lib/supabase/knowledge-graph.ts). createQuiz/createFlashcards never
-  // supply one — the quiz/flashcard content itself is the "detail" for
-  // those — but a topic added this way has nothing else to show, so a short
-  // description is worth asking for here specifically. Capped well above
-  // what SYSTEM_PROMPT actually asks for (one or two sentences, ~200 chars):
-  // Groq validates tool-call arguments against this schema *before* our own
-  // `execute()` ever runs, so a cap the model can realistically overshoot
-  // (240 was too tight — a "one or two sentence" summary regularly landed at
-  // 250-260) fails the whole request with an opaque `invalid_request_error`,
-  // not a normal `output-error` state execute()'s own validation produces.
+  // Explore's TopicPanel shows this when present. createQuiz/createFlashcards
+  // never supply one — their own content is the "detail" — but a topic
+  // added this way has nothing else to show. Capped well above what
+  // SYSTEM_PROMPT asks for (~200 chars): Groq validates tool-call arguments
+  // against this schema *before* execute() runs, so a tighter cap the model
+  // can overshoot (240 was too tight — summaries regularly landed at
+  // 250-260) fails the whole request with an opaque error, not execute()'s
+  // own `output-error` state.
   summary: z.string().min(1).max(400).optional(),
 });
 

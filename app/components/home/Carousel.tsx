@@ -2,19 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, type PanInfo, useMotionValue, useTransform } from "motion/react";
-// The source's own default items use react-icons/fi; swapped for
-// lucide-react (already the project's icon library — see AGENTS/CLAUDE
-// conventions) so this doesn't pull in a second icon package. Home always
-// passes its own `items` prop, so these defaults never actually render —
-// kept only so the component's own API/fallback stays complete.
+// Swapped react-icons/fi for lucide-react (the project's icon library) —
+// Home always passes its own `items`, so these defaults never actually
+// render; kept only for API completeness.
 import { CircleIcon, CodeIcon, FileTextIcon, LayersIcon, LayoutIcon } from "lucide-react";
 import "./Carousel.css";
 
 // A faithful port of React Bits' Carousel component
-// (https://reactbits.dev/components/carousel, source: DavidHDev/react-bits,
-// src/ts-default/Components/Carousel). The drag/spring/perspective/loop
-// mechanics are reproduced as-is; only Carousel.css was adapted, swapping
-// its hardcoded demo colors (#555/#0d0d0d/#fff/#333) for Lumora's existing
+// (https://reactbits.dev/components/carousel). Drag/spring/perspective/loop
+// mechanics reproduced as-is; only Carousel.css was adapted to Lumora's
 // semantic tokens.
 export interface CarouselItem {
   title: string;
@@ -159,11 +155,9 @@ export default function Carousel({
     return () => clearInterval(timer);
   }, [autoplay, autoplayDelay, isHovered, pauseOnHover, itemsForRender.length]);
 
-  // These two effects are verbatim from the upstream React Bits source —
-  // both re-synchronize `position` (and the underlying motion value `x`)
-  // whenever `items`/`loop` actually change, which this project's stricter
-  // set-state-in-effect lint rule flags on sight but which upstream itself
-  // relies on; preserved as-is rather than restructured, per this
+  // Verbatim from upstream: re-synchronizes `position`/`x` whenever
+  // `items`/`loop` change. Flagged by this project's stricter
+  // set-state-in-effect lint rule but preserved as-is, per this
   // integration's "keep the supplied implementation faithful" requirement.
   useEffect(() => {
     const startingPosition = loop ? 1 : 0;

@@ -4,10 +4,8 @@ import { getServerUser } from "@/lib/supabase/server";
 import ResetPasswordForm from "./ResetPasswordForm";
 
 export default async function ResetPasswordPage() {
-  // Reached only via a Supabase recovery link, which establishes a session
-  // server-side (in app/auth/confirm/route.ts) before redirecting here —
-  // so a missing session at this point means the link was invalid, expired,
-  // or already used, not that anything else went wrong.
+  // Reached only via a Supabase recovery link (see app/auth/confirm/route.ts)
+  // — a missing session here means the link was invalid, expired, or reused.
   const user = await getServerUser();
 
   if (!user) {

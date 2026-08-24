@@ -1,16 +1,12 @@
 /**
- * Generate's accent-theme system: a small, Generate-scoped color layer that
- * sits *on top of* the global Light/Dark system above (theme.ts) rather
- * than replacing or competing with it. Deliberately mirrors theme.ts's own
- * shape (a storage key, a validity guard, get/apply helpers) since it's
- * solving the same kind of problem — a user-chosen preference, persisted in
- * localStorage, applied by toggling a DOM attribute — just for a single
- * page's decorative accent instead of the whole app's light/dark palette.
+ * Generate's accent-theme system: a Generate-scoped color layer on top of
+ * the global Light/Dark system (theme.ts), mirroring its shape (storage
+ * key, validity guard, get/apply helpers) for the same kind of problem —
+ * a persisted user preference toggled via a DOM attribute.
  *
- * Colocated here (not under app/generate/) because, like theme.ts, it's now
- * read from two different routes: GenerateWorkspace.tsx (which applies it)
- * and SettingsClient.tsx (which lets the user change it) — see
- * generate-accent.css for the actual color tokens each value below unlocks.
+ * Colocated here rather than under app/generate/ because it's read from two
+ * routes: GenerateWorkspace.tsx (applies it) and SettingsClient.tsx (lets
+ * the user change it) — see generate-accent.css for the color tokens.
  */
 
 export type GenerateAccent =
@@ -65,12 +61,10 @@ export function getStoredGenerateAccent(): GenerateAccent {
 }
 
 /**
- * Persists the chosen accent. Unlike applyThemePreference, this never
- * touches the DOM itself — the accent only ever affects one page
- * (`/generate`), which owns applying `data-generate-accent` to its own
- * subtree (see GenerateWorkspace.tsx) rather than this module reaching into
- * a `document.documentElement` that most callers (Settings) aren't even
- * rendering alongside.
+ * Persists the chosen accent. Unlike applyThemePreference, never touches
+ * the DOM — `/generate` owns applying `data-generate-accent` to its own
+ * subtree (GenerateWorkspace.tsx), since most callers (Settings) aren't
+ * even rendering that page.
  */
 export function applyGenerateAccent(accent: GenerateAccent): void {
   if (typeof window === "undefined") return;

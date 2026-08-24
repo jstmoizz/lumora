@@ -10,12 +10,10 @@ interface StaticFallbackProps {
 }
 
 // A real, usable representation of the knowledge graph when the 3D scene
-// isn't shown (reduced motion or no WebGL) — not an error/unsupported
-// message. Selecting a topic here drives the exact same state as the 3D
-// scene and the Topics list beside/below it. Positions come from the same
-// computeGraphLayout() the 3D Scene uses (a 2D projection of it), not a
-// hand-placed map — necessary once node ids/counts are per-user and
-// arbitrary rather than a fixed set of 7.
+// isn't shown (reduced motion or no WebGL) — not an error message.
+// Selecting a topic here drives the same state as the 3D scene and the
+// Topics list. Positions come from the same computeGraphLayout() the 3D
+// Scene uses, since node ids/counts are per-user and arbitrary.
 export default function StaticFallback({ nodes, selectedNodeId, onSelect }: StaticFallbackProps) {
   const layout = computeGraphLayout(nodes);
   const maxRadius = layout.reduce((max, entry) => Math.max(max, entry.radius), 1);
@@ -80,12 +78,10 @@ export default function StaticFallback({ nodes, selectedNodeId, onSelect }: Stat
       </div>
 
       {/*
-        Pointer-operable only: the Topics list (OptionWheel on desktop, a
-        chip row on mobile) renders this exact same set of topics as real,
-        accessible controls, so these overlay buttons would otherwise be a
-        second, redundant set of tab stops with the same accessible names.
-        `tabIndex={-1}` + `aria-hidden` keep them clickable for mouse/touch
-        while removing that duplication for keyboard and screen-reader users.
+        Pointer-operable only: the Topics list already renders this same
+        set as real, accessible controls, so these would otherwise be
+        redundant tab stops. `tabIndex={-1}` + `aria-hidden` keep them
+        clickable for mouse/touch while removing that duplication.
       */}
       {nodes.map((node) => {
         const pos = positions.get(node.id);

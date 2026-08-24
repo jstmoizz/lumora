@@ -1,20 +1,17 @@
 /**
- * Shared theme logic for Phase 4.4's Light/Dark/System support. Hand-rolled
- * rather than a library (next-themes etc.): the actual mechanism is small
- * (read/write one localStorage key, toggle one class, listen to one media
- * query) and this keeps it dependency-free and fully under this app's own
- * control, matching "prefer CSS/existing tooling" for this phase.
+ * Shared theme logic for Light/Dark/System support. Hand-rolled rather
+ * than a library (next-themes etc.) — the mechanism is small (one
+ * localStorage key, one class, one media query listener) and this keeps
+ * it dependency-free.
  *
  * Source of truth split:
  * - localStorage (`THEME_STORAGE_KEY`) drives instant, no-reload
- *   application on every page — read synchronously by the inline
- *   ThemeScript before first paint, so returning visitors never see a
- *   flash of the wrong theme.
+ *   application — read synchronously by ThemeScript before first paint,
+ *   so returning visitors never see a flash of the wrong theme.
  * - `user_settings.theme` (Supabase) is the durable, cross-device record —
  *   written via `updateUserSetting("theme", ...)` alongside every local
- *   change, and reconciled into localStorage once when Settings loads (see
- *   SettingsClient), so a new device converges after one Settings visit.
- * Full rationale for this split is in the Phase 4.4 report.
+ *   change, and reconciled into localStorage once when Settings loads, so
+ *   a new device converges after one visit.
  */
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -53,15 +50,11 @@ export function getStoredThemePreference(): ThemePreference {
 }
 
 // Distinguishes "nothing has ever been stored" from "system" as a stored
-// value — getStoredThemePreference() collapses both to "system", which
-// isn't enough to tell a genuinely fresh browser apart from one where the
-// user explicitly picked System. Settings' cross-device reconciliation
-// (see AppearanceRow in app/settings/SettingsClient.tsx) needs exactly
-// that distinction: it should only ever pull the database's value in on a
-// browser that has never made a local choice at all, never as a general
-// "these two disagree, database wins" rule — the database read can be
-// stale or defaulted for reasons that have nothing to do with which one is
-// actually more recent.
+// value — getStoredThemePreference() collapses both, which isn't enough to
+// tell a fresh browser apart from one where the user explicitly picked
+// System. AppearanceRow's cross-device reconciliation needs exactly that:
+// only pull the database's value in on a browser with no local choice at
+// all, never as a general "database wins" rule.
 export function hasStoredThemePreference(): boolean {
   if (typeof window === "undefined") return false;
   try {

@@ -24,16 +24,12 @@ import HeroScrollShell from "./components/home/HeroScrollShell";
 import HeroShaderBackground from "./components/home/HeroShaderBackground";
 import type { WarpTextRun } from "./components/home/WarpText";
 
-// Mirrors HERO_HEADLINE_RUNS below as real DOM text — not canvas-rasterized
-// via WarpText, and not the `role="img"` + aria-label trick that needs
-// (this text speaks for itself to a screen reader, being real content
-// inside the <h1> below). Typography matches the props Home passes to the
-// real WarpText further down (fontSize/fontWeight/letterSpacing/lineHeight/
-// minHeight) so swapping to the animated version once it loads causes no
-// layout shift. `--foreground` (rather than WarpText's own
-// useIsDarkTheme()-resolved literal color) is deliberate: this renders
-// before hydration can run any hook at all, and the CSS variable already
-// resolves correctly at first paint via ThemeScript.
+// Mirrors HERO_HEADLINE_RUNS below as real DOM text — real content inside
+// the <h1>, not canvas-rasterized or hidden behind a role="img" trick.
+// Typography matches the real WarpText's props so swapping to the animated
+// version causes no layout shift. `--foreground`, not WarpText's own
+// useIsDarkTheme()-resolved color, since this renders before hydration can
+// run any hook — the CSS variable already resolves correctly via ThemeScript.
 function HeroHeadlineFallback() {
   return (
     <span
@@ -59,16 +55,13 @@ function HeroHeadlineFallback() {
   );
 }
 
-// Keeps `ogl` (and the shader's own canvas-rasterization/WebGL setup) out
-// of the initial Home bundle and off the critical path to the hero
-// heading — same established pattern as HeroShaderBackground's own
-// dynamic(() => import("./ShaderScene"), { ssr: false }). Unlike that swap
-// (WebGL shader <-> CSS blobs, both purely decorative), this one matters
-// for LCP specifically: the heading is real, load-bearing content, and
-// HeroHeadlineFallback above is real static text with matching typography
-// — not a placeholder — so the browser can paint it immediately, with no
-// dependency on JS hydration, WebGL init, or `document.fonts.ready`. The
-// animated warp effect still layers in afterward, unchanged, once the
+// Keeps `ogl` and the shader's WebGL setup out of the initial Home bundle
+// and off the critical path to the hero heading — same pattern as
+// HeroShaderBackground's dynamic ShaderScene import. This one matters for
+// LCP specifically: the heading is real, load-bearing content, and
+// HeroHeadlineFallback is real static text with matching typography, so
+// the browser paints it immediately with no dependency on hydration, WebGL
+// init, or `document.fonts.ready`. The animated version layers in once the
 // dynamic import resolves.
 const WarpText = dynamic(() => import("./components/home/WarpText"), {
   ssr: false,
@@ -84,18 +77,12 @@ function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-// Carousel's `baseWidth` is a plain pixel prop rendered straight into an
-// inline style, so a naive useState(lazyInitializer) here would compute
-// 520 on the server and (correctly) something narrower on the client —
-// but React's hydration doesn't force-patch a mismatched inline style, so
-// the server's 520px would silently stick past hydration on any screen
-// narrower than that, overflowing the viewport. useSyncExternalStore is
-// the documented fix for exactly this "value only knowable on the
-// client" shape (same pattern already used in ChatInterface.tsx for its
-// example prompts): the server snapshot (520, matching SSR) is used for
-// hydration itself, then React re-checks the real snapshot immediately
-// after and reconciles it as an ordinary update — no manual effect,
-// no mismatch.
+// `baseWidth` renders straight into an inline style, so a naive
+// useState(lazyInitializer) would compute 520 on the server and something
+// narrower on the client — but hydration doesn't force-patch a mismatched
+// inline style, so it would silently stick past hydration. useSyncExternalStore
+// fixes this: the server snapshot (520) hydrates first, then React
+// reconciles to the real value as an ordinary update — no mismatch.
 function subscribeToResize(callback: () => void) {
   window.addEventListener("resize", callback);
   return () => window.removeEventListener("resize", callback);
@@ -116,20 +103,15 @@ function getServerCarouselWidth() {
 const GLOW_COLORS = ["#4f46e5", "#db2777", "#7c3aed"];
 const GLOW_HSL = "262 83 58"; // violet-600, for BorderGlow's outer edge-light halo
 
-// The hero headline, split so "Lumora" renders in the brand's own wordmark
-// font instead of WarpText's base display font — the exact same treatment
-// (`font-wordmark`, which resolves to Pacifico) already used everywhere
-// else the brand name appears as itself rather than inline body text (see
-// app/layout.tsx's header/footer, About, Settings). The trailing period
-// stays in the base font: Pacifico's own descender/period shape read badly
-// immediately after the word in earlier testing, the same reason the plain-
-// DOM version of this headline dropped it from the wordmark span too.
-// Pacifico only ships a 400 weight — explicitly overriding fontWeight here
-// (rather than inheriting WarpText's own bold default) keeps it at its one
-// real weight instead of asking the canvas to synthesize a fake bold.
-// A module-level constant (not built inline in JSX) so WarpText's props-
-// sync effect — which re-rasterizes whenever `text` changes by reference —
-// doesn't refire on every Home render for a value that never changes.
+// The hero headline, split so "Lumora" renders in the brand's wordmark
+// font (`font-wordmark`, resolves to Pacifico) instead of WarpText's base
+// display font — same treatment used everywhere else the brand name
+// appears as itself. The trailing period stays in the base font since
+// Pacifico's descender/period shape reads badly right after the word.
+// Pacifico only ships weight 400, explicitly overridden here rather than
+// inheriting WarpText's bold default. A module-level constant, not built
+// inline in JSX, so WarpText's props-sync effect doesn't refire on every
+// Home render for a value that never changes.
 const HERO_HEADLINE_RUNS: WarpTextRun[] = [
   { text: "Study Smarter with " },
   { text: "Lumora", fontFamily: "var(--font-wordmark)", fontWeight: 400 },

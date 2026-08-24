@@ -2,16 +2,12 @@
 
 import { useEffect, useState, type RefObject } from "react";
 
-// Drives the shader Canvas's `frameloop` prop alongside useTabVisible: the
-// hero is only pinned on-screen (via HeroScrollShell's `position: sticky`)
-// for a bounded scroll range — once the user scrolls past it, it leaves the
-// viewport like any other section, but nothing was previously telling the
-// Canvas to stop rendering, so it kept paying for a WebGL frame every tick
-// the tab was open no matter how far away the hero had scrolled. That's the
-// main cost behind "scrolling feels heavy" — this closes the gap.
+// Drives the shader Canvas's `frameloop` prop alongside useTabVisible: once
+// the hero scrolls out of HeroScrollShell's pinned range, there's no reason
+// to keep paying for a WebGL frame every tick. See ShaderScene.tsx.
 //
-// Starts `true` (the hero is what's on screen on first paint) and lets the
-// observer correct it once it has something to measure.
+// Starts `true` (the hero is on screen on first paint); the observer
+// corrects it once it has something to measure.
 export function useElementVisible(ref: RefObject<Element | null>): boolean {
   const [visible, setVisible] = useState(true);
 

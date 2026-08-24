@@ -49,14 +49,11 @@ interface ProfileCardProps {
   onContactClick?: () => void;
 }
 
-// TS port of React Bits' ProfileCard (JS + CSS variant). One deliberate
-// deviation from the given source: `avatarUrl`/`iconUrl`/`grainUrl` no
-// longer default to the literal string "<Placeholder for ... URL>" — the
-// original source used that string as a JS default, which the CSS/`<img>`
-// then tried to load as if it were a real path. Left undefined here, which
-// the existing `--icon`/`--grain` "none" fallbacks (see ProfileCard.css's
-// `:root` block) and the `<img>`'s own `onError` handler already handle
-// correctly with no further changes needed.
+// TS port of React Bits' ProfileCard. One deviation: `avatarUrl`/`iconUrl`/
+// `grainUrl` no longer default to the placeholder string the original used
+// (which the CSS/`<img>` then tried to load as a real path) — left
+// undefined, which the `--icon`/`--grain` "none" fallbacks and `onError`
+// already handle correctly.
 function ProfileCardComponent({
   avatarUrl,
   iconUrl,
@@ -277,14 +274,11 @@ function ProfileCardComponent({
     if (img) img.style.display = "none";
   }, []);
 
-  // A server-rendered `<img>` can start (and, for a fast local 404, finish)
-  // its request before React finishes hydrating and attaching the `onError`
-  // listener below — `error`/`load` are non-bubbling, fire-once events, so
-  // a failure that happens in that window is missed entirely and the
-  // broken-image glyph is left showing with no `onError` call to hide it.
-  // This mount-time check catches exactly that case; `onError` below still
-  // covers a failure that happens after hydration (e.g. a slower real
-  // network round-trip, or the URL changing later).
+  // A server-rendered `<img>` can finish (or fail) loading before React
+  // attaches the `onError` listener below — `error`/`load` are non-bubbling,
+  // fire-once events, so a failure in that window is missed entirely. This
+  // mount-time check catches that case; `onError` covers failures after
+  // hydration.
   useEffect(() => {
     const img = avatarRef.current;
     if (img && img.complete && img.naturalWidth === 0) {

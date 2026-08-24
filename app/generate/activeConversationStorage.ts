@@ -1,13 +1,10 @@
 const ACTIVE_CONVERSATION_KEY = "lumora-active-conversation-id";
 
-// `sessionStorage`, not `localStorage`: it's naturally scoped to one browser
-// tab, which is exactly what "the ongoing conversation survives navigating
-// away and back, or a refresh, but a brand-new tab starts its own session"
-// needs — no per-tab bookkeeping to build by hand. The rest of the app's one
-// existing storage precedent (theme.ts) is a global `localStorage` key on
-// purpose (theme should be shared across tabs); this is deliberately the
-// opposite choice for the opposite reason. Guarded the same way theme.ts
-// guards its reads/writes, since private browsing can make storage throw.
+// `sessionStorage`, not `localStorage`: naturally scoped to one browser
+// tab, so a conversation survives navigating away and back or a refresh,
+// but a new tab starts fresh. theme.ts uses `localStorage` on purpose
+// (shared across tabs) — this is the opposite choice for the opposite
+// reason. Guarded the same way, since private browsing can make storage throw.
 
 /** The active conversation id for this tab, or `null` if there isn't one. */
 export function readActiveConversationId(): string | null {

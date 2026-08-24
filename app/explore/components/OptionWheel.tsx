@@ -4,29 +4,20 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import "./OptionWheel.css";
 
 /**
- * A faithful TypeScript port of React Bits' `OptionWheel` — the user
- * supplied the actual component source this time (a from-scratch
- * reconstruction matching only its public prop contract previously stood in
- * for it — see git history). Structure, the rAF easing loop, and the drag/
- * wheel/keyboard interaction are unchanged from the original; only type
- * annotations were added, `items` was made required with no built-in demo
- * fallback (this app always has real topics or an empty-state message of
- * its own to show instead), and `aria-label` was made a prop instead of a
- * hardcoded string, so Explore can name it appropriately for its own list.
+ * A faithful TypeScript port of React Bits' `OptionWheel`. Structure, the
+ * rAF easing loop, and the drag/wheel/keyboard interaction are unchanged
+ * from the original; only type annotations were added, `items` was made
+ * required with no built-in demo fallback, and `aria-label` was made a
+ * prop instead of a hardcoded string.
  */
 
 export interface OptionWheelProps {
   items: string[];
   defaultSelected?: number;
-  // The third argument is the wheel's own root listbox element — the sole
-  // real, focusable DOM node in this "virtual/roving focus" control (its
-  // individual `role="option"` rows are plain, non-tabbable divs; the
-  // container itself is what actually holds keyboard focus and receives
-  // arrow-key input). Passed on every selection change regardless of how it
-  // was triggered (click, drag, wheel, or arrow keys), so a caller wanting
-  // to restore focus after navigating away has a real element to focus —
-  // not `document.activeElement`, which this component's own roving-focus
-  // model wouldn't otherwise expose reliably.
+  // Third argument is the wheel's own root listbox element — the sole real,
+  // focusable DOM node in this roving-focus control (its `role="option"`
+  // rows are plain, non-tabbable divs). Passed on every selection change so
+  // a caller can restore focus after navigating away.
   onChange?: (index: number, item: string, element: HTMLDivElement | null) => void;
   textColor?: string;
   activeColor?: string;
@@ -81,14 +72,12 @@ interface RunFrameRefs {
 }
 
 // A plain module-level function, not a `useCallback` — it closes only over
-// refs passed in explicitly (never over props/state directly), so it needs
-// no stable-identity dance, and defining it as an ordinary named function
-// (rather than a self-referencing `const` inside the component) sidesteps
-// `react-hooks/immutability`'s "accessed before declared" complaint about a
-// rAF callback scheduling another call to itself.
+// refs, so it needs no stable-identity dance, and an ordinary named
+// function sidesteps `react-hooks/immutability` flagging a rAF callback
+// that schedules another call to itself.
 //
-// Single rAF loop that eases the wheel position toward its target with
-// frame-rate independent exponential smoothing, then lays every option out
+// Single rAF loop: eases the wheel position toward its target with
+// frame-rate independent exponential smoothing, then lays out every option
 // along the curve based on its distance from the current position.
 function runFrame(now: number, refs: RunFrameRefs) {
   const { itemRefs, rafRef, lastRef, posRef, targetRef, cfgRef } = refs;
@@ -272,12 +261,10 @@ export default function OptionWheel({
   const applyTarget = useCallback(
     (value: number, snap: boolean) => {
       const cfg = cfgRef.current;
-      // Nothing to select with zero items — `idx` below would be a modulo
-      // by zero (NaN), and `cfg.items[NaN]` is undefined, which the caller's
-      // onChange isn't expecting. The component itself renders its own
-      // empty-state placeholder in this case (see the `items.length === 0`
-      // branch below) rather than this listbox, but its effects still run
-      // regardless, so this guard has to live here too.
+      // Nothing to select with zero items — `idx` would be modulo by zero
+      // (NaN). The component renders its own empty-state placeholder in
+      // this case, but its effects still run regardless, so this guard
+      // has to live here too.
       if (cfg.count === 0) return;
       let v = value;
       if (!cfg.loop) v = Math.min(Math.max(v, 0), Math.max(cfg.count - 1, 0));

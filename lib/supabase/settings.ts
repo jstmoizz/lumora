@@ -1,11 +1,9 @@
 /**
- * Read-side data access for Settings persistence (Phase 3.3). The write
- * side (updating a single preference) is a Server Action in
- * `lib/supabase/settings-actions.ts` — kept in a separate, "use server"
- * file rather than here, since anything exported from a "use server" file
- * becomes a network-callable endpoint; this module is only ever imported
- * by Server Components, so it stays a plain module, same as
- * `lib/supabase/conversations.ts`.
+ * Read-side data access for Settings persistence. The write side (updating
+ * a single preference) is a Server Action in `lib/supabase/settings-
+ * actions.ts` — kept separate since anything exported from a "use server"
+ * file becomes a network-callable endpoint; this module is only ever
+ * imported by Server Components, so it stays a plain module.
  *
  * Every query here goes through the RLS-scoped server client — never the
  * service-role client — so "only the signed-in user's own row" is enforced

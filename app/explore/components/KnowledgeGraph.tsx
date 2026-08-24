@@ -15,10 +15,7 @@ interface KnowledgeGraphProps {
 }
 
 // A node's own parent/children (direct graph neighbors), plus anything it
-// named as a related subtopic that happens to already be a studied node —
-// the closest equivalent to the old static KNOWLEDGE_EDGES now that
-// relationships come from the graph's own tree + relatedLabels rather than
-// a hand-authored edge list.
+// named as a related subtopic that happens to already be a studied node.
 function relatedIdsOf(nodeId: string, nodes: KnowledgeGraphNode[]): Set<string> {
   const node = nodes.find((candidate) => candidate.id === nodeId);
   if (!node) return new Set();
