@@ -23,10 +23,15 @@ const geistMono = Geist_Mono({
 
 // Used exclusively for the "Lumora" wordmark (header logo, footer, and
 // section headings that are just the brand name) via the `font-wordmark`
-// Tailwind utility below — never for body copy.
+// Tailwind utility below — never for body copy. Every `font-wordmark` usage
+// in the codebase renders the literal string "Lumora" (grepped to confirm),
+// so `latin` is the only subset that will ever actually paint a glyph —
+// the previous `cyrillic`/`vietnamese` subsets were preloaded on every
+// route (this font is loaded from the root layout) for characters nothing
+// in the app ever displays.
 const pacifico = Pacifico({
   variable: "--font-pacifico",
-  subsets: ["latin", "cyrillic", "vietnamese"],
+  subsets: ["latin"],
   weight: "400",
 });
 

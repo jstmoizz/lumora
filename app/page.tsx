@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useRef, useSyncExternalStore } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
@@ -21,7 +22,58 @@ import BorderGlow from "./components/home/BorderGlow";
 import Carousel, { type CarouselItem } from "./components/home/Carousel";
 import HeroScrollShell from "./components/home/HeroScrollShell";
 import HeroShaderBackground from "./components/home/HeroShaderBackground";
-import WarpText, { type WarpTextRun } from "./components/home/WarpText";
+import type { WarpTextRun } from "./components/home/WarpText";
+
+// Mirrors HERO_HEADLINE_RUNS below as real DOM text — not canvas-rasterized
+// via WarpText, and not the `role="img"` + aria-label trick that needs
+// (this text speaks for itself to a screen reader, being real content
+// inside the <h1> below). Typography matches the props Home passes to the
+// real WarpText further down (fontSize/fontWeight/letterSpacing/lineHeight/
+// minHeight) so swapping to the animated version once it loads causes no
+// layout shift. `--foreground` (rather than WarpText's own
+// useIsDarkTheme()-resolved literal color) is deliberate: this renders
+// before hydration can run any hook at all, and the CSS variable already
+// resolves correctly at first paint via ThemeScript.
+function HeroHeadlineFallback() {
+  return (
+    <span
+      style={{
+        display: "flex",
+        minHeight: "clamp(140px, 16vw, 220px)",
+        alignItems: "center",
+        justifyContent: "center",
+        textAlign: "center",
+        fontSize: "clamp(2.75rem, 7vw, 4.75rem)",
+        fontWeight: 700,
+        letterSpacing: "-0.02em",
+        lineHeight: 1.05,
+        color: "var(--foreground)",
+      }}
+    >
+      Study Smarter with{" "}
+      <span style={{ fontFamily: "var(--font-wordmark)", fontWeight: 400 }}>
+        Lumora
+      </span>
+      .
+    </span>
+  );
+}
+
+// Keeps `ogl` (and the shader's own canvas-rasterization/WebGL setup) out
+// of the initial Home bundle and off the critical path to the hero
+// heading — same established pattern as HeroShaderBackground's own
+// dynamic(() => import("./ShaderScene"), { ssr: false }). Unlike that swap
+// (WebGL shader <-> CSS blobs, both purely decorative), this one matters
+// for LCP specifically: the heading is real, load-bearing content, and
+// HeroHeadlineFallback above is real static text with matching typography
+// — not a placeholder — so the browser can paint it immediately, with no
+// dependency on JS hydration, WebGL init, or `document.fonts.ready`. The
+// animated warp effect still layers in afterward, unchanged, once the
+// dynamic import resolves.
+const WarpText = dynamic(() => import("./components/home/WarpText"), {
+  ssr: false,
+  loading: () => <HeroHeadlineFallback />,
+});
 
 if (typeof window !== "undefined") {
   gsap.registerPlugin(ScrollTrigger);
