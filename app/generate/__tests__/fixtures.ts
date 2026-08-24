@@ -124,6 +124,19 @@ export function multiQuestionQuiz(): CreateQuizOutput {
   };
 }
 
+// A quiz with zero questions — not producible by live generation
+// (createQuizInputSchema requires `.min(1)`), but persisted/resumed
+// conversation data is loaded straight from the database with no
+// re-validation against that schema, so QuizPanel's ActiveQuiz has to
+// tolerate this shape defensively rather than assume it can't occur.
+export function emptyQuiz(): CreateQuizOutput {
+  return {
+    quizId: "quiz-empty",
+    topic: "Photosynthesis",
+    questions: [],
+  };
+}
+
 export function outputErrorQuizPart(
   errorText = "Question 1 has duplicate answer options.",
   toolCallId = "call-4",
@@ -230,6 +243,18 @@ export function multiCardFlashcardSet(): CreateFlashcardsOutput {
         back: "Chloroplast",
       },
     ],
+  };
+}
+
+// A flashcard set with zero cards — same reasoning as emptyQuiz() above:
+// unreachable from live generation (createFlashcardsInputSchema requires
+// `.min(1)`), but persisted data isn't re-validated against that schema on
+// load.
+export function emptyFlashcardSet(): CreateFlashcardsOutput {
+  return {
+    flashcardSetId: "flashcards-empty",
+    topic: "Photosynthesis",
+    cards: [],
   };
 }
 

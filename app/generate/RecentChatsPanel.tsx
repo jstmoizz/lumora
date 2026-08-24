@@ -12,6 +12,11 @@ interface RecentChatsPanelProps {
   /** The conversation currently being fetched after a click — disables just
    * that row rather than the whole list, so the rest stays usable. */
   loadingConversationId?: string | null;
+  /** Set when the most recent selection attempt failed — cleared the
+   * instant a new one starts. Rendered above the list so it stays visible
+   * (and, on mobile, inside the same drawer) regardless of which row it
+   * was for. */
+  selectionError?: string | null;
   onSelect: (id: string) => void;
   onNewChat: () => void;
 }
@@ -28,6 +33,7 @@ export default function RecentChatsPanel({
   conversations,
   activeConversationId,
   loadingConversationId,
+  selectionError,
   onSelect,
   onNewChat,
 }: RecentChatsPanelProps) {
@@ -47,6 +53,17 @@ export default function RecentChatsPanel({
         <PlusIcon aria-hidden="true" className="size-3.5" />
         New Chat
       </Button>
+
+      {/*
+        `role="alert"` is an implicit assertive live region — announced to
+        screen readers the moment it appears, same pattern as Explore's
+        delete/reset errors and ChatInterface's ChatErrorCard.
+      */}
+      {selectionError && (
+        <p role="alert" className="text-xs text-destructive">
+          {selectionError}
+        </p>
+      )}
 
       {conversations.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 py-6 text-center">

@@ -157,7 +157,12 @@ export async function POST(req: Request) {
     }
   }
 
-  const modelMessages = await convertToModelMessages(messages);
+  let modelMessages;
+  try {
+    modelMessages = await convertToModelMessages(messages);
+  } catch {
+    return Response.json({ error: "Invalid message format." }, { status: 400 });
+  }
 
   const result = streamText({
     model: chatModel,

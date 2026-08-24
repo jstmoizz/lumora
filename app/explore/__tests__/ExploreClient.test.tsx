@@ -233,6 +233,88 @@ describe("ExploreClient — delete", () => {
 
     expect(deleteKnowledgeNode).not.toHaveBeenCalled();
   });
+
+  test("a failed delete surfaces an accessible error and leaves the node selected, without refreshing", async () => {
+    vi.mocked(deleteKnowledgeNode).mockResolvedValueOnce({ ok: false });
+    render(<ExploreClient nodes={[node()]} />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Machine Learning" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Topic" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Couldn't delete this topic. Please try again.",
+    );
+    // The panel is still showing the node the failed delete targeted —
+    // selection was not cleared as though the delete had succeeded.
+    expect(screen.getByRole("heading", { name: "Machine Learning" })).toBeInTheDocument();
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  test("retrying after a failed delete calls deleteKnowledgeNode again", async () => {
+    vi.mocked(deleteKnowledgeNode).mockResolvedValueOnce({ ok: false });
+    render(<ExploreClient nodes={[node()]} />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Machine Learning" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Topic" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+    await screen.findByRole("alert");
+
+    // The node is still selected (see the test above), so Delete Topic is
+    // still right there — this is the "retry naturally" path.
+    fireEvent.click(screen.getByRole("button", { name: "Delete Topic" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+
+    expect(deleteKnowledgeNode).toHaveBeenCalledTimes(2);
+  });
+
+  test("a successful delete of the selected node still refreshes, and closes the panel", async () => {
+    render(<ExploreClient nodes={[node()]} />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Machine Learning" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Topic" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }),
+    );
+
+    await vi.waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1));
+    expect(
+      screen.queryByRole("heading", { name: "Machine Learning" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("a successful delete of the selected node moves focus to the stable graph region, not the (now-gone) trigger", async () => {
+    render(<ExploreClient nodes={[node()]} />);
+
+    const trigger = screen.getAllByRole("button", { name: "Machine Learning" })[0];
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Topic" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }),
+    );
+
+    await vi.waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1));
+
+    // The trigger that opened the panel must not be left holding focus —
+    // in the real app, `router.refresh()` removes it from the DOM entirely.
+    expect(trigger).not.toHaveFocus();
+    expect(
+      screen.getByLabelText(
+        "Interactive 3D knowledge space. Use the topic list for keyboard access.",
+      ),
+    ).toHaveFocus();
+  });
+
+  test("a normal Back (no deletion) still focuses the original trigger, not the graph region", () => {
+    render(<ExploreClient nodes={[node()]} />);
+
+    const trigger = screen.getAllByRole("button", { name: "Machine Learning" })[0];
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "Back to overview" }));
+
+    expect(trigger).toHaveFocus();
+  });
 });
 
 describe("ExploreClient — reset", () => {
@@ -244,5 +326,22 @@ describe("ExploreClient — reset", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Reset Graph" }));
     expect(resetKnowledgeGraph).toHaveBeenCalled();
+  });
+
+  test("a failed reset surfaces an accessible error and does not refresh, leaving the graph as-is", async () => {
+    vi.mocked(resetKnowledgeGraph).mockResolvedValueOnce({ ok: false });
+    render(<ExploreClient nodes={[node()]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset Knowledge Graph" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset Graph" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Couldn't reset your knowledge graph. Please try again.",
+    );
+    // The graph wasn't actually reset server-side, so nothing should act as
+    // though it was — no refresh, and the (still-nonexistent, in this
+    // mocked world) node is untouched either way.
+    expect(refreshMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("option", { name: "Machine Learning" })).toBeInTheDocument();
   });
 });

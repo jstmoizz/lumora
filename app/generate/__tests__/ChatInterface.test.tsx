@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
-import { render, screen, within, fireEvent } from "@testing-library/react";
+import { act, render, screen, within, fireEvent } from "@testing-library/react";
 import { useChat } from "@ai-sdk/react";
 import ChatInterface from "../ChatInterface";
 import { makeUseChatReturn, type MockUseChatReturn } from "./useChatMock";
@@ -70,6 +70,73 @@ describe("composer send gating", () => {
 
     fireEvent.keyDown(textarea, { key: "Enter" });
     expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  // `status` (and therefore `canSend`) is React state — it only reflects
+  // "no longer ready" once a render has happened. Two clicks dispatched
+  // inside a single `act()` block deliberately deny React that render
+  // between them (its DOM commit — the Send button becoming disabled, the
+  // textarea clearing — is deferred until the outer `act()` returns), so
+  // both clicks see the exact same pre-submit DOM. Two separate
+  // `fireEvent.click` calls would each flush on their own, and the second
+  // one would simply land on an already-disabled button — proving nothing
+  // about the ref. `sendMessage` is made to return a pending promise so the
+  // first click's `isSubmittingRef` guard is still set (not yet reset by
+  // `finally`) at the moment the second click's handler runs.
+  test("a rapid double-submit (before React can re-render) calls sendMessage exactly once", () => {
+    let resolveSend!: () => void;
+    const sendMessage = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
+    render(<ChatInterface />);
+
+    fireEvent.change(screen.getByLabelText("Message"), {
+      target: { value: "Explain osmosis" },
+    });
+    const sendButton = screen.getByRole("button", { name: "Send" });
+
+    act(() => {
+      fireEvent.click(sendButton);
+      fireEvent.click(sendButton);
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    resolveSend();
+  });
+
+  test("the guard releases once the first submission settles, so a later legitimate submit still sends", async () => {
+    let resolveSend!: () => void;
+    const sendMessage = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
+    render(<ChatInterface />);
+
+    const textarea = screen.getByLabelText("Message");
+    const sendButton = screen.getByRole("button", { name: "Send" });
+
+    fireEvent.change(textarea, { target: { value: "First question" } });
+    fireEvent.click(sendButton);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+
+    // Let the first submission's promise settle, so its `finally` block
+    // (the only place `isSubmittingRef` is cleared) actually runs.
+    await act(async () => {
+      resolveSend();
+    });
+
+    fireEvent.change(textarea, { target: { value: "Second question" } });
+    fireEvent.click(sendButton);
+
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage).toHaveBeenLastCalledWith({ text: "Second question" });
   });
 });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { HistoryIcon, SparklesIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -171,6 +171,23 @@ export default function GenerateWorkspace({
   const [loadingConversationId, setLoadingConversationId] = useState<
     string | null
   >(null);
+  // User-facing message for the most recent *failed* Recent Chat selection
+  // — null the rest of the time. Kept separate from `loadingConversationId`
+  // since a failure needs to stay visible after loading clears.
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+  // Identifies the most recently *started* Recent Chat selection, bumped on
+  // every call to handleSelectConversation regardless of which row it's
+  // for. A ref, not state: two clicks fired synchronously in the same tick
+  // (a fast double-click, or two different rows clicked before either
+  // fetch resolves) must be distinguishable the instant the second one
+  // starts, not after React gets around to re-rendering — state read from
+  // a closure would still see the first click's value in that window. Each
+  // in-flight request captures its own id and checks it against this ref
+  // before touching any state, so only the *latest* selection's response
+  // (success or failure) is ever allowed to apply — an earlier one that
+  // resolves late is silently ignored instead of overwriting whatever the
+  // newer selection already produced.
+  const selectionRequestIdRef = useRef(0);
   // True only while restoring a conversation this tab was already on before
   // an away-and-back navigation (see the mount effect below) — never true
   // when the server already resolved a conversation from the URL.
@@ -259,6 +276,7 @@ export default function GenerateWorkspace({
     setActiveInitialMessages(undefined);
     setSessionKey((key) => key + 1);
     setMobilePanel(null);
+    setSelectionError(null);
     writeActiveConversationId(null);
     router.replace("/generate", { scroll: false });
   }, [router]);
@@ -269,22 +287,66 @@ export default function GenerateWorkspace({
         setMobilePanel(null);
         return;
       }
+
+      const requestId = ++selectionRequestIdRef.current;
+      const isStale = () => selectionRequestIdRef.current !== requestId;
+
       setLoadingConversationId(id);
+      setSelectionError(null);
+
       try {
         const response = await fetch(`/api/conversations/${id}`);
-        if (!response.ok) return;
+        // A newer selection has already started — this response no longer
+        // describes what the user is currently looking at (or waiting
+        // for), success or failure alike. Discard it entirely rather than
+        // letting it touch activeConversationId/messages/the URL/the error
+        // message/anything else belonging to whichever selection *is* now
+        // current.
+        if (isStale()) return;
+
+        if (!response.ok) {
+          if (response.status === 404) {
+            setSelectionError("This conversation is no longer available.");
+            // Best-effort: drops the now-gone conversation from the list so
+            // it can't be selected again. A failure here just means the
+            // list stays stale until the next successful refresh (same
+            // tradeoff refreshConversations already accepts elsewhere) —
+            // never something this selection's own error should also fail
+            // over.
+            void refreshConversations();
+          } else {
+            setSelectionError("Couldn't load this conversation. Please try again.");
+          }
+          return;
+        }
+
         const data = (await response.json()) as { messages: LumoraUIMessage[] };
+        if (isStale()) return;
+
         setActiveConversationId(id);
         setActiveInitialMessages(data.messages);
         setSessionKey((key) => key + 1);
         writeActiveConversationId(id);
         router.replace(`/generate?conversationId=${id}`, { scroll: false });
+      } catch {
+        // Network failure, or response.json() choked on a malformed body —
+        // the AI SDK/fetch layer doesn't distinguish these any more finely
+        // than "something went wrong reaching the server," so neither does
+        // this message; the raw error is never shown.
+        if (isStale()) return;
+        setSelectionError("Couldn't load this conversation. Please try again.");
       } finally {
-        setLoadingConversationId(null);
+        // Only the request that's still current is allowed to clear the
+        // loading indicator — a stale request finishing after a newer one
+        // has already started must not rip the "loading" state out from
+        // under the row the user actually just clicked.
+        if (!isStale()) {
+          setLoadingConversationId(null);
+        }
         setMobilePanel(null);
       }
     },
-    [activeConversationId, router],
+    [activeConversationId, router, refreshConversations],
   );
 
   const handleConversationIdKnown = useCallback(
@@ -347,6 +409,7 @@ export default function GenerateWorkspace({
           conversations={conversations}
           activeConversationId={activeConversationId}
           loadingConversationId={loadingConversationId}
+          selectionError={selectionError}
           onSelect={handleSelectConversation}
           onNewChat={handleNewChat}
         />
@@ -401,6 +464,7 @@ export default function GenerateWorkspace({
             conversations={conversations}
             activeConversationId={activeConversationId}
             loadingConversationId={loadingConversationId}
+            selectionError={selectionError}
             onSelect={handleSelectConversation}
             onNewChat={handleNewChat}
           />

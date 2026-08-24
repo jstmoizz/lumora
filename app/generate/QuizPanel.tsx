@@ -5,6 +5,7 @@ import {
   CheckCircle2Icon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CircleAlertIcon,
   SparklesIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -67,6 +68,35 @@ export default function QuizPanel({ quizzes }: QuizPanelProps) {
   );
 }
 
+// Live generation can't produce a quiz with zero questions —
+// createQuizInputSchema requires at least one — but a quiz resumed from a
+// persisted conversation is loaded straight from the database with no
+// re-validation against that schema, so this shape has to be handled
+// defensively rather than assumed impossible. Same visual language as
+// PracticeToolPart's ActivityErrorCard (the in-chat equivalent for a quiz
+// that failed to *generate*), scaled to sit inside a Disclosure row instead
+// of a standalone chat message.
+function EmptyQuizFallback() {
+  return (
+    <div
+      role="alert"
+      className="flex items-center gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4"
+    >
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
+        <CircleAlertIcon aria-hidden="true" className="size-4" />
+      </div>
+      <div className="flex flex-col">
+        <p className="text-sm font-medium text-foreground">
+          This quiz couldn&apos;t be loaded.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Try generating the quiz again.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ActiveQuiz({ quiz }: { quiz: CreateQuizOutput }) {
   const [index, setIndex] = useState(0);
   // Which option the student picked per question, keyed by question id.
@@ -77,6 +107,15 @@ function ActiveQuiz({ quiz }: { quiz: CreateQuizOutput }) {
   const [finished, setFinished] = useState(false);
 
   const total = quiz.questions.length;
+
+  // Guards every access below `quiz.questions[index]` at once, rather than
+  // patching just the one that happens to crash first — with zero
+  // questions there is no valid index at all (0 is already out of bounds),
+  // so nothing past this point may run.
+  if (total === 0) {
+    return <EmptyQuizFallback />;
+  }
+
   const question = quiz.questions[index];
   const selected = selections[question.id];
   const hasAnswered = selected !== undefined;

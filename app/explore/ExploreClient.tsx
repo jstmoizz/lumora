@@ -42,10 +42,23 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
   // a related pill) — mutually exclusive with selectedNodeId.
   const [previewLabel, setPreviewLabel] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<KnowledgeGraphNode | null>(null);
+  // Set only when a confirmed delete's Server Action reports failure
+  // (`{ ok: false }`) — deleteKnowledgeNode already catches its own Supabase
+  // errors rather than throwing, so this can't be caught with a try/catch;
+  // it has to be read from the result. Cleared on the next delete attempt.
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Remembers whichever HTML control triggered a selection (a 3D-node click
   // has none) so "Back to overview" can return focus to it.
   const lastTriggerRef = useRef<HTMLElement | null>(null);
+  // A stable, always-rendered focus target for the one case
+  // `lastTriggerRef` can't serve: deleting the currently selected node. That
+  // trigger is about to disappear from the DOM once `router.refresh()`
+  // commits the updated graph, so focusing it would land nowhere. This graph
+  // region exists regardless of node count and regardless of which
+  // topic-list layout (desktop wheel vs. mobile chip row) is currently
+  // visible, so it's usable no matter what's rendered.
+  const graphRegionRef = useRef<HTMLDivElement>(null);
 
   const handleSelect = useCallback((id: string, trigger?: HTMLElement | null) => {
     lastTriggerRef.current = trigger ?? null;
@@ -104,6 +117,7 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
   }
 
   function handleRequestDelete(node: KnowledgeGraphNode) {
+    setDeleteError(null);
     setDeleteTarget(node);
   }
 
@@ -111,8 +125,31 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
     if (!deleteTarget) return;
     const id = deleteTarget.id;
     startTransition(async () => {
-      await deleteKnowledgeNode(id);
-      if (selectedNodeId === id) handleBack();
+      const result = await deleteKnowledgeNode(id);
+      if (!result.ok) {
+        // Deletion failed server-side — leave the node selected and the
+        // graph untouched, exactly as if the delete had never been
+        // requested, and surface why instead of quietly refreshing as if
+        // it had succeeded (the previous behavior: closing the dialog and
+        // refreshing regardless of the result made a failed delete look
+        // successful until the "deleted" node reappeared with no
+        // explanation). The dialog itself already closed on confirm (see
+        // ConfirmDialog), so the user's natural retry path is just clicking
+        // Delete Topic again.
+        setDeleteError("Couldn't delete this topic. Please try again.");
+        return;
+      }
+      if (selectedNodeId === id) {
+        // Deliberately not `handleBack()` here: that focuses
+        // `lastTriggerRef`, but the trigger that opened this node is the
+        // very thing that just got deleted — it won't survive the
+        // `router.refresh()` below. Close the panel the same way, but send
+        // focus to the stable graph region instead.
+        setSelectedNodeId(null);
+        setPreviewLabel(null);
+        lastTriggerRef.current = null;
+        graphRegionRef.current?.focus();
+      }
       router.refresh();
     });
   }
@@ -164,8 +201,10 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
               next to the topic list, instead of sitting in a narrow centered
               column with empty space on both sides. */}
           <div
+            ref={graphRegionRef}
+            tabIndex={-1}
             aria-label="Interactive 3D knowledge space. Use the topic list for keyboard access."
-            className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl border border-zinc-800 bg-[#08070c]"
+            className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl border border-zinc-800 bg-[#08070c] outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/80"
           >
             {showScene ? (
               <Scene nodes={nodes} selectedNodeId={selectedNodeId} onSelect={handleSelect} />
@@ -270,6 +309,17 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
         confirmLabel="Delete"
         onConfirm={handleConfirmDelete}
       />
+      {/*
+        `role="alert"` is an implicit assertive live region — announced to
+        screen readers the moment it appears, same as ChatErrorCard/
+        SettingsClient's error rows elsewhere in the app, and (unlike the
+        sr-only status span below) visible so sighted users see it too.
+      */}
+      {deleteError && (
+        <p role="alert" className="shrink-0 text-center text-xs text-destructive">
+          {deleteError}
+        </p>
+      )}
       <span className="sr-only" aria-live="polite">
         {isPending ? "Updating your knowledge graph…" : ""}
       </span>

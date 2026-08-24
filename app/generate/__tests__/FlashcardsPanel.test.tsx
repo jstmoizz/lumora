@@ -1,7 +1,11 @@
 import { describe, test, expect } from "vitest";
 import { render, screen, within, fireEvent } from "@testing-library/react";
 import FlashcardsPanel from "../FlashcardsPanel";
-import { multiCardFlashcardSet, singleCardFlashcardSet } from "./fixtures";
+import {
+  emptyFlashcardSet,
+  multiCardFlashcardSet,
+  singleCardFlashcardSet,
+} from "./fixtures";
 
 describe("FlashcardsPanel empty state", () => {
   test("shows a calm idle message when no flashcards have been generated yet", () => {
@@ -10,6 +14,54 @@ describe("FlashcardsPanel empty state", () => {
     expect(
       screen.queryByRole("button", { name: "Next card" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+// Regression coverage for a flashcard set resumed from a persisted
+// conversation whose `cards` array is empty — unreachable from live
+// generation (the tool's own Zod schema requires at least one), but
+// persisted data is loaded straight from the database with no
+// re-validation against that schema. ActiveFlashcardSet used to index
+// straight into `set.cards[0]` and crash the whole /generate route; it
+// must now render a fallback instead.
+describe("FlashcardsPanel — persisted set with zero cards", () => {
+  test("renders an accessible fallback instead of crashing, with no card UI", () => {
+    render(<FlashcardsPanel flashcardSets={[emptyFlashcardSet()]} />);
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("These flashcards couldn't be loaded.");
+    expect(alert).toHaveTextContent("Try generating them again.");
+
+    expect(screen.queryByRole("button", { name: "Flip flashcard" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Previous card" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Next card" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/\d+ \/ \d+/)).not.toBeInTheDocument();
+  });
+
+  test("the Disclosure still labels it correctly, and a normal set alongside it is unaffected", () => {
+    // The newest set (index 0 — see useAutoCollapseList) starts expanded;
+    // putting the healthy one there means the broken one starts collapsed,
+    // exercising the fallback via the "expand it" path rather than only on
+    // first paint.
+    render(
+      <FlashcardsPanel flashcardSets={[singleCardFlashcardSet(), emptyFlashcardSet()]} />,
+    );
+
+    // The broken set's own header still shows its topic/card count — only
+    // its *content* is replaced by the fallback.
+    expect(screen.getByText("0 cards")).toBeInTheDocument();
+
+    const collapsedTrigger = screen.getByRole("button", {
+      name: /Photosynthesis/,
+      expanded: false,
+    });
+    fireEvent.click(collapsedTrigger);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "These flashcards couldn't be loaded.",
+    );
+
+    // The healthy set (the newest, already expanded) still works normally.
+    expect(screen.getByRole("button", { name: "Flip flashcard" })).toBeInTheDocument();
   });
 });
 

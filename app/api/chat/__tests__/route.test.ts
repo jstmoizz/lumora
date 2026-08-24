@@ -239,6 +239,43 @@ describe("authentication", () => {
   });
 });
 
+describe("malformed messages", () => {
+  test("a message with an unexpected part shape is rejected with 400 before streamText runs", async () => {
+    setupSupabaseMock();
+
+    const response = await POST(
+      makeRequest({
+        messages: [
+          {
+            id: "user-1",
+            role: "user",
+            parts: [{ unexpected: "shape" }],
+          },
+        ],
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid message format.",
+    });
+    expect(streamTextMock).not.toHaveBeenCalled();
+  });
+
+  test("`messages` not being an array is rejected with 400 before any DB work happens", async () => {
+    setupSupabaseMock();
+
+    const response = await POST(makeRequest({ messages: "not-an-array" }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Request body must be JSON with a `messages` array.",
+    });
+    expect(streamTextMock).not.toHaveBeenCalled();
+    expect(fromMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("conversation ownership", () => {
   test("a request without conversationId creates a new conversation for the authenticated user", async () => {
     const spies = setupSupabaseMock({

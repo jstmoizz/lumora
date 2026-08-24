@@ -13,11 +13,26 @@ import { resetKnowledgeGraph } from "@/lib/supabase/knowledge-graph-actions";
 export default function ResetGraphControl() {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+  // Set only when a confirmed reset's Server Action reports failure
+  // (`{ ok: false }`) — resetKnowledgeGraph already catches its own
+  // Supabase errors rather than throwing, so this can't be caught with a
+  // try/catch; it has to be read from the result. Cleared on the next
+  // reset attempt.
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
   function handleConfirm() {
     startTransition(async () => {
-      await resetKnowledgeGraph();
+      const result = await resetKnowledgeGraph();
+      if (!result.ok) {
+        // Reset failed server-side — leave the graph exactly as it was
+        // instead of refreshing as though it had been cleared. The dialog
+        // itself already closed on confirm (see ConfirmDialog), so the
+        // user's natural retry path is just clicking Reset Knowledge Graph
+        // again.
+        setError("Couldn't reset your knowledge graph. Please try again.");
+        return;
+      }
       router.refresh();
     });
   }
@@ -26,7 +41,10 @@ export default function ResetGraphControl() {
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setError(null);
+          setOpen(true);
+        }}
         disabled={isPending}
         className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
       >
@@ -41,6 +59,18 @@ export default function ResetGraphControl() {
         confirmLabel="Reset Graph"
         onConfirm={handleConfirm}
       />
+      {/*
+        `role="alert"` is an implicit assertive live region — announced to
+        screen readers the moment it appears, and (unlike a purely sr-only
+        span) visible so sighted users see it too. This component has no
+        layout opinion of its own (see the module comment), so this renders
+        inline in whatever row the caller places it in, same as the button.
+      */}
+      {error && (
+        <span role="alert" className="text-xs text-destructive">
+          {error}
+        </span>
+      )}
     </>
   );
 }

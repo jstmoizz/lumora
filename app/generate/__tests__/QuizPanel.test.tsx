@@ -2,7 +2,7 @@ import { describe, test, expect } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { fireEvent } from "@testing-library/react";
 import QuizPanel from "../QuizPanel";
-import { multiQuestionQuiz, singleQuestionQuiz } from "./fixtures";
+import { emptyQuiz, multiQuestionQuiz, singleQuestionQuiz } from "./fixtures";
 
 describe("QuizPanel empty state", () => {
   test("shows a calm idle message when no quiz has been generated yet", () => {
@@ -18,6 +18,54 @@ describe("QuizPanel empty state", () => {
 // (index 0 in the list) — these interaction tests exercise its content
 // directly, the same way they did before quizzes were wrapped in a
 // collapsible card.
+// Regression coverage for a quiz resumed from a persisted conversation
+// whose `questions` array is empty — unreachable from live generation (the
+// tool's own Zod schema requires at least one), but persisted data is
+// loaded straight from the database with no re-validation against that
+// schema. ActiveQuiz used to index straight into `quiz.questions[0]` and
+// crash the whole /generate route; it must now render a fallback instead.
+describe("QuizPanel — persisted quiz with zero questions", () => {
+  test("renders an accessible fallback instead of crashing, with no question UI", () => {
+    render(<QuizPanel quizzes={[emptyQuiz()]} />);
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("This quiz couldn't be loaded.");
+    expect(alert).toHaveTextContent("Try generating the quiz again.");
+
+    // None of the normal question-taking UI exists — there is no question
+    // to page through, answer, or finish.
+    expect(screen.queryByRole("button", { name: /previous question/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /next question/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /finish quiz/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/\d+ \/ \d+/)).not.toBeInTheDocument();
+  });
+
+  test("the Disclosure still labels it correctly, and a normal quiz alongside it is unaffected", () => {
+    // The newest quiz (index 0 — see useAutoCollapseList) starts expanded;
+    // putting the healthy one there means the broken one starts collapsed,
+    // exercising the fallback via the "expand it" path rather than only on
+    // first paint.
+    render(<QuizPanel quizzes={[singleQuestionQuiz(), emptyQuiz()]} />);
+
+    // The broken quiz's own header still shows its topic/question count —
+    // only its *content* is replaced by the fallback.
+    expect(screen.getByText("0 questions")).toBeInTheDocument();
+
+    // Expand the broken quiz's row (it isn't the newest, so it starts
+    // collapsed) and confirm the fallback renders there without disturbing
+    // the other, healthy quiz.
+    const collapsedTrigger = screen.getByRole("button", {
+      name: /Photosynthesis/,
+      expanded: false,
+    });
+    fireEvent.click(collapsedTrigger);
+    expect(screen.getByRole("alert")).toHaveTextContent("This quiz couldn't be loaded.");
+
+    // The healthy quiz (the newest, already expanded) still works normally.
+    expect(screen.getByRole("button", { name: "Chlorophyll" })).toBeInTheDocument();
+  });
+});
+
 describe("QuizPanel answer interaction", () => {
   test("selecting the correct option locks the question in and shows Correct!", () => {
     render(<QuizPanel quizzes={[singleQuestionQuiz()]} />);

@@ -1,7 +1,12 @@
 "use client";
 
 import { useState, type KeyboardEvent } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, LayersIcon } from "lucide-react";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CircleAlertIcon,
+  LayersIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CreateFlashcardsOutput } from "@/lib/ai/tools";
 import Disclosure from "./Disclosure";
@@ -58,6 +63,34 @@ export default function FlashcardsPanel({ flashcardSets }: FlashcardsPanelProps)
   );
 }
 
+// Live generation can't produce a set with zero cards —
+// createFlashcardsInputSchema requires at least one — but a set resumed
+// from a persisted conversation is loaded straight from the database with
+// no re-validation against that schema, so this shape has to be handled
+// defensively rather than assumed impossible. Mirrors QuizPanel's own
+// EmptyQuizFallback (same visual language as PracticeToolPart's
+// ActivityErrorCard), for the equivalent zero-item case here.
+function EmptyFlashcardsFallback() {
+  return (
+    <div
+      role="alert"
+      className="flex items-center gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4"
+    >
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
+        <CircleAlertIcon aria-hidden="true" className="size-4" />
+      </div>
+      <div className="flex flex-col">
+        <p className="text-sm font-medium text-foreground">
+          These flashcards couldn&apos;t be loaded.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Try generating them again.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ActiveFlashcardSet({ set }: { set: CreateFlashcardsOutput }) {
   // Position + flip side, kept here (not in Flashcard itself) so they
   // survive this set's own Disclosure being collapsed and reopened —
@@ -67,6 +100,14 @@ function ActiveFlashcardSet({ set }: { set: CreateFlashcardsOutput }) {
   const [flipped, setFlipped] = useState(false);
 
   const total = set.cards.length;
+
+  // Guards every access below `set.cards[index]` at once — with zero cards
+  // there is no valid index at all (0 is already out of bounds), so
+  // nothing past this point may run.
+  if (total === 0) {
+    return <EmptyFlashcardsFallback />;
+  }
+
   const card = set.cards[index];
   const isFirst = index === 0;
   const isLast = index === total - 1;

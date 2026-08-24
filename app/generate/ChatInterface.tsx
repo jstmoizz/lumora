@@ -234,11 +234,9 @@ export default function ChatInterface({
   // existed. The single choke point every send path (composer submit,
   // example-prompt click) routes through.
   function sendChatMessage(message: { text: string }) {
-    if (conversationId) {
-      sendMessage(message, { body: { conversationId } });
-    } else {
-      sendMessage(message);
-    }
+    return conversationId
+      ? sendMessage(message, { body: { conversationId } })
+      : sendMessage(message);
   }
 
   // Reports `conversationId` up the moment it's known — for a resumed
@@ -342,6 +340,15 @@ export default function ChatInterface({
   // double-click from firing `regenerate()` twice.
   const isRetryingRef = useRef(false);
   const [isRetrying, setIsRetrying] = useState(false);
+
+  // Same principle as `isRetryingRef` above, for the composer's own submit
+  // path: `canSend` is derived from `status`, a piece of React state, so two
+  // submissions fired in the same synchronous event-handling pass (a double
+  // click, Enter pressed twice fast) can both read `canSend` as still true —
+  // neither has had a render in between to see `status` move off "ready".
+  // This ref closes that window; it's an additional synchronous layer on
+  // top of the `canSend` check, not a replacement for it.
+  const isSubmittingRef = useRef(false);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   // Mirrors "is the user currently near the bottom", read on every scroll
@@ -594,11 +601,24 @@ export default function ChatInterface({
     scrollToTop(prefersReducedMotion() ? "auto" : "smooth");
   }
 
-  function handleSubmit(event?: FormEvent) {
+  // The ref guard (`isSubmittingRef`) is checked first and synchronously —
+  // see its declaration above for why `canSend` alone isn't enough to stop
+  // two submissions fired before React re-renders. It's released in
+  // `finally` so a real failure (or just the turn finishing) never leaves
+  // the composer permanently unable to submit again.
+  async function handleSubmit(event?: FormEvent) {
     event?.preventDefault();
+    if (isSubmittingRef.current) return;
     if (!canSend) return;
-    sendChatMessage({ text: input });
+
+    isSubmittingRef.current = true;
+    const text = input;
     setInput("");
+    try {
+      await sendChatMessage({ text });
+    } finally {
+      isSubmittingRef.current = false;
+    }
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
