@@ -23,12 +23,13 @@ function getDpr(): [number, number] {
 interface ShaderPlaneProps {
   isDark: boolean;
   mouseRef: React.RefObject<{ x: number; y: number }>;
+  wrapperRef: React.RefObject<HTMLDivElement | null>;
 }
 
 // The actual fullscreen-plane + shader material. Split out from
 // ShaderScene so `useFrame`/`useThree` (R3F hooks — only valid inside a
 // <Canvas>) sit right next to the JSX that needs them.
-function ShaderPlane({ isDark, mouseRef }: ShaderPlaneProps) {
+function ShaderPlane({ isDark, mouseRef, wrapperRef }: ShaderPlaneProps) {
   const meshRef = useRef<Mesh>(null);
   // Holds the live three.js material instance. Only ever read/written
   // inside effects and useFrame — never in the render body/JSX — which is
@@ -49,6 +50,7 @@ function ShaderPlane({ isDark, mouseRef }: ShaderPlaneProps) {
         u_resolution: { value: new Vector2(1, 1) },
         u_mouse: { value: new Vector2(0.5, 0.5) },
         u_isLight: { value: isDark ? 0 : 1 },
+        u_aspect: { value: 1 },
       },
       depthTest: false,
       depthWrite: false,
@@ -88,6 +90,25 @@ function ShaderPlane({ isDark, mouseRef }: ShaderPlaneProps) {
     // ratio R3F resolved.
     const dpr = state.viewport.dpr;
     material.uniforms.u_resolution.value.set(state.size.width * dpr, state.size.height * dpr);
+
+    // u_resolution above tracks R3F's measured size, which is debounced
+    // (see the Canvas `resize` prop below) and so goes stale for up to
+    // 500ms while HeroScrollShell's MotionValues animate this wrapper's
+    // box every scroll tick. Reading the wrapper's live box here — once
+    // per frame, no separate ResizeObserver/state/effect — keeps the
+    // shader's aspect correction (used in the fragment shader) always
+    // matching the box it's actually being displayed in, so the CSS
+    // stretch from ShaderScene.css never visibly squishes the ribbons
+    // mid-scroll. u_resolution itself is left untouched: it still only
+    // needs to normalize gl_FragCoord into 0..1 UV space, which staying
+    // debounced doesn't visibly affect.
+    const wrapper = wrapperRef.current;
+    if (wrapper) {
+      const rect = wrapper.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        material.uniforms.u_aspect.value = rect.width / rect.height;
+      }
+    }
 
     // Ease toward the latest pointer sample instead of snapping to it, so
     // the field's response to the mouse reads as a gentle pull rather than
@@ -180,7 +201,7 @@ export default function ShaderScene() {
         // only happens once scrolling has properly stopped.
         resize={{ debounce: { scroll: 500, resize: 0 } }}
       >
-        <ShaderPlane isDark={isDark} mouseRef={mouseRef} />
+        <ShaderPlane isDark={isDark} mouseRef={mouseRef} wrapperRef={wrapperRef} />
       </Canvas>
     </div>
   );

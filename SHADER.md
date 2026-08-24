@@ -32,7 +32,8 @@ extension — same organization the assignment suggested, zero new tooling.
 | Uniform | Type | What it does |
 |---|---|---|
 | `u_time` | `float` | Seconds since the shader mounted (`state.clock.elapsedTime`, read inside `useFrame`). Drives every wave/flow calculation. Scaled by `0.06` inside the shader so the whole field evolves slowly — a full cycle takes on the order of a minute, not seconds. |
-| `u_resolution` | `vec2` | The canvas's physical pixel size (CSS size × the actual device pixel ratio R3F resolved, capped — see below). Used to normalize `gl_FragCoord` into 0..1 UV space and to correct for aspect ratio, so the field looks the same shape on a wide desktop hero and a narrow phone screen. |
+| `u_resolution` | `vec2` | The canvas's physical pixel size (CSS size × the actual device pixel ratio R3F resolved, capped — see below). Used only to normalize `gl_FragCoord` into 0..1 UV space. |
+| `u_aspect` | `float` | The shader wrapper's live `width / height`, read via `getBoundingClientRect()` inside `useFrame` — independent of `u_resolution`, which only updates on a debounced measurement (see the `resize` prop on `<Canvas>`). Used to correct for aspect ratio. Kept separate from `u_resolution` so the hero's scroll-linked shrink (HeroScrollShell) doesn't stretch/squish the field while the WebGL buffer itself is still catching up. |
 | `u_mouse` | `vec2` | The pointer position, normalized to 0..1, eased toward the latest sample each frame (not snapped) so the field's response reads as a gentle pull. |
 | `u_isLight` | `float` | `0` in dark mode, `1` in light mode (read from the `.dark` class via a `MutationObserver`, see `useIsDarkTheme.ts`). Lets one shader adapt its own intensity per theme instead of shipping two shaders. |
 
@@ -41,10 +42,10 @@ extension — same organization the assignment suggested, zero new tooling.
 `gl_FragCoord.xy` is the fragment's position in physical pixels. Dividing
 by `u_resolution` normalizes that to 0..1 regardless of screen size or
 DPR. Subtracting `0.5` re-centers the origin at the middle of the
-viewport, and multiplying `p.x` by the aspect ratio (`u_resolution.x /
-u_resolution.y`) stops the field's shapes from stretching on wide
-viewports — without this correction, a circle would render as an ellipse
-on anything that isn't square.
+viewport, and multiplying `p.x` by the aspect ratio (`u_aspect`) stops the
+field's shapes from stretching on wide viewports — without this
+correction, a circle would render as an ellipse on anything that isn't
+square.
 
 ## How the flow field is built
 

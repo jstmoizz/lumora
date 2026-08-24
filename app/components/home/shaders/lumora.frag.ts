@@ -15,6 +15,13 @@ export const fragmentShader = /* glsl */ `
   uniform vec2 u_resolution;
   uniform vec2 u_mouse;
   uniform float u_isLight;
+  // Live width/height of the shader's container, sampled every frame on
+  // the JS side independently of u_resolution (which only updates on a
+  // debounced measurement) — see ShaderScene.tsx. Keeps aspect correction
+  // matching the box actually on screen during HeroScrollShell's
+  // scroll-linked resize, instead of the stale ratio u_resolution would
+  // give mid-scroll.
+  uniform float u_aspect;
 
   // Cheap hash-based pseudo-random value, used only for the grain pass.
   // No texture lookups, no external noise library — a single sine/fract
@@ -47,7 +54,7 @@ export const fragmentShader = /* glsl */ `
     // 2. Correct for aspect ratio so the ribbons keep their proportions on
     // wide desktop heroes and narrow phone screens alike, instead of
     // stretching horizontally on wide viewports.
-    float aspect = u_resolution.x / u_resolution.y;
+    float aspect = u_aspect;
     p.x *= aspect;
 
     // 3. Subtle mouse influence: the cursor gently bends nearby flow
