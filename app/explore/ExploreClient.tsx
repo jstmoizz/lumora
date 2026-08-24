@@ -1,17 +1,20 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useMemo, useRef, useState, useTransition } from "react";
 import ScenePlaceholder from "./ScenePlaceholder";
 import StaticFallback from "./StaticFallback";
-import TopicControls from "./TopicControls";
-import TopicPanel from "./TopicPanel";
-import { EXPANDED_CONCEPTS, KNOWLEDGE_NODES } from "./data";
-import { expansionStateFor } from "./progress";
+import TopicPanel, { type RelatedItem } from "./TopicPanel";
+import OptionWheel from "./components/OptionWheel";
+import ConfirmDialog from "./components/ConfirmDialog";
+import ResetGraphControl from "./components/ResetGraphControl";
+import type { KnowledgeGraphNode } from "./data";
+import { levelForNodeCount } from "./levels";
 import { useReducedMotion } from "./useReducedMotion";
 import { useWebglSupported } from "./webgl";
-import { recordTopicStudied } from "@/lib/supabase/topic-progress-actions";
-import type { TopicProgress } from "@/lib/supabase/topic-progress";
+import { deleteKnowledgeNode } from "@/lib/supabase/knowledge-graph-actions";
+import { normalizeTopicKey } from "@/lib/knowledge-graph/topics";
 
 // Keeps three/@react-three/* entirely out of every bundle except the one
 // that actually renders this scene, and out of the server-rendered HTML.
@@ -21,117 +24,255 @@ const Scene = dynamic(() => import("./components/Scene"), {
 });
 
 interface ExploreClientProps {
-  progress: Record<string, TopicProgress>;
+  nodes: KnowledgeGraphNode[];
 }
 
-export default function ExploreClient({ progress }: ExploreClientProps) {
+export default function ExploreClient({ nodes }: ExploreClientProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+
   // Both hooks default to their SSR-safe "false" snapshot and self-correct
-  // against the real client value before paint (see useReducedMotion /
-  // useWebglSupported) — no manual mount-detection effect needed.
+  // against the real client value before paint — no manual mount-detection
+  // effect needed.
   const reducedMotion = useReducedMotion();
   const webglSupported = useWebglSupported();
+
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  // An unlocked-but-not-yet-studied label being previewed (from the wheel or
+  // a related pill) — mutually exclusive with selectedNodeId.
+  const [previewLabel, setPreviewLabel] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<KnowledgeGraphNode | null>(null);
 
   // Remembers whichever HTML control triggered a selection (a 3D-node click
   // has none) so "Back to overview" can return focus to it.
   const lastTriggerRef = useRef<HTMLElement | null>(null);
 
-  // Mirrors the last core topic id study progress was recorded for, so
-  // handleSelect can tell "a genuinely new core topic was chosen" apart
-  // from "the already-recorded topic is still in context" — only the
-  // former should record study progress. A ref rather than reading
-  // `selectedNodeId` directly keeps handleSelect's identity stable and
-  // avoids any dependency on React's render timing.
-  const recordedNodeIdRef = useRef<string | null>(null);
+  const handleSelect = useCallback((id: string, trigger?: HTMLElement | null) => {
+    lastTriggerRef.current = trigger ?? null;
+    setPreviewLabel(null);
+    setSelectedNodeId(id);
+  }, []);
 
-  const handleSelect = useCallback(
-    (id: string, trigger?: HTMLElement | null) => {
-      lastTriggerRef.current = trigger ?? null;
-      setSelectedNodeId(id);
-
-      // Only ever records a *core* topic (Phase 4.2 behavior, unchanged) —
-      // selecting an expanded concept (Phase 4.3) is interaction-only and
-      // never touches topic_progress; see the Phase 4.3 report for why.
-      // Only fires from a real click/keyboard-activation event (never a
-      // re-render or effect), and only once per genuine transition into a
-      // topic — re-clicking the already-recorded topic, or browsing one of
-      // its concepts and coming back to it, is a no-op here, so this can
-      // never turn into a render-loop or rapid-double-count. Fire-and-
-      // forget: Explore's own UI never waits on this, and a failed write is
-      // swallowed quietly rather than shown to the user (see
-      // recordTopicStudied's own error handling).
-      const isCoreTopic = KNOWLEDGE_NODES.some((node) => node.id === id);
-      if (isCoreTopic && id !== recordedNodeIdRef.current) {
-        recordedNodeIdRef.current = id;
-        recordTopicStudied(id).catch(() => {});
-      }
-    },
-    [],
-  );
+  const handlePreview = useCallback((label: string) => {
+    lastTriggerRef.current = null;
+    setSelectedNodeId(null);
+    setPreviewLabel(label);
+  }, []);
 
   const handleBack = useCallback(() => {
     setSelectedNodeId(null);
-    recordedNodeIdRef.current = null;
+    setPreviewLabel(null);
     lastTriggerRef.current?.focus();
     lastTriggerRef.current = null;
   }, []);
 
-  // The core topic currently in context for TopicPanel — either the one
-  // literally selected, or the parent of a selected expanded concept, so
-  // the panel always has a topic to anchor to.
-  const selectedConcept = selectedNodeId
-    ? (EXPANDED_CONCEPTS.find((concept) => concept.id === selectedNodeId) ??
-      null)
-    : null;
-  const contextCoreId = selectedConcept
-    ? selectedConcept.parentId
-    : selectedNodeId;
-  const contextCoreNode = contextCoreId
-    ? (KNOWLEDGE_NODES.find((node) => node.id === contextCoreId) ?? null)
-    : null;
-  const topicExpansionState = expansionStateFor(
-    contextCoreNode ? progress[contextCoreNode.id]?.studyCount : undefined,
-  );
-  const relatedConcepts = contextCoreNode
-    ? EXPANDED_CONCEPTS.filter(
-        (concept) => concept.parentId === contextCoreNode.id,
-      )
-    : [];
+  const selectedNode = selectedNodeId ? (nodes.find((node) => node.id === selectedNodeId) ?? null) : null;
 
+  const nodesByTopicKey = useMemo(() => new Map(nodes.map((node) => [node.topicKey, node])), [nodes]);
+
+  const relatedItems: RelatedItem[] = useMemo(() => {
+    if (!selectedNode) return [];
+    return selectedNode.relatedLabels.map((label) => ({
+      label,
+      nodeId: nodesByTopicKey.get(normalizeTopicKey(label))?.id ?? null,
+    }));
+  }, [selectedNode, nodesByTopicKey]);
+
+  // The Topics list shows exactly the nodes that exist in the graph —
+  // nothing inferred or not-yet-studied. Suggestions the model named but the
+  // user hasn't studied yet still surface, just inside a selected node's own
+  // "Related" list below (see `relatedItems` above), not mixed into this
+  // one, which is meant to answer "what's actually in my graph."
+  const allTopicLabels = useMemo(() => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const topicNode of nodes) {
+      if (seen.has(topicNode.topicKey)) continue;
+      seen.add(topicNode.topicKey);
+      result.push(topicNode.label);
+    }
+    return result;
+  }, [nodes]);
+
+  function handleTopicChoice(label: string, trigger?: HTMLElement | null) {
+    const existing = nodesByTopicKey.get(normalizeTopicKey(label));
+    if (existing) {
+      handleSelect(existing.id, trigger);
+    } else {
+      handlePreview(label);
+    }
+  }
+
+  function handleRequestDelete(node: KnowledgeGraphNode) {
+    setDeleteTarget(node);
+  }
+
+  function handleConfirmDelete() {
+    if (!deleteTarget) return;
+    const id = deleteTarget.id;
+    startTransition(async () => {
+      await deleteKnowledgeNode(id);
+      if (selectedNodeId === id) handleBack();
+      router.refresh();
+    });
+  }
+
+  const level = levelForNodeCount(nodes.length);
   const showScene = !reducedMotion && webglSupported;
+  const showPanel = selectedNode !== null || previewLabel !== null;
 
   return (
-    <div className="flex flex-1 flex-col">
-      <div
-        aria-label="Interactive 3D knowledge space. Use the topic list below for keyboard access."
-        className="relative h-[65vh] min-h-[420px] w-full overflow-hidden rounded-2xl border border-zinc-800 bg-[#08070c] sm:h-[70vh]"
-      >
-        {showScene ? (
-          <Scene
-            selectedNodeId={selectedNodeId}
-            onSelect={handleSelect}
-            progress={progress}
-          />
-        ) : (
-          <StaticFallback
-            selectedNodeId={selectedNodeId}
-            onSelect={handleSelect}
-          />
-        )}
-
-        {contextCoreNode && (
-          <TopicPanel
-            node={contextCoreNode}
-            concept={selectedConcept}
-            expansionState={topicExpansionState}
-            relatedConcepts={relatedConcepts}
-            onBack={handleBack}
-            onSelect={handleSelect}
-          />
-        )}
+    // `min-h-0 flex-1` (not a fixed/vh height) so this exactly fills
+    // whatever page.tsx's own fixed-height <main> leaves it — the whole
+    // point of the fixed-page layout is that nothing here forces the page
+    // itself to scroll; only OptionWheel's own wheel/drag handling "scrolls"
+    // within its column.
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      {/* Mirrors the graph(flex-1)/list(w-72) split below it, so "Topics"
+          sits directly above the list it labels instead of floating as a
+          page-wide banner disconnected from either column. */}
+      <div className="flex shrink-0 items-center gap-4">
+        <div className="flex flex-1 flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">
+            Knowledge Level {level.level} · {level.name}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>
+            {nodes.length} topic{nodes.length === 1 ? "" : "s"}
+          </span>
+          {nodes.length > 0 && (
+            <>
+              <span aria-hidden="true">·</span>
+              <ResetGraphControl />
+            </>
+          )}
+        </div>
+        <p className="hidden w-72 shrink-0 text-right text-xs font-medium tracking-wide text-muted-foreground uppercase md:block">
+          Topics
+        </p>
       </div>
 
-      <TopicControls selectedNodeId={selectedNodeId} onSelect={handleSelect} />
+      {/* A fixed-height row, vertically centered in whatever's left (not
+          flex-1 stretching all the way down) — the graph and the list both
+          used to reach right down to the bottom of the viewport, where the
+          floating dock sits, so on shorter windows the list's lower items
+          ended up visually behind/under it. min(560px,100%) keeps that
+          height on tall viewports but still shrinks to fit short ones. */}
+      <div className="flex min-h-0 flex-1 items-center justify-center">
+        <div className="flex h-[min(560px,100%)] w-full gap-4">
+          {/* flex-1 + min-w-0: stretches to fill essentially the whole width
+              next to the topic list, instead of sitting in a narrow centered
+              column with empty space on both sides. */}
+          <div
+            aria-label="Interactive 3D knowledge space. Use the topic list for keyboard access."
+            className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl border border-zinc-800 bg-[#08070c]"
+          >
+            {showScene ? (
+              <Scene nodes={nodes} selectedNodeId={selectedNodeId} onSelect={handleSelect} />
+            ) : (
+              <StaticFallback nodes={nodes} selectedNodeId={selectedNodeId} onSelect={handleSelect} />
+            )}
+
+            {nodes.length === 0 && !showPanel && (
+              <div className="absolute inset-x-3 bottom-3 z-10 rounded-xl border border-zinc-800 bg-[#0c0b12]/95 p-4 text-center backdrop-blur-sm sm:inset-x-auto sm:right-4 sm:bottom-4 sm:left-4">
+                <p className="text-sm font-medium text-zinc-100">Your knowledge graph starts here.</p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Study something on Generate to begin growing your universe.
+                </p>
+              </div>
+            )}
+
+            {showPanel && (
+              <TopicPanel
+                node={selectedNode}
+                previewLabel={selectedNode ? null : previewLabel}
+                relatedItems={relatedItems}
+                onBack={handleBack}
+                onSelect={handleSelect}
+                onPreview={handlePreview}
+                onDelete={handleRequestDelete}
+              />
+            )}
+          </div>
+
+          {/* Docked at the right edge on anything wider than a phone (md:+) —
+              true small-screen widths fall back to the bottom chip row below,
+              since the wheel needs real vertical room to read as a list
+              rather than a cramped column. Shows exactly the nodes in the
+              graph — see `allTopicLabels`'s own comment for why unlocked
+              suggestions live in a selected node's Related list instead. */}
+          <aside aria-label="Topics" className="hidden min-h-0 w-72 shrink-0 md:flex md:flex-col">
+            {/*
+              OptionWheel's own prop defaults (fontSize 3rem, inset 80px) are
+              sized for a full-bleed demo layout, not a ~288px (w-72)
+              sidebar — text at 3rem would overflow the column entirely.
+              textColor/activeColor are plain CSS color values as far as the
+              component's concerned, so passing theme variables here (rather
+              than literal hex) is enough to get automatic light/dark
+              support with zero changes inside the component itself.
+            */}
+            <OptionWheel
+              items={allTopicLabels}
+              side="right"
+              fontSize={1.05}
+              spacing={1.7}
+              curve={0.6}
+              tilt={3}
+              blur={1.5}
+              fade={0.22}
+              minOpacity={0.15}
+              inset={20}
+              textColor="var(--muted-foreground)"
+              activeColor="var(--foreground)"
+              onChange={(_index, label) => handleTopicChoice(label)}
+              aria-label="Topics"
+            />
+          </aside>
+        </div>
+      </div>
+
+      {/* Mobile: a compact chip row instead of squeezing the wheel into a
+          tiny sidebar — same topic list as the wheel above. */}
+      {allTopicLabels.length > 0 && (
+        <div className="shrink-0 md:hidden">
+          <p className="text-center text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            Topics
+          </p>
+          <div className="mt-2 flex flex-wrap justify-center gap-1.5">
+            {allTopicLabels.map((label) => {
+              const existing = nodesByTopicKey.get(normalizeTopicKey(label));
+              const isSelected = existing !== undefined && existing.id === selectedNodeId;
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={(event) => handleTopicChoice(label, event.currentTarget)}
+                  className={
+                    isSelected
+                      ? "rounded-full border border-indigo-400/60 bg-indigo-500/10 px-2.5 py-1 text-xs font-medium text-foreground"
+                      : "rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+                  }
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title={deleteTarget ? `Delete "${deleteTarget.label}"?` : "Delete Topic"}
+        description="This removes the topic and anything nested under it from your knowledge graph. This can't be undone."
+        confirmLabel="Delete"
+        onConfirm={handleConfirmDelete}
+      />
+      <span className="sr-only" aria-live="polite">
+        {isPending ? "Updating your knowledge graph…" : ""}
+      </span>
     </div>
   );
 }

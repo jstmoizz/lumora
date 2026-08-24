@@ -8,6 +8,7 @@ import { HistoryIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatRelativeTime } from "@/lib/formatRelativeTime";
 import type { ConversationSummary } from "@/lib/supabase/conversations";
+import HistoryParticlesBackground from "./HistoryParticlesBackground";
 
 function prefersReducedMotion() {
   if (typeof window === "undefined") return true;
@@ -110,8 +111,10 @@ export default function HistoryClient({
   return (
     <main
       ref={pageRef}
-      className="flex flex-1 flex-col items-center px-6 py-16 pb-24 sm:py-20"
+      className="relative flex flex-1 flex-col items-center px-6 py-16 pb-24 sm:py-20"
     >
+      <HistoryParticlesBackground />
+
       <div className="flex w-full max-w-2xl flex-col items-center gap-2 text-center">
         <h1
           ref={titleRef}

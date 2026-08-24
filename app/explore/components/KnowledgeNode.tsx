@@ -2,100 +2,75 @@
 
 import { useRef, useState } from "react";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
+import { Html } from "@react-three/drei";
 import { MathUtils, type Mesh } from "three";
-import { NODE_ACCENTS, type KnowledgeNode as KnowledgeNodeData } from "../data";
-import { familiarityFor, type Familiarity } from "../progress";
+import { NODE_ACCENTS, type AccentId, type KnowledgeGraphNode } from "../data";
 import Glow from "./Glow";
 
 interface KnowledgeNodeProps {
-  node: KnowledgeNodeData;
+  node: KnowledgeGraphNode;
+  position: [number, number, number];
+  // 0 = top-level (studied directly), 1+ = a child of another studied
+  // topic — drives the same two-shape/two-size vocabulary the old `tier`
+  // field used to (icosahedron+larger for the "foundational" ring, octahedron
+  // +smaller for everything nested under it), just derived from the graph's
+  // own shape instead of a hand-picked field.
+  depth: number;
+  accent: AccentId;
   isSelected: boolean;
-  // Directly related to the current selection (shares a KNOWLEDGE_EDGES
-  // entry) — stays visible and a touch more prominent, distinct from nodes
-  // with no relation to the current selection.
+  // Directly related to the current selection (parent/child, or named in
+  // each other's relatedLabels) — stays visible and a touch more prominent,
+  // distinct from nodes with no relation to the current selection.
   isRelated: boolean;
   isDimmed: boolean;
   onSelect: (id: string, trigger?: HTMLElement | null) => void;
-  // The signed-in user's topic_progress.study_count for this node, or
-  // undefined if it's never been studied. Only ever nudges the *baseline*
-  // presence (see FAMILIARITY_* below) — selection/hover feedback stays the
-  // dominant signal regardless of study history.
-  studyCount?: number;
 }
 
-// Restrained, capped bumps layered on top of the existing baseline —
-// personal familiarity should read as "a little more present," never as a
-// second competing visual system. Central Lumora is never touched by these,
-// so it stays dominant regardless of anyone's progress.
-const FAMILIARITY_SCALE_BUMP: Record<Familiarity, number> = {
-  0: 0,
-  1: 0.06,
-  2: 0.12,
-};
-const FAMILIARITY_GLOW_BUMP: Record<Familiarity, number> = {
-  0: 0,
-  1: 0.04,
-  2: 0.08,
-};
-const FAMILIARITY_EMISSIVE_BUMP: Record<Familiarity, number> = {
-  0: 0,
-  1: 0.03,
-  2: 0.06,
-};
-
-// Interactive scale is a multiplier on top of the tier's geometry radius
+// Interactive scale is a multiplier on top of the depth's geometry radius
 // (see CORE_RADIUS/SECONDARY_RADIUS below), so hover/selection read the same
-// way regardless of tier.
+// way regardless of depth.
 const BASE_SCALE = 1;
 const HOVER_SCALE = 1.15;
 const SELECTED_SCALE = 1.3;
 const SCALE_LERP = 0.15;
 
-// Two-shape vocabulary: core topics get the rounder icosahedron (closer in
-// spirit to CentralNode's smoother form), secondary topics keep the
+// Two-shape vocabulary: top-level topics get the rounder icosahedron (closer
+// in spirit to CentralNode's smoother form), nested topics keep the
 // sharper-faceted octahedron. Kept deliberately small — a star-point, not a
 // UI sphere — with the Glow below doing the work of making each one read as
-// a soft source of light rather than a small solid shape. Radii still give
-// core nodes a modest, not dramatic, size edge over secondary ones.
+// a soft source of light rather than a small solid shape.
 const CORE_RADIUS = 0.34;
 const SECONDARY_RADIUS = 0.24;
 
-// One topic node. Position comes from the parent <group> (static, from
-// data.ts); only local offsets (bob, scale, rotation) are driven imperatively
-// here, so the two never fight each other on re-render.
+// One topic node. Position comes from the parent <group> (computed by
+// graphLayout.ts); only local offsets (bob, scale, rotation) are driven
+// imperatively here, so the two never fight each other on re-render.
 export default function KnowledgeNode({
   node,
+  position,
+  depth,
+  accent,
   isSelected,
   isRelated,
   isDimmed,
   onSelect,
-  studyCount,
 }: KnowledgeNodeProps) {
   const meshRef = useRef<Mesh>(null);
   const [hovered, setHovered] = useState(false);
   const currentScale = useRef(BASE_SCALE);
-  const familiarity = familiarityFor(studyCount);
-  const scaleBump = FAMILIARITY_SCALE_BUMP[familiarity];
   // Randomized once per node (lazy initializer, so the impure call only
-  // ever runs on mount) so the ~7 nodes don't bob in lockstep.
+  // ever runs on mount) so nodes don't bob in lockstep.
   const [bobOffset] = useState(() => Math.random() * Math.PI * 2);
 
   useFrame((state) => {
     const mesh = meshRef.current;
     if (!mesh) return;
 
-    const targetScale =
-      (isSelected ? SELECTED_SCALE : hovered ? HOVER_SCALE : BASE_SCALE) +
-      scaleBump;
-    currentScale.current = MathUtils.lerp(
-      currentScale.current,
-      targetScale,
-      SCALE_LERP,
-    );
+    const targetScale = isSelected ? SELECTED_SCALE : hovered ? HOVER_SCALE : BASE_SCALE;
+    currentScale.current = MathUtils.lerp(currentScale.current, targetScale, SCALE_LERP);
     mesh.scale.setScalar(currentScale.current);
 
-    mesh.position.y =
-      Math.sin(state.clock.elapsedTime * 0.4 + bobOffset) * 0.05;
+    mesh.position.y = Math.sin(state.clock.elapsedTime * 0.4 + bobOffset) * 0.05;
     mesh.rotation.y += 0.001;
   });
 
@@ -116,46 +91,49 @@ export default function KnowledgeNode({
     onSelect(node.id);
   }
 
+  const isCore = depth === 0;
   const opacity = isSelected ? 1 : isDimmed ? (isRelated ? 0.75 : 0.32) : 1;
-  const emissiveBump = FAMILIARITY_EMISSIVE_BUMP[familiarity];
   const emissiveIntensity = isSelected
-    ? 0.5
+    ? 0.75
     : hovered
-      ? 0.35
+      ? 0.55
       : isRelated && isDimmed
-        ? 0.22 + emissiveBump
-        : 0.15 + emissiveBump;
+        ? 0.4
+        : 0.3;
 
-  // Restrained per-node color identity (see NODE_ACCENTS); selection still
-  // converges every node toward the same shared Lumora violet, so "selected"
-  // reads as "now has Lumora's attention" regardless of the node's own hue.
-  const accent = NODE_ACCENTS[node.accent];
-  const color = isSelected ? "#8b85e6" : accent.color;
-  const emissiveColor = isSelected ? "#a89ef2" : accent.emissive;
+  // Per-node color identity (see NODE_ACCENTS, Lumora's own indigo/violet/
+  // pink gradient); selection converges every node toward the brightest,
+  // hottest point on that same gradient, so "selected" reads as "now has
+  // Lumora's attention" regardless of the node's own hue.
+  const accentColors = NODE_ACCENTS[accent];
+  const color = isSelected ? "#c9a0e8" : accentColors.color;
+  const emissiveColor = isSelected ? "#f9a8d4" : accentColors.emissive;
 
   // Glow hierarchy: strong when selected, moderate for its related
   // neighborhood, quietly present normally, and nearly gone for unrelated
-  // nodes once something else is selected. Core topics sit a touch stronger
-  // than secondary even at rest, echoing their slightly larger geometry.
-  const glowBump = FAMILIARITY_GLOW_BUMP[familiarity];
+  // nodes once something else is selected. Top-level topics sit a touch
+  // stronger than nested ones even at rest, echoing their slightly larger
+  // geometry.
   const glowOpacity = isSelected
-    ? 0.3
+    ? 0.48
     : isDimmed
       ? isRelated
-        ? 0.14 + glowBump
-        : 0.04
-      : (node.tier === "core" ? 0.12 : 0.08) + glowBump;
-  const radius = node.tier === "core" ? CORE_RADIUS : SECONDARY_RADIUS;
+        ? 0.24
+        : 0.06
+      : isCore
+        ? 0.22
+        : 0.16;
+  const radius = isCore ? CORE_RADIUS : SECONDARY_RADIUS;
 
   return (
-    <group position={node.position}>
+    <group position={position}>
       <mesh
         ref={meshRef}
         onPointerOver={handlePointerOver}
         onPointerOut={handlePointerOut}
         onClick={handleClick}
       >
-        {node.tier === "core" ? (
+        {isCore ? (
           <icosahedronGeometry args={[CORE_RADIUS, 0]} />
         ) : (
           <octahedronGeometry args={[SECONDARY_RADIUS, 0]} />
@@ -173,13 +151,34 @@ export default function KnowledgeNode({
             the same bob/scale transform automatically, instead of drifting
             apart from the node it's glowing around. */}
         <Glow
-          shape={node.tier === "core" ? "icosahedron" : "octahedron"}
+          shape={isCore ? "icosahedron" : "octahedron"}
           radius={radius}
           color={emissiveColor}
           opacity={glowOpacity}
-          haloScale={2.2}
+          haloScale={2.3}
+          haloScaleOuter={3}
+          opacityOuter={glowOpacity * 0.25}
         />
       </mesh>
+      {/* A plain HTML overlay, not 3D text — every node shows its own name
+          directly on the graph so identifying a topic never requires
+          clicking it first. Sits on the outer group (not inside the bobbing
+          mesh) so the label itself stays still while its node breathes. */}
+      <Html center position={[0, -(radius + 0.24), 0]} zIndexRange={[10, 0]} occlude={false}>
+        <button
+          type="button"
+          onClick={() => onSelect(node.id)}
+          className="cursor-pointer rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap backdrop-blur-sm transition-opacity"
+          style={{
+            opacity,
+            color: isSelected ? "#f1f0ff" : "#c9c6e2",
+            borderColor: isSelected ? "rgba(139,133,230,0.65)" : "rgba(255,255,255,0.14)",
+            background: "rgba(8,7,12,0.6)",
+          }}
+        >
+          {node.label}
+        </button>
+      </Html>
     </group>
   );
 }

@@ -1,4 +1,5 @@
 import type {
+  AddKnowledgeTopicOutput,
   CreateFlashcardsOutput,
   CreateQuizOutput,
   LumoraUIMessage,
@@ -240,6 +241,66 @@ export function outputErrorFlashcardsPart(
     toolCallId,
     state: "output-error",
     input: SAMPLE_FLASHCARDS_INPUT,
+    errorText,
+  });
+}
+
+type AddKnowledgeTopicUIPart = Extract<
+  LumoraUIMessage["parts"][number],
+  { type: "tool-addKnowledgeTopic" }
+>;
+
+const SAMPLE_ADD_TOPIC_INPUT = { topic: "World War II" };
+
+export function addKnowledgeTopicPart(
+  overrides: Partial<AddKnowledgeTopicUIPart> & { toolCallId?: string },
+): AddKnowledgeTopicUIPart {
+  return {
+    type: "tool-addKnowledgeTopic",
+    toolCallId: overrides.toolCallId ?? "add-topic-call-1",
+    ...overrides,
+  } as AddKnowledgeTopicUIPart;
+}
+
+export function inputStreamingAddTopicPart(
+  toolCallId = "add-topic-call-1",
+): AddKnowledgeTopicUIPart {
+  return addKnowledgeTopicPart({ toolCallId, state: "input-streaming", input: undefined });
+}
+
+export function inputAvailableAddTopicPart(
+  toolCallId = "add-topic-call-2",
+): AddKnowledgeTopicUIPart {
+  return addKnowledgeTopicPart({
+    toolCallId,
+    state: "input-available",
+    input: SAMPLE_ADD_TOPIC_INPUT,
+  });
+}
+
+export function addedTopic(): AddKnowledgeTopicOutput {
+  return { topic: SAMPLE_ADD_TOPIC_INPUT.topic, category: "20th Century History" };
+}
+
+export function outputAvailableAddTopicPart(
+  toolCallId = "add-topic-call-3",
+): AddKnowledgeTopicUIPart {
+  return addKnowledgeTopicPart({
+    toolCallId,
+    state: "output-available",
+    input: SAMPLE_ADD_TOPIC_INPUT,
+    output: addedTopic(),
+  });
+}
+
+export function outputErrorAddTopicPart(
+  errorText = "The topic was empty after trimming whitespace.",
+  toolCallId = "add-topic-call-4",
+): AddKnowledgeTopicUIPart {
+  return addKnowledgeTopicPart({
+    toolCallId,
+    state: "output-error",
+    input: SAMPLE_ADD_TOPIC_INPUT,
     errorText,
   });
 }

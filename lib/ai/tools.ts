@@ -28,6 +28,18 @@ const quizQuestionInputSchema = z.object({
 const createQuizInputSchema = z.object({
   topic: z.string().min(1).max(80),
   questions: z.array(quizQuestionInputSchema).min(1).max(5),
+  // Feeds Explore's knowledge graph (lib/supabase/knowledge-graph.ts) as
+  // suggested "unlocked" topics once this one has been studied — optional
+  // since not every quiz needs to name related subtopics, but the model is
+  // asked to include 3-6 whenever the subject genuinely has some (see
+  // SYSTEM_PROMPT).
+  relatedTopics: z.array(z.string().min(1).max(60)).min(3).max(6).optional(),
+  // The broader field `topic` belongs under (e.g. topic "Binary Search
+  // Trees" -> category "Data Structures and Algorithms"), so Explore can
+  // nest it under that category even the very first time it's studied,
+  // without needing the category to already exist as its own node. Omitted
+  // when `topic` is itself already a broad top-level subject.
+  category: z.string().min(1).max(80).optional(),
 });
 
 export type CreateQuizInput = z.infer<typeof createQuizInputSchema>;
@@ -43,6 +55,8 @@ export interface CreateQuizOutput {
   quizId: string;
   topic: string;
   questions: CreateQuizQuestion[];
+  relatedTopics?: string[];
+  category?: string;
 }
 
 /**
@@ -60,7 +74,7 @@ export const createQuizTool = tool({
   description:
     "Create a short multiple-choice quiz to test the student's understanding of a topic they're studying. Call this whenever the user asks to be quizzed, tested, or wants practice questions. Write 1-5 clear questions, each with exactly four distinct answer options and exactly one correct answer.",
   inputSchema: createQuizInputSchema,
-  execute: async ({ topic, questions }): Promise<CreateQuizOutput> => {
+  execute: async ({ topic, questions, relatedTopics, category }): Promise<CreateQuizOutput> => {
     const normalizedTopic = topic.trim();
     if (!normalizedTopic) {
       throw new Error("The quiz topic was empty after trimming whitespace.");
@@ -112,10 +126,17 @@ export const createQuizTool = tool({
       };
     });
 
+    const normalizedRelated = relatedTopics
+      ?.map((related) => related.trim())
+      .filter(Boolean);
+    const normalizedCategory = category?.trim();
+
     return {
       quizId,
       topic: normalizedTopic,
       questions: normalizedQuestions,
+      ...(normalizedRelated?.length ? { relatedTopics: normalizedRelated } : {}),
+      ...(normalizedCategory ? { category: normalizedCategory } : {}),
     };
   },
 });
@@ -129,6 +150,9 @@ const flashcardInputSchema = z.object({
 const createFlashcardsInputSchema = z.object({
   topic: z.string().min(1).max(80),
   cards: z.array(flashcardInputSchema).min(1).max(10),
+  // See createQuizInputSchema's relatedTopics/category for what these feed.
+  relatedTopics: z.array(z.string().min(1).max(60)).min(3).max(6).optional(),
+  category: z.string().min(1).max(80).optional(),
 });
 
 export type CreateFlashcardsInput = z.infer<typeof createFlashcardsInputSchema>;
@@ -144,6 +168,8 @@ export interface CreateFlashcardsOutput {
   flashcardSetId: string;
   topic: string;
   cards: Flashcard[];
+  relatedTopics?: string[];
+  category?: string;
 }
 
 /**
@@ -157,7 +183,7 @@ export const createFlashcardsTool = tool({
   description:
     "Create a set of flashcards to help the student review and memorize a topic they're studying. Call this whenever the user asks for flashcards, or to review/memorize/study a topic that way. Write 1-10 cards, each with a short front (the question or term) and a back (the answer or definition); an optional brief explanation can add context the back alone doesn't cover.",
   inputSchema: createFlashcardsInputSchema,
-  execute: async ({ topic, cards }): Promise<CreateFlashcardsOutput> => {
+  execute: async ({ topic, cards, relatedTopics, category }): Promise<CreateFlashcardsOutput> => {
     const normalizedTopic = topic.trim();
     if (!normalizedTopic) {
       throw new Error(
@@ -187,10 +213,81 @@ export const createFlashcardsTool = tool({
       };
     });
 
+    const normalizedRelated = relatedTopics
+      ?.map((related) => related.trim())
+      .filter(Boolean);
+    const normalizedCategory = category?.trim();
+
     return {
       flashcardSetId,
       topic: normalizedTopic,
       cards: normalizedCards,
+      ...(normalizedRelated?.length ? { relatedTopics: normalizedRelated } : {}),
+      ...(normalizedCategory ? { category: normalizedCategory } : {}),
+    };
+  },
+});
+
+const addKnowledgeTopicInputSchema = z.object({
+  topic: z.string().min(1).max(80),
+  // See createQuizInputSchema's relatedTopics/category for what these feed —
+  // same fields, same meaning, just supplied without a quiz/flashcard set
+  // attached.
+  relatedTopics: z.array(z.string().min(1).max(60)).min(3).max(6).optional(),
+  category: z.string().min(1).max(80).optional(),
+  // Explore's TopicPanel shows this when present (see
+  // lib/supabase/knowledge-graph.ts). createQuiz/createFlashcards never
+  // supply one — the quiz/flashcard content itself is the "detail" for
+  // those — but a topic added this way has nothing else to show, so a short
+  // description is worth asking for here specifically. Capped well above
+  // what SYSTEM_PROMPT actually asks for (one or two sentences, ~200 chars):
+  // Groq validates tool-call arguments against this schema *before* our own
+  // `execute()` ever runs, so a cap the model can realistically overshoot
+  // (240 was too tight — a "one or two sentence" summary regularly landed at
+  // 250-260) fails the whole request with an opaque `invalid_request_error`,
+  // not a normal `output-error` state execute()'s own validation produces.
+  summary: z.string().min(1).max(400).optional(),
+});
+
+export type AddKnowledgeTopicInput = z.infer<typeof addKnowledgeTopicInputSchema>;
+
+export interface AddKnowledgeTopicOutput {
+  topic: string;
+  relatedTopics?: string[];
+  category?: string;
+  summary?: string;
+}
+
+/**
+ * Adds a topic to the user's Explore knowledge graph directly, with no quiz
+ * or flashcard set attached — for when the user explicitly asks to
+ * track/add/remember a topic there rather than study it right now.
+ * createQuiz/createFlashcards already add their topic to the graph as a
+ * side effect (see app/api/chat/route.ts's onEnd); this tool exists for the
+ * case those don't cover; SYSTEM_PROMPT tells the model not to call both for
+ * the same topic in the same turn.
+ */
+export const addKnowledgeTopicTool = tool({
+  description:
+    "Add a topic to the user's Explore knowledge graph when they explicitly ask to track, add, or remember it there — e.g. \"add World War II to my knowledge graph\", \"track that I'm learning Rust\", \"add this to Explore\". Do not call this for every topic mentioned in conversation, and do not call it in the same turn as createQuiz/createFlashcards for the same topic — those already add it as a side effect of studying it.",
+  inputSchema: addKnowledgeTopicInputSchema,
+  execute: async ({ topic, relatedTopics, category, summary }): Promise<AddKnowledgeTopicOutput> => {
+    const normalizedTopic = topic.trim();
+    if (!normalizedTopic) {
+      throw new Error("The topic was empty after trimming whitespace.");
+    }
+
+    const normalizedRelated = relatedTopics
+      ?.map((related) => related.trim())
+      .filter(Boolean);
+    const normalizedCategory = category?.trim();
+    const normalizedSummary = summary?.trim();
+
+    return {
+      topic: normalizedTopic,
+      ...(normalizedRelated?.length ? { relatedTopics: normalizedRelated } : {}),
+      ...(normalizedCategory ? { category: normalizedCategory } : {}),
+      ...(normalizedSummary ? { summary: normalizedSummary } : {}),
     };
   },
 });
@@ -204,6 +301,7 @@ export const createFlashcardsTool = tool({
 export const lumoraTools = {
   createQuiz: createQuizTool,
   createFlashcards: createFlashcardsTool,
+  addKnowledgeTopic: addKnowledgeTopicTool,
 };
 
 /**

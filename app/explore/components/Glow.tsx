@@ -13,6 +13,12 @@ interface GlowProps {
   // postprocessing bloom — is what makes them read as light sources rather
   // than tiny solid shapes.
   haloScale?: number;
+  // An optional second, larger/softer halo layered behind the first —
+  // a tight bright inner halo plus a big faint outer haze reads closer to
+  // real bloom's soft falloff than one flat halo, with no postprocessing
+  // pass. Omit for the original single-layer look.
+  haloScaleOuter?: number;
+  opacityOuter?: number;
 }
 
 // A restrained "fake glow": a larger, low-opacity, additive-blended copy of
@@ -21,21 +27,52 @@ interface GlowProps {
 // pass. `raycast={() => null}` makes it fully transparent to pointer events,
 // so it never steals hover/click from the node it's wrapping (or from
 // anything behind it).
-export default function Glow({ shape, radius, color, opacity, haloScale = 1.3 }: GlowProps) {
+export default function Glow({
+  shape,
+  radius,
+  color,
+  opacity,
+  haloScale = 1.3,
+  haloScaleOuter,
+  opacityOuter,
+}: GlowProps) {
+  // Detail 1 (not 0): a smoother, higher-facet-count copy of the shape reads
+  // as a soft-edged halo at the larger scales this component is used at now;
+  // detail 0 is fine for a node's own small solid mesh but a hard-edged
+  // hexagon/octagon silhouette once blown up several times its own size.
+  const geometryArgs: [number, number] = [radius, 1];
   return (
-    <mesh raycast={() => null} scale={haloScale}>
-      {shape === "icosahedron" ? (
-        <icosahedronGeometry args={[radius, 0]} />
-      ) : (
-        <octahedronGeometry args={[radius, 0]} />
+    <>
+      <mesh raycast={() => null} scale={haloScale}>
+        {shape === "icosahedron" ? (
+          <icosahedronGeometry args={geometryArgs} />
+        ) : (
+          <octahedronGeometry args={geometryArgs} />
+        )}
+        <meshBasicMaterial
+          color={color}
+          transparent
+          opacity={opacity}
+          depthWrite={false}
+          blending={AdditiveBlending}
+        />
+      </mesh>
+      {haloScaleOuter != null && opacityOuter != null && (
+        <mesh raycast={() => null} scale={haloScaleOuter}>
+          {shape === "icosahedron" ? (
+            <icosahedronGeometry args={geometryArgs} />
+          ) : (
+            <octahedronGeometry args={geometryArgs} />
+          )}
+          <meshBasicMaterial
+            color={color}
+            transparent
+            opacity={opacityOuter}
+            depthWrite={false}
+            blending={AdditiveBlending}
+          />
+        </mesh>
       )}
-      <meshBasicMaterial
-        color={color}
-        transparent
-        opacity={opacity}
-        depthWrite={false}
-        blending={AdditiveBlending}
-      />
-    </mesh>
+    </>
   );
 }

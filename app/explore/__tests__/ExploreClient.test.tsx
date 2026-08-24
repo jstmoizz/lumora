@@ -1,21 +1,37 @@
 import { beforeEach, describe, test, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import ExploreClient from "../ExploreClient";
-import { KNOWLEDGE_NODES } from "../data";
-import type { TopicProgress } from "@/lib/supabase/topic-progress";
+import type { KnowledgeGraphNode } from "../data";
 
-function progressWithStudyCount(
-  topicId: string,
-  studyCount: number,
-): Record<string, TopicProgress> {
-  return { [topicId]: { topicId, studyCount, lastStudiedAt: null } };
-}
+const { refreshMock } = vi.hoisted(() => ({ refreshMock: vi.fn() }));
 
-vi.mock("@/lib/supabase/topic-progress-actions", () => ({
-  recordTopicStudied: vi.fn(() => Promise.resolve({ ok: true })),
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: refreshMock, push: vi.fn(), replace: vi.fn() }),
 }));
 
-import { recordTopicStudied } from "@/lib/supabase/topic-progress-actions";
+vi.mock("@/lib/supabase/knowledge-graph-actions", () => ({
+  deleteKnowledgeNode: vi.fn(() => Promise.resolve({ ok: true })),
+  resetKnowledgeGraph: vi.fn(() => Promise.resolve({ ok: true })),
+}));
+
+import { deleteKnowledgeNode, resetKnowledgeGraph } from "@/lib/supabase/knowledge-graph-actions";
+
+function node(overrides: Partial<KnowledgeGraphNode> = {}): KnowledgeGraphNode {
+  return {
+    id: "ml",
+    topicKey: "machine learning",
+    label: "Machine Learning",
+    summary: "Systems that learn from data.",
+    parentId: null,
+    relatedLabels: [],
+    activityCount: 1,
+    quizCount: 1,
+    flashcardCount: 0,
+    createdAt: "2026-01-01T00:00:00Z",
+    lastStudiedAt: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -27,187 +43,206 @@ beforeEach(() => {
 // manually and in e2e (real Chromium has WebGL); it isn't render-tested here
 // since jsdom can't execute it and CSS-class/Three.js-internal assertions
 // would be brittle.
-describe("ExploreClient", () => {
-  test("renders every knowledge topic as an accessible, selectable button", () => {
-    render(<ExploreClient progress={{}} />);
-    for (const node of KNOWLEDGE_NODES) {
-      expect(
-        screen.getAllByRole("button", { name: node.label }).length,
-      ).toBeGreaterThan(0);
-    }
+//
+// jsdom also doesn't evaluate Tailwind's responsive `hidden`/`md:flex`
+// classes as real layout — both the desktop Topics list (OptionWheel,
+// role="option" items) and the mobile chip row (role="button" items) render
+// into the DOM simultaneously in every test here, for the same topic list.
+// Tests pick whichever role fits what they're asserting.
+describe("ExploreClient — new user", () => {
+  test("shows only the empty-state message, no topic buttons", () => {
+    render(<ExploreClient nodes={[]} />);
+
+    expect(screen.getByText("Your knowledge graph starts here.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Machine Learning" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Machine Learning" })).not.toBeInTheDocument();
   });
 
-  test("selecting a topic opens the topic panel with its content", () => {
-    render(<ExploreClient progress={{}} />);
-    const node = KNOWLEDGE_NODES[0];
+  test("still shows Knowledge Level 1 · Curious", () => {
+    render(<ExploreClient nodes={[]} />);
+    expect(screen.getByText(/Knowledge Level 1 · Curious/)).toBeInTheDocument();
+  });
 
-    const [trigger] = screen.getAllByRole("button", { name: node.label });
-    fireEvent.click(trigger);
+  test("does not show Reset Knowledge Graph when there's nothing to reset", () => {
+    render(<ExploreClient nodes={[]} />);
+    expect(screen.queryByRole("button", { name: "Reset Knowledge Graph" })).not.toBeInTheDocument();
+  });
+});
 
-    expect(screen.getByRole("heading", { name: node.label })).toBeInTheDocument();
-    expect(screen.getByText(node.summary)).toBeInTheDocument();
+describe("ExploreClient — the topic list", () => {
+  test("a studied topic appears in the Topics list, both as a listbox option and a mobile chip", () => {
+    render(<ExploreClient nodes={[node()]} />);
+
+    expect(screen.getByRole("option", { name: "Machine Learning" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Machine Learning" }).length).toBeGreaterThan(0);
+  });
+
+  test("selecting a studied topic (via its mobile chip) opens the topic panel with its content", () => {
+    render(<ExploreClient nodes={[node()]} />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Machine Learning" })[0]);
+
+    expect(screen.getByRole("heading", { name: "Machine Learning" })).toBeInTheDocument();
+    expect(screen.getByText("Systems that learn from data.")).toBeInTheDocument();
+    expect(screen.getByText(/1 study session/)).toBeInTheDocument();
+  });
+
+  test("selecting a studied topic via its Topics-list option opens the same panel", () => {
+    // Two nodes, not one: OptionWheel starts centered on index 0 and only
+    // fires onChange when the selection actually moves to a different index
+    // — clicking the sole/already-centered item is a no-op by design (see
+    // OptionWheel.test.tsx's own "does not re-fire" case).
+    const nodes = [node(), node({ id: "la", topicKey: "linear algebra", label: "Linear Algebra" })];
+    render(<ExploreClient nodes={nodes} />);
+
+    fireEvent.click(screen.getByRole("option", { name: "Linear Algebra" }));
+
+    expect(screen.getByRole("heading", { name: "Linear Algebra" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete Topic" })).toBeInTheDocument();
   });
 
   test("selecting a different topic updates the panel", () => {
-    render(<ExploreClient progress={{}} />);
-    const [first, second] = KNOWLEDGE_NODES;
+    const nodes = [node(), node({ id: "la", topicKey: "linear algebra", label: "Linear Algebra" })];
+    render(<ExploreClient nodes={nodes} />);
 
-    fireEvent.click(screen.getAllByRole("button", { name: first.label })[0]);
-    expect(screen.getByRole("heading", { name: first.label })).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Machine Learning" })[0]);
+    expect(screen.getByRole("heading", { name: "Machine Learning" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole("button", { name: second.label })[0]);
-    expect(screen.getByRole("heading", { name: second.label })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: first.label }),
-    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Linear Algebra" })[0]);
+    expect(screen.getByRole("heading", { name: "Linear Algebra" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Machine Learning" })).not.toBeInTheDocument();
   });
 
   test("Back to overview clears the selection", () => {
-    render(<ExploreClient progress={{}} />);
-    const node = KNOWLEDGE_NODES[0];
+    render(<ExploreClient nodes={[node()]} />);
 
-    fireEvent.click(screen.getAllByRole("button", { name: node.label })[0]);
-    expect(screen.getByRole("heading", { name: node.label })).toBeInTheDocument();
-
+    fireEvent.click(screen.getAllByRole("button", { name: "Machine Learning" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "Back to overview" }));
-    expect(
-      screen.queryByRole("heading", { name: node.label }),
-    ).not.toBeInTheDocument();
+
+    expect(screen.queryByRole("heading", { name: "Machine Learning" })).not.toBeInTheDocument();
   });
 
-  test("topic controls reflect the current selection via aria-pressed", () => {
-    render(<ExploreClient progress={{}} />);
-    const node = KNOWLEDGE_NODES[0];
+  test("the mobile chip for the selected topic reflects it via aria-pressed", () => {
+    render(<ExploreClient nodes={[node()]} />);
 
-    const [trigger] = screen.getAllByRole("button", { name: node.label });
+    const [trigger] = screen.getAllByRole("button", { name: "Machine Learning" });
     expect(trigger).toHaveAttribute("aria-pressed", "false");
 
     fireEvent.click(trigger);
-    const [selected] = screen.getAllByRole("button", { name: node.label });
+    const [selected] = screen.getAllByRole("button", { name: "Machine Learning" });
     expect(selected).toHaveAttribute("aria-pressed", "true");
   });
 
-  describe("topic progress recording", () => {
-    test("selecting a topic records it as studied exactly once", () => {
-      render(<ExploreClient progress={{}} />);
-      const node = KNOWLEDGE_NODES[0];
+  test("a topic that's only an unlocked (not-yet-studied) suggestion does NOT appear in the Topics list", () => {
+    // The list is scoped to real graph nodes only — a related label the
+    // model named but the user hasn't studied yet must not show up here,
+    // even though it does surface via the selected node's own Related pills
+    // (covered below).
+    const nodes = [node({ relatedLabels: ["Neural Networks"] })];
+    render(<ExploreClient nodes={nodes} />);
 
-      fireEvent.click(screen.getAllByRole("button", { name: node.label })[0]);
-
-      expect(recordTopicStudied).toHaveBeenCalledTimes(1);
-      expect(recordTopicStudied).toHaveBeenCalledWith(node.id);
-    });
-
-    test("re-clicking the already-selected topic does not record it again", () => {
-      render(<ExploreClient progress={{}} />);
-      const node = KNOWLEDGE_NODES[0];
-
-      const [trigger] = screen.getAllByRole("button", { name: node.label });
-      fireEvent.click(trigger);
-      fireEvent.click(trigger);
-      fireEvent.click(trigger);
-
-      expect(recordTopicStudied).toHaveBeenCalledTimes(1);
-    });
-
-    test("selecting a different topic records the new one too", () => {
-      render(<ExploreClient progress={{}} />);
-      const [first, second] = KNOWLEDGE_NODES;
-
-      fireEvent.click(screen.getAllByRole("button", { name: first.label })[0]);
-      fireEvent.click(screen.getAllByRole("button", { name: second.label })[0]);
-
-      expect(recordTopicStudied).toHaveBeenCalledTimes(2);
-      expect(recordTopicStudied).toHaveBeenNthCalledWith(1, first.id);
-      expect(recordTopicStudied).toHaveBeenNthCalledWith(2, second.id);
-    });
-
-    test("selecting the same topic again after going back to overview records it again", () => {
-      render(<ExploreClient progress={{}} />);
-      const node = KNOWLEDGE_NODES[0];
-
-      const [trigger] = screen.getAllByRole("button", { name: node.label });
-      fireEvent.click(trigger);
-      fireEvent.click(screen.getByRole("button", { name: "Back to overview" }));
-      fireEvent.click(
-        screen.getAllByRole("button", { name: node.label })[0],
-      );
-
-      expect(recordTopicStudied).toHaveBeenCalledTimes(2);
-    });
-
-    test("a failed progress write does not break topic selection", async () => {
-      vi.mocked(recordTopicStudied).mockRejectedValueOnce(
-        new Error("network error"),
-      );
-      render(<ExploreClient progress={{}} />);
-      const node = KNOWLEDGE_NODES[0];
-
-      fireEvent.click(screen.getAllByRole("button", { name: node.label })[0]);
-
-      expect(
-        screen.getByRole("heading", { name: node.label }),
-      ).toBeInTheDocument();
-    });
+    expect(screen.queryByRole("option", { name: "Neural Networks" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Neural Networks" })).not.toBeInTheDocument();
   });
 
-  describe("expanded concepts (Phase 4.3)", () => {
-    test("an unstudied topic's panel makes no mention of related concepts", () => {
-      render(<ExploreClient progress={{}} />);
-      fireEvent.click(screen.getAllByRole("button", { name: "Algorithms" })[0]);
+  test("selecting an unlocked related label from the panel's Related pills previews it with a Study button, not a delete button", () => {
+    const nodes = [node({ relatedLabels: ["Neural Networks"] })];
+    render(<ExploreClient nodes={nodes} />);
 
-      expect(screen.queryByText(/related concept/i)).not.toBeInTheDocument();
-      expect(
-        screen.queryByRole("button", { name: "Sorting" }),
-      ).not.toBeInTheDocument();
-    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Machine Learning" })[0]);
+    const panel = screen.getByRole("region");
+    fireEvent.click(within(panel).getByRole("button", { name: "Neural Networks" }));
 
-    test("a topic studied once shows a quiet hint, with no clickable concepts yet", () => {
-      render(<ExploreClient progress={progressWithStudyCount("algorithms", 1)} />);
-      fireEvent.click(screen.getAllByRole("button", { name: "Algorithms" })[0]);
+    expect(screen.getByRole("heading", { name: "Neural Networks" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Study this topic/ })).toHaveAttribute(
+      "href",
+      "/generate?topic=Neural%20Networks",
+    );
+    expect(screen.queryByRole("button", { name: "Delete Topic" })).not.toBeInTheDocument();
+  });
 
-      expect(screen.getByText(/2 related concepts/i)).toBeInTheDocument();
-      expect(
-        screen.queryByRole("button", { name: "Sorting" }),
-      ).not.toBeInTheDocument();
-    });
+  test("a related label that's already a node appears only once in the list, not duplicated", () => {
+    const nodes = [
+      node({ relatedLabels: ["Linear Algebra"] }),
+      node({ id: "la", topicKey: "linear algebra", label: "Linear Algebra" }),
+    ];
+    render(<ExploreClient nodes={nodes} />);
 
-    test("a topic studied repeatedly reveals its concepts as selectable buttons", () => {
-      render(<ExploreClient progress={progressWithStudyCount("algorithms", 2)} />);
-      fireEvent.click(screen.getAllByRole("button", { name: "Algorithms" })[0]);
+    expect(screen.getAllByRole("option", { name: "Linear Algebra" })).toHaveLength(1);
+  });
 
-      expect(screen.getByRole("button", { name: "Sorting" })).toBeInTheDocument();
-      expect(
-        screen.getByRole("button", { name: "Graph Algorithms" }),
-      ).toBeInTheDocument();
-    });
+  test("TopicPanel's related list resolves an already-studied related label to its real node, not a preview", () => {
+    const nodes = [
+      node({ relatedLabels: ["Linear Algebra"] }),
+      node({
+        id: "la",
+        topicKey: "linear algebra",
+        label: "Linear Algebra",
+        summary: "The study of vectors and matrices.",
+      }),
+    ];
+    render(<ExploreClient nodes={nodes} />);
 
-    test("selecting a revealed concept opens its own panel and does not record topic progress for it", () => {
-      render(<ExploreClient progress={progressWithStudyCount("algorithms", 2)} />);
-      fireEvent.click(screen.getAllByRole("button", { name: "Algorithms" })[0]);
-      fireEvent.click(screen.getByRole("button", { name: "Sorting" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Machine Learning" })[0]);
+    const panel = screen.getByRole("region");
+    fireEvent.click(within(panel).getByRole("button", { name: "Linear Algebra" }));
 
-      expect(screen.getByRole("heading", { name: "Sorting" })).toBeInTheDocument();
-      expect(screen.getByText("Part of Algorithms")).toBeInTheDocument();
-      // Only the core topic selection (Algorithms) should have recorded
-      // progress — selecting the concept itself is interaction-only.
-      expect(recordTopicStudied).toHaveBeenCalledTimes(1);
-      expect(recordTopicStudied).toHaveBeenCalledWith("algorithms");
-    });
+    expect(screen.getByRole("heading", { name: "Linear Algebra" })).toBeInTheDocument();
+    expect(screen.getByText("The study of vectors and matrices.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete Topic" })).toBeInTheDocument();
+  });
 
-    test("Back to overview from a concept's panel clears the selection entirely", () => {
-      render(<ExploreClient progress={progressWithStudyCount("algorithms", 2)} />);
-      fireEvent.click(screen.getAllByRole("button", { name: "Algorithms" })[0]);
-      fireEvent.click(screen.getByRole("button", { name: "Sorting" }));
-      fireEvent.click(screen.getByRole("button", { name: "Back to overview" }));
+  test("a studied child topic appears in the Topics list alongside its parent, flat", () => {
+    const nodes = [
+      node(),
+      node({
+        id: "nn",
+        topicKey: "neural networks",
+        label: "Neural Networks",
+        parentId: "ml",
+      }),
+    ];
+    render(<ExploreClient nodes={nodes} />);
 
-      expect(
-        screen.queryByRole("heading", { name: "Sorting" }),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.queryByRole("heading", { name: "Algorithms" }),
-      ).not.toBeInTheDocument();
-    });
+    expect(screen.getByRole("option", { name: "Machine Learning" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Neural Networks" })).toBeInTheDocument();
+  });
+});
 
+describe("ExploreClient — delete", () => {
+  test("deleting a node requires confirmation before it's removed", async () => {
+    render(<ExploreClient nodes={[node()]} />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Machine Learning" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Topic" }));
+
+    expect(deleteKnowledgeNode).not.toHaveBeenCalled();
+
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    expect(deleteKnowledgeNode).toHaveBeenCalledWith("ml");
+  });
+
+  test("cancelling the confirmation does not delete anything", () => {
+    render(<ExploreClient nodes={[node()]} />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Machine Learning" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Topic" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(deleteKnowledgeNode).not.toHaveBeenCalled();
+  });
+});
+
+describe("ExploreClient — reset", () => {
+  test("resetting the graph requires confirmation", () => {
+    render(<ExploreClient nodes={[node()]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset Knowledge Graph" }));
+    expect(resetKnowledgeGraph).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset Graph" }));
+    expect(resetKnowledgeGraph).toHaveBeenCalled();
   });
 });

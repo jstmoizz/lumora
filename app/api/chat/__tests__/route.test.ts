@@ -5,19 +5,34 @@ import {
 } from "@/app/generate/__tests__/fixtures";
 import type { LumoraUIMessage } from "@/lib/ai/tools";
 
-const { requireUserMock, fromMock, createClientMock, streamTextMock } =
-  vi.hoisted(() => {
-    const requireUserMock = vi.fn();
-    const fromMock = vi.fn();
-    const createClientMock = vi.fn(async () => ({ from: fromMock }));
-    const streamTextMock = vi.fn();
-    return { requireUserMock, fromMock, createClientMock, streamTextMock };
-  });
+const {
+  requireUserMock,
+  fromMock,
+  createClientMock,
+  streamTextMock,
+  upsertKnowledgeNodeActivityMock,
+} = vi.hoisted(() => {
+  const requireUserMock = vi.fn();
+  const fromMock = vi.fn();
+  const createClientMock = vi.fn(async () => ({ from: fromMock }));
+  const streamTextMock = vi.fn();
+  const upsertKnowledgeNodeActivityMock = vi.fn(() => Promise.resolve());
+  return {
+    requireUserMock,
+    fromMock,
+    createClientMock,
+    streamTextMock,
+    upsertKnowledgeNodeActivityMock,
+  };
+});
 
 vi.mock("@/lib/supabase/authorization", () => ({
   requireUser: requireUserMock,
 }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
+vi.mock("@/lib/supabase/knowledge-graph", () => ({
+  upsertKnowledgeNodeActivity: upsertKnowledgeNodeActivityMock,
+}));
 vi.mock("@/lib/ai/config", () => ({
   chatModel: "mock-model",
   GENERATION_CONFIG: {},
@@ -407,6 +422,136 @@ describe("structured content", () => {
 
     expect(spies.messagesInsertSpy).toHaveBeenCalledWith(
       expect.objectContaining({ parts: message.parts }),
+    );
+  });
+});
+
+describe("knowledge graph integration", () => {
+  test("a finished createQuiz tool call upserts a knowledge-graph node", async () => {
+    setupSupabaseMock();
+    const quizPart = {
+      type: "tool-createQuiz" as const,
+      toolCallId: "call-1",
+      state: "output-available" as const,
+      input: { topic: "Cells", questions: [] },
+      output: {
+        quizId: "quiz-1",
+        topic: "Cells",
+        questions: [],
+        relatedTopics: ["Mitochondria", "Cell Membrane"],
+        category: "Biology",
+      },
+    };
+    setupStreamText({
+      responseMessage: assistantMessageWithParts([quizPart]),
+      finishReason: "stop",
+    });
+
+    await POST(makeRequest({ messages: [userMessage("Quiz me on cells")] }));
+
+    expect(upsertKnowledgeNodeActivityMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "user-1",
+      {
+        label: "Cells",
+        kind: "quiz",
+        relatedTopics: ["Mitochondria", "Cell Membrane"],
+        category: "Biology",
+      },
+    );
+  });
+
+  test("a finished createFlashcards tool call upserts a knowledge-graph node", async () => {
+    setupSupabaseMock();
+    const flashcardsPart = {
+      type: "tool-createFlashcards" as const,
+      toolCallId: "call-1",
+      state: "output-available" as const,
+      input: { topic: "Cells", cards: [] },
+      output: { flashcardSetId: "set-1", topic: "Cells", cards: [] },
+    };
+    setupStreamText({
+      responseMessage: assistantMessageWithParts([flashcardsPart]),
+      finishReason: "stop",
+    });
+
+    await POST(makeRequest({ messages: [userMessage("Flashcards on cells")] }));
+
+    expect(upsertKnowledgeNodeActivityMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "user-1",
+      { label: "Cells", kind: "flashcards", relatedTopics: undefined },
+    );
+  });
+
+  test("a plain text turn with no tool call never touches the knowledge graph", async () => {
+    setupSupabaseMock();
+    setupStreamText({
+      responseMessage: assistantMessageWithParts([
+        { type: "text", text: "Osmosis is the movement of water.", state: "done" },
+      ]),
+      finishReason: "stop",
+    });
+
+    await POST(makeRequest({ messages: [userMessage("Explain osmosis")] }));
+
+    expect(upsertKnowledgeNodeActivityMock).not.toHaveBeenCalled();
+  });
+
+  test("a knowledge-graph write failure doesn't prevent the assistant message from being persisted", async () => {
+    const spies = setupSupabaseMock();
+    upsertKnowledgeNodeActivityMock.mockRejectedValueOnce(new Error("db error"));
+    const quizPart = {
+      type: "tool-createQuiz" as const,
+      toolCallId: "call-1",
+      state: "output-available" as const,
+      input: { topic: "Cells", questions: [] },
+      output: { quizId: "quiz-1", topic: "Cells", questions: [] },
+    };
+    setupStreamText({
+      responseMessage: assistantMessageWithParts([quizPart]),
+      finishReason: "stop",
+    });
+
+    await expect(
+      POST(makeRequest({ messages: [userMessage("Quiz me on cells")] })),
+    ).resolves.toBeInstanceOf(Response);
+    expect(spies.messagesInsertSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "assistant" }),
+    );
+  });
+
+  test("a finished addKnowledgeTopic tool call upserts a knowledge-graph node with kind 'manual'", async () => {
+    setupSupabaseMock();
+    const addTopicPart = {
+      type: "tool-addKnowledgeTopic" as const,
+      toolCallId: "call-1",
+      state: "output-available" as const,
+      input: { topic: "World War II" },
+      output: {
+        topic: "World War II",
+        relatedTopics: ["World War I", "The Cold War", "The Treaty of Versailles"],
+        category: "20th Century History",
+        summary: "A global conflict from 1939 to 1945.",
+      },
+    };
+    setupStreamText({
+      responseMessage: assistantMessageWithParts([addTopicPart]),
+      finishReason: "stop",
+    });
+
+    await POST(makeRequest({ messages: [userMessage("Add World War II to my knowledge graph")] }));
+
+    expect(upsertKnowledgeNodeActivityMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "user-1",
+      {
+        label: "World War II",
+        kind: "manual",
+        relatedTopics: ["World War I", "The Cold War", "The Treaty of Versailles"],
+        category: "20th Century History",
+        summary: "A global conflict from 1939 to 1945.",
+      },
     );
   });
 });

@@ -11,7 +11,7 @@ describe("supabase/schema.sql", () => {
       "public.conversations",
       "public.messages",
       "public.user_settings",
-      "public.topic_progress",
+      "public.knowledge_nodes",
     ]) {
       expect(sql).toContain(`create table ${table}`);
     }
@@ -28,14 +28,15 @@ describe("supabase/schema.sql", () => {
       "public.conversations",
       "public.messages",
       "public.user_settings",
-      "public.topic_progress",
+      "public.knowledge_nodes",
     ]) {
       expect(sql).toContain(`alter table ${table} enable row level security`);
     }
   });
 
-  test("topic_progress has a composite primary key over (user_id, topic_id)", () => {
-    expect(sql).toContain("primary key (user_id, topic_id)");
+  test("knowledge_nodes is unique per user per normalized topic, and cascades from its parent", () => {
+    expect(sql).toContain("unique (user_id, topic_key)");
+    expect(sql).toMatch(/parent_id uuid references public\.knowledge_nodes \(id\) on delete cascade/);
   });
 
   test("role defaults to \"user\" and is never client-settable", () => {

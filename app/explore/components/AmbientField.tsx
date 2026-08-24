@@ -72,7 +72,7 @@ function AmbientElement({ seed, shardGeometry, ringGeometry }: AmbientElementPro
         attach="geometry"
       />
       <meshBasicMaterial
-        color="#4a4870"
+        color="#6b4a72"
         transparent
         opacity={seed.opacity}
         depthWrite={false}

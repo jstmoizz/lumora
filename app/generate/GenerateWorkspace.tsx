@@ -52,6 +52,11 @@ interface GenerateWorkspaceProps {
   initialConversationId?: string;
   initialMessages?: LumoraUIMessage[];
   initialConversations: ConversationSummary[];
+  /** From /generate?topic=... (Explore's "Study Topic" link) — only ever
+   * relevant to the very first session this component mounts with, so it's
+   * read once by GenerateSession's ChatInterface and never threaded through
+   * New Chat/Recent Chat switches. */
+  initialTopic?: string;
 }
 
 // One conversation's worth of state: the chat itself (owned entirely by
@@ -65,6 +70,7 @@ interface GenerateWorkspaceProps {
 function GenerateSession({
   initialConversationId,
   initialMessages,
+  initialTopic,
   resourcesMobileOpen,
   onResourcesMobileOpenChange,
   onConversationIdKnown,
@@ -73,6 +79,7 @@ function GenerateSession({
 }: {
   initialConversationId?: string;
   initialMessages?: LumoraUIMessage[];
+  initialTopic?: string;
   resourcesMobileOpen: boolean;
   onResourcesMobileOpenChange: (open: boolean) => void;
   onConversationIdKnown: (id: string) => void;
@@ -107,6 +114,7 @@ function GenerateSession({
         <ChatInterface
           initialConversationId={initialConversationId}
           initialMessages={initialMessages}
+          initialTopic={initialTopic}
           onConversationIdKnown={onConversationIdKnown}
           onTurnSettled={onTurnSettled}
           onQuizGenerated={handleQuizGenerated}
@@ -145,6 +153,7 @@ export default function GenerateWorkspace({
   initialConversationId,
   initialMessages,
   initialConversations,
+  initialTopic,
 }: GenerateWorkspaceProps) {
   const router = useRouter();
 
@@ -368,6 +377,11 @@ export default function GenerateWorkspace({
           key={sessionKey}
           initialConversationId={activeConversationId}
           initialMessages={activeInitialMessages}
+          // Only ever meaningful for the very first session — after a New
+          // Chat or a Recent Chat switch (either of which bumps
+          // sessionKey), the original ?topic= link shouldn't keep
+          // re-prefilling the composer indefinitely.
+          initialTopic={sessionKey === 0 ? initialTopic : undefined}
           resourcesMobileOpen={mobilePanel === "resources"}
           onResourcesMobileOpenChange={handleResourcesMobileOpenChange}
           onConversationIdKnown={handleConversationIdKnown}

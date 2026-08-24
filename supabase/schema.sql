@@ -187,38 +187,58 @@ create policy "Users can update own settings"
   with check (auth.uid() = user_id);
 
 -- ============================================================================
--- topic_progress — per-user, per-topic study activity; the foundation for a
--- future personalized Knowledge Universe. `topic_id` is a plain string that
--- matches the existing static topic ids in app/explore/data.ts
--- (KNOWLEDGE_NODES: "ai", "algorithms", "data-structures", "databases",
--- "networks", "software-engineering", "mathematics") — there's no `topics`
--- table yet, so this is a loose reference by id, not a foreign key.
+-- knowledge_nodes — each user's personal knowledge graph (Explore). One row
+-- per topic they've actually studied (quiz/flashcard generation via
+-- Generate) — the graph's root, "Lumora Core", is never a row here: it's
+-- virtual/implicit, exactly like the app's own CENTRAL_NODE constant, which
+-- is what makes it un-deletable by construction. A node with parent_id null
+-- is attached directly under Core; parent_id otherwise points at the node
+-- whose related_labels first suggested this topic.
+--
+-- topic_key is a normalized (lowercased/trimmed/whitespace-collapsed) form
+-- of `label`, used only for per-user dedup — not a foreign key into
+-- anything, since topics are free text the model chooses, not a fixed
+-- vocabulary.
 --
 -- Holds knowledge/activity facts only. Never store Three.js/R3F rendering
 -- data here (position, rotation, scale, color, camera state, animation
--- state) — the visual Knowledge Universe is expected to derive its layout
--- from this data later, not store the layout itself.
+-- state) — the visual graph derives its layout from this data (see
+-- app/explore/graphLayout.ts), it doesn't store the layout itself.
 -- ============================================================================
 
-create table public.topic_progress (
+create table public.knowledge_nodes (
+  id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.users (id) on delete cascade,
-  topic_id text not null,
-  last_studied_at timestamptz,
-  study_count integer not null default 0,
-  primary key (user_id, topic_id)
+  topic_key text not null,
+  label text not null,
+  summary text,
+  parent_id uuid references public.knowledge_nodes (id) on delete cascade,
+  related_labels text[] not null default '{}',
+  activity_count integer not null default 0,
+  quiz_count integer not null default 0,
+  flashcard_count integer not null default 0,
+  created_at timestamptz not null default now(),
+  last_studied_at timestamptz not null default now(),
+  unique (user_id, topic_key)
 );
 
-alter table public.topic_progress enable row level security;
+alter table public.knowledge_nodes enable row level security;
 
-create policy "Users can view own topic progress"
-  on public.topic_progress for select
+create policy "Users can view own knowledge nodes"
+  on public.knowledge_nodes for select
   using (auth.uid() = user_id);
 
-create policy "Users can insert own topic progress"
-  on public.topic_progress for insert
+create policy "Users can insert own knowledge nodes"
+  on public.knowledge_nodes for insert
   with check (auth.uid() = user_id);
 
-create policy "Users can update own topic progress"
-  on public.topic_progress for update
+create policy "Users can update own knowledge nodes"
+  on public.knowledge_nodes for update
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+create policy "Users can delete own knowledge nodes"
+  on public.knowledge_nodes for delete
+  using (auth.uid() = user_id);
+
+create index knowledge_nodes_user_id_idx on public.knowledge_nodes (user_id);

@@ -125,24 +125,48 @@ export interface Database {
         };
         Relationships: [];
       };
-      topic_progress: {
+      knowledge_nodes: {
         Row: {
+          id: string;
           user_id: string;
-          topic_id: string;
-          last_studied_at: string | null;
-          study_count: number;
+          topic_key: string;
+          label: string;
+          summary: string | null;
+          parent_id: string | null;
+          related_labels: string[];
+          activity_count: number;
+          quiz_count: number;
+          flashcard_count: number;
+          created_at: string;
+          last_studied_at: string;
         };
         Insert: {
+          id?: string;
           user_id: string;
-          topic_id: string;
-          last_studied_at?: string | null;
-          study_count?: number;
+          topic_key: string;
+          label: string;
+          summary?: string | null;
+          parent_id?: string | null;
+          related_labels?: string[];
+          activity_count?: number;
+          quiz_count?: number;
+          flashcard_count?: number;
+          created_at?: string;
+          last_studied_at?: string;
         };
         Update: {
+          id?: string;
           user_id?: string;
-          topic_id?: string;
-          last_studied_at?: string | null;
-          study_count?: number;
+          topic_key?: string;
+          label?: string;
+          summary?: string | null;
+          parent_id?: string | null;
+          related_labels?: string[];
+          activity_count?: number;
+          quiz_count?: number;
+          flashcard_count?: number;
+          created_at?: string;
+          last_studied_at?: string;
         };
         Relationships: [];
       };

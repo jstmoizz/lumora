@@ -27,7 +27,7 @@ import type {
   CreateQuizOutput,
   LumoraUIMessage,
 } from "@/lib/ai/tools";
-import { FlashcardsToolPart, QuizToolPart } from "./PracticeToolPart";
+import { AddKnowledgeTopicToolPart, FlashcardsToolPart, QuizToolPart } from "./PracticeToolPart";
 
 // How close to either edge (in pixels) counts as "at that edge" — for
 // re-engaging bottom auto-scroll, and for deciding whether "Go to top"/
@@ -170,6 +170,7 @@ function ChatErrorCard({
 export default function ChatInterface({
   initialConversationId,
   initialMessages,
+  initialTopic,
   onConversationIdKnown,
   onTurnSettled,
   onQuizGenerated,
@@ -179,6 +180,10 @@ export default function ChatInterface({
    * /generate?conversationId=... */
   initialConversationId?: string;
   initialMessages?: LumoraUIMessage[];
+  /** Set when arriving from Explore's "Study Topic" link
+   * (/generate?topic=...) — prefills the composer so the user can edit
+   * before sending, rather than auto-sending on their behalf. */
+  initialTopic?: string;
   /** Fired the moment `conversationId` (see below) becomes known — either
    * immediately, if `initialConversationId` was already given, or the
    * instant the server creates a brand-new conversation and reports it
@@ -200,7 +205,9 @@ export default function ChatInterface({
    * Resources' Flashcards tab. */
   onFlashcardsGenerated?: (flashcards: CreateFlashcardsOutput) => void;
 }) {
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(() =>
+    initialTopic ? `Teach me about ${initialTopic}` : "",
+  );
   const { messages, sendMessage, regenerate, status, stop, error } =
     useChat<LumoraUIMessage>({
       messages: initialMessages,
@@ -767,7 +774,8 @@ export default function ChatInterface({
                     (part) =>
                       (part.type === "text" && part.text.length > 0) ||
                       part.type === "tool-createQuiz" ||
-                      part.type === "tool-createFlashcards",
+                      part.type === "tool-createFlashcards" ||
+                      part.type === "tool-addKnowledgeTopic",
                   );
                   const isPending =
                     !isUser &&
@@ -830,6 +838,14 @@ export default function ChatInterface({
                                 if (part.type === "tool-createFlashcards") {
                                   return (
                                     <FlashcardsToolPart
+                                      key={part.toolCallId}
+                                      part={part}
+                                    />
+                                  );
+                                }
+                                if (part.type === "tool-addKnowledgeTopic") {
+                                  return (
+                                    <AddKnowledgeTopicToolPart
                                       key={part.toolCallId}
                                       part={part}
                                     />

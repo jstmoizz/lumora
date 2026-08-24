@@ -6,6 +6,7 @@ import gsap from "gsap";
 import {
   CircleAlertIcon,
   ClipboardCheckIcon,
+  CompassIcon,
   LayersIcon,
   SparklesIcon,
 } from "lucide-react";
@@ -18,6 +19,10 @@ type CreateQuizUIPart = Extract<
 type CreateFlashcardsUIPart = Extract<
   LumoraUIMessage["parts"][number],
   { type: "tool-createFlashcards" }
+>;
+type AddKnowledgeTopicUIPart = Extract<
+  LumoraUIMessage["parts"][number],
+  { type: "tool-addKnowledgeTopic" }
 >;
 
 function prefersReducedMotion() {
@@ -228,6 +233,52 @@ export function FlashcardsToolPart({ part }: { part: CreateFlashcardsUIPart }) {
             return (
               <ActivityErrorCard
                 title="Couldn't build these flashcards"
+                message={part.errorText}
+              />
+            );
+          default:
+            return null;
+        }
+      })()}
+    </ToolPartWrapper>
+  );
+}
+
+// Not a Practice activity (no quiz/flashcard content) but the same
+// "compact status card for a tool call in the conversation" shape as
+// QuizToolPart/FlashcardsToolPart above, so it reuses their wrapper/
+// skeleton/building/notice/error-card components rather than duplicating
+// them in a separate file for one more tool.
+export function AddKnowledgeTopicToolPart({ part }: { part: AddKnowledgeTopicUIPart }) {
+  return (
+    <ToolPartWrapper>
+      {(() => {
+        switch (part.state) {
+          case "input-streaming":
+            return <ActivitySkeleton label="Adding to your knowledge graph" />;
+          case "input-available":
+            return (
+              <ActivityBuilding
+                icon={CompassIcon}
+                verb="Adding"
+                topic={part.input.topic}
+              />
+            );
+          case "output-available":
+            return (
+              <ActivityReadyNotice
+                title={`Added to Explore: ${part.output.topic}`}
+                detail={
+                  part.output.category
+                    ? `Filed under ${part.output.category} · View in Explore`
+                    : "View in Explore"
+                }
+              />
+            );
+          case "output-error":
+            return (
+              <ActivityErrorCard
+                title="Couldn't add this topic"
                 message={part.errorText}
               />
             );

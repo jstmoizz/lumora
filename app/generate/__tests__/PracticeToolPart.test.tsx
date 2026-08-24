@@ -1,13 +1,17 @@
 import { describe, test, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { FlashcardsToolPart, QuizToolPart } from "../PracticeToolPart";
+import { AddKnowledgeTopicToolPart, FlashcardsToolPart, QuizToolPart } from "../PracticeToolPart";
 import {
+  inputAvailableAddTopicPart,
   inputAvailableFlashcardsPart,
   inputAvailableQuizPart,
+  inputStreamingAddTopicPart,
   inputStreamingFlashcardsPart,
   inputStreamingQuizPart,
+  outputAvailableAddTopicPart,
   outputAvailableFlashcardsPart,
   outputAvailableQuizPart,
+  outputErrorAddTopicPart,
   outputErrorFlashcardsPart,
   outputErrorQuizPart,
 } from "./fixtures";
@@ -91,5 +95,38 @@ describe("FlashcardsToolPart lifecycle states", () => {
     );
     expect(screen.getByText("Couldn't build these flashcards")).toBeInTheDocument();
     expect(screen.getByText("Card 2 had an empty back.")).toBeInTheDocument();
+  });
+});
+
+describe("AddKnowledgeTopicToolPart lifecycle states", () => {
+  test("input-streaming renders the preparing skeleton", () => {
+    render(<AddKnowledgeTopicToolPart part={inputStreamingAddTopicPart()} />);
+    expect(
+      screen.getByRole("status", { name: "Adding to your knowledge graph" }),
+    ).toBeInTheDocument();
+  });
+
+  test("input-available renders the building state with the topic", () => {
+    render(<AddKnowledgeTopicToolPart part={inputAvailableAddTopicPart()} />);
+    expect(screen.getByText(/Adding/)).toBeInTheDocument();
+    expect(screen.getByText("World War II")).toBeInTheDocument();
+  });
+
+  test("output-available renders a ready notice naming the category and pointing at Explore", () => {
+    render(<AddKnowledgeTopicToolPart part={outputAvailableAddTopicPart()} />);
+
+    expect(screen.getByText(/Added to Explore: World War II/)).toBeInTheDocument();
+    expect(screen.getByText(/Filed under 20th Century History/)).toBeInTheDocument();
+    expect(screen.getByText(/View in Explore/)).toBeInTheDocument();
+  });
+
+  test("output-error renders the tool's errorText", () => {
+    render(
+      <AddKnowledgeTopicToolPart
+        part={outputErrorAddTopicPart("The topic was empty after trimming whitespace.")}
+      />,
+    );
+    expect(screen.getByText("Couldn't add this topic")).toBeInTheDocument();
+    expect(screen.getByText("The topic was empty after trimming whitespace.")).toBeInTheDocument();
   });
 });

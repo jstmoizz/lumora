@@ -2,12 +2,13 @@
 
 import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
+import { Html } from "@react-three/drei";
 import type { Mesh, MeshStandardMaterial } from "three";
 import Glow from "./Glow";
 
 const RADIUS = 0.85;
-const BASE_EMISSIVE = 0.28;
-const DIMMED_EMISSIVE = 0.18;
+const BASE_EMISSIVE = 0.42;
+const DIMMED_EMISSIVE = 0.26;
 // A barely-perceptible intensity drift, not a scale pulse — "breathing"
 // without anything visibly growing/shrinking.
 const BREATH_AMPLITUDE = 0.03;
@@ -44,8 +45,8 @@ export default function CentralNode({ dimmed }: CentralNodeProps) {
       <icosahedronGeometry args={[RADIUS, 1]} />
       <meshStandardMaterial
         ref={materialRef}
-        color="#4c4a75"
-        emissive="#6a63c9"
+        color="#6d2f8f"
+        emissive="#e0a6f0"
         emissiveIntensity={dimmed ? DIMMED_EMISSIVE : BASE_EMISSIVE}
         roughness={0.45}
         metalness={0.15}
@@ -55,9 +56,25 @@ export default function CentralNode({ dimmed }: CentralNodeProps) {
       <Glow
         shape="icosahedron"
         radius={RADIUS}
-        color="#8b85e6"
-        opacity={dimmed ? 0.11 : 0.17}
+        color="#f0b8e8"
+        opacity={dimmed ? 0.2 : 0.32}
+        haloScale={1.35}
+        haloScaleOuter={1.75}
+        opacityOuter={dimmed ? 0.05 : 0.09}
       />
+      <Html center position={[0, -(RADIUS + 0.28), 0]} zIndexRange={[10, 0]} occlude={false}>
+        <span
+          className="rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap backdrop-blur-sm"
+          style={{
+            opacity: dimmed ? 0.6 : 1,
+            color: "#f1f0ff",
+            borderColor: "rgba(139,133,230,0.5)",
+            background: "rgba(8,7,12,0.6)",
+          }}
+        >
+          Lumora Core
+        </span>
+      </Html>
     </mesh>
   );
 }

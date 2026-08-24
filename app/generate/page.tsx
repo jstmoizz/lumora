@@ -7,9 +7,9 @@ import GenerateWorkspace from "./GenerateWorkspace";
 export default async function GeneratePage({
   searchParams,
 }: {
-  searchParams: Promise<{ conversationId?: string }>;
+  searchParams: Promise<{ conversationId?: string; topic?: string }>;
 }) {
-  const { conversationId } = await searchParams;
+  const { conversationId, topic } = await searchParams;
 
   // A conversationId that doesn't exist or isn't this user's own (RLS
   // makes those indistinguishable) is treated exactly like none was
@@ -47,6 +47,7 @@ export default async function GeneratePage({
         initialConversationId={resolvedConversationId}
         initialMessages={messages ?? undefined}
         initialConversations={conversations}
+        initialTopic={topic}
       />
     </main>
   );

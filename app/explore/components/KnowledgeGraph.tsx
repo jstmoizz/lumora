@@ -1,81 +1,73 @@
 "use client";
 
 import CentralNode from "./CentralNode";
-import ConceptConnections from "./ConceptConnections";
 import Connections from "./Connections";
-import ExpandedConceptNode from "./ExpandedConceptNode";
 import KnowledgeNode from "./KnowledgeNode";
-import {
-  EXPANDED_CONCEPTS,
-  KNOWLEDGE_EDGES,
-  KNOWLEDGE_NODES,
-  conceptPosition,
-} from "../data";
-import { expansionStateFor } from "../progress";
-import type { TopicProgress } from "@/lib/supabase/topic-progress";
+import { assignAccents, type KnowledgeGraphNode } from "../data";
+import { toVector3, type LayoutEntry } from "../graphLayout";
+import { normalizeTopicKey } from "@/lib/knowledge-graph/topics";
 
 interface KnowledgeGraphProps {
+  nodes: KnowledgeGraphNode[];
+  layout: LayoutEntry[];
   selectedNodeId: string | null;
   onSelect: (id: string, trigger?: HTMLElement | null) => void;
-  progress: Record<string, TopicProgress>;
 }
 
-function relatedIdsOf(nodeId: string): Set<string> {
+// A node's own parent/children (direct graph neighbors), plus anything it
+// named as a related subtopic that happens to already be a studied node —
+// the closest equivalent to the old static KNOWLEDGE_EDGES now that
+// relationships come from the graph's own tree + relatedLabels rather than
+// a hand-authored edge list.
+function relatedIdsOf(nodeId: string, nodes: KnowledgeGraphNode[]): Set<string> {
+  const node = nodes.find((candidate) => candidate.id === nodeId);
+  if (!node) return new Set();
+
+  const relatedKeys = new Set(node.relatedLabels.map(normalizeTopicKey));
   const related = new Set<string>();
-  for (const edge of KNOWLEDGE_EDGES) {
-    if (edge.from === nodeId) related.add(edge.to);
-    if (edge.to === nodeId) related.add(edge.from);
+  for (const candidate of nodes) {
+    if (candidate.id === nodeId) continue;
+    const isParent = candidate.id === node.parentId;
+    const isChild = candidate.parentId === node.id;
+    const isNamedRelated = relatedKeys.has(candidate.topicKey);
+    if (isParent || isChild || isNamedRelated) related.add(candidate.id);
   }
   return related;
 }
 
 export default function KnowledgeGraph({
+  nodes,
+  layout,
   selectedNodeId,
   onSelect,
-  progress,
 }: KnowledgeGraphProps) {
-  // The core topic that should read as "in focus" for the existing
-  // core-dimming scheme — either the literally selected core topic, or the
-  // parent of a selected expanded concept, so opening a concept highlights
-  // its topic instead of dimming it into oblivion. When nothing (or a core
-  // topic) is selected this is exactly `selectedNodeId`, so every existing
-  // core-topic interaction is unaffected.
-  const selectedConcept = selectedNodeId
-    ? (EXPANDED_CONCEPTS.find((concept) => concept.id === selectedNodeId) ??
-      null)
-    : null;
-  const focusedCoreId = selectedConcept
-    ? selectedConcept.parentId
-    : selectedNodeId;
-
-  const relatedIds = focusedCoreId ? relatedIdsOf(focusedCoreId) : new Set<string>();
+  const accents = assignAccents(nodes);
+  const positions = new Map(layout.map((entry) => [entry.id, entry]));
+  const relatedIds = selectedNodeId ? relatedIdsOf(selectedNodeId, nodes) : new Set<string>();
 
   return (
     <group>
-      <Connections selectedNodeId={focusedCoreId} progress={progress} />
-      <ConceptConnections progress={progress} />
+      <Connections nodes={nodes} layout={layout} accents={accents} selectedNodeId={selectedNodeId} />
       <CentralNode dimmed={selectedNodeId !== null} />
-      {KNOWLEDGE_NODES.map((node) => (
-        <KnowledgeNode
-          key={node.id}
-          node={node}
-          isSelected={node.id === selectedNodeId}
-          isRelated={relatedIds.has(node.id)}
-          isDimmed={focusedCoreId !== null && node.id !== focusedCoreId && !relatedIds.has(node.id)}
-          onSelect={onSelect}
-          studyCount={progress[node.id]?.studyCount}
-        />
-      ))}
-      {EXPANDED_CONCEPTS.map((concept) => (
-        <ExpandedConceptNode
-          key={concept.id}
-          concept={concept}
-          position={conceptPosition(concept)}
-          expansionState={expansionStateFor(progress[concept.parentId]?.studyCount)}
-          isSelected={concept.id === selectedNodeId}
-          onSelect={onSelect}
-        />
-      ))}
+      {nodes.map((node) => {
+        const entry = positions.get(node.id);
+        if (!entry) return null;
+        return (
+          <KnowledgeNode
+            key={node.id}
+            node={node}
+            position={toVector3(entry)}
+            depth={entry.depth}
+            accent={accents[node.id]}
+            isSelected={node.id === selectedNodeId}
+            isRelated={relatedIds.has(node.id)}
+            isDimmed={
+              selectedNodeId !== null && node.id !== selectedNodeId && !relatedIds.has(node.id)
+            }
+            onSelect={onSelect}
+          />
+        );
+      })}
     </group>
   );
 }

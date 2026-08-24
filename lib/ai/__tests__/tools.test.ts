@@ -1,7 +1,9 @@
 import { describe, test, expect } from "vitest";
 import {
+  addKnowledgeTopicTool,
   createFlashcardsTool,
   createQuizTool,
+  type AddKnowledgeTopicOutput,
   type CreateFlashcardsOutput,
   type CreateQuizOutput,
 } from "../tools";
@@ -22,6 +24,16 @@ function executeFlashcards(
     messages: [],
     context: {},
   }) as Promise<CreateFlashcardsOutput>;
+}
+
+function executeAddKnowledgeTopic(
+  input: Parameters<NonNullable<typeof addKnowledgeTopicTool.execute>>[0],
+) {
+  return addKnowledgeTopicTool.execute!(input, {
+    toolCallId: "test-call",
+    messages: [],
+    context: {},
+  }) as Promise<AddKnowledgeTopicOutput>;
 }
 
 describe("createQuizTool.execute", () => {
@@ -102,6 +114,44 @@ describe("createQuizTool.execute", () => {
       }),
     ).rejects.toThrow(/Question 1 was empty/i);
   });
+
+  test("passes through trimmed relatedTopics, feeding Explore's knowledge graph", async () => {
+    const result = await execute({
+      topic: "Machine Learning",
+      questions: [{ question: "Q1", options: ["A", "B", "C", "D"], correctIndex: 0 }],
+      relatedTopics: ["  Neural Networks  ", "Supervised Learning"],
+    });
+
+    expect(result.relatedTopics).toEqual(["Neural Networks", "Supervised Learning"]);
+  });
+
+  test("omits relatedTopics entirely when none were given", async () => {
+    const result = await execute({
+      topic: "Machine Learning",
+      questions: [{ question: "Q1", options: ["A", "B", "C", "D"], correctIndex: 0 }],
+    });
+
+    expect(result.relatedTopics).toBeUndefined();
+  });
+
+  test("passes through a trimmed category, for nesting under a broader field", async () => {
+    const result = await execute({
+      topic: "Binary Search Trees",
+      questions: [{ question: "Q1", options: ["A", "B", "C", "D"], correctIndex: 0 }],
+      category: "  Data Structures and Algorithms  ",
+    });
+
+    expect(result.category).toBe("Data Structures and Algorithms");
+  });
+
+  test("omits category entirely when none was given", async () => {
+    const result = await execute({
+      topic: "Machine Learning",
+      questions: [{ question: "Q1", options: ["A", "B", "C", "D"], correctIndex: 0 }],
+    });
+
+    expect(result.category).toBeUndefined();
+  });
 });
 
 describe("createFlashcardsTool.execute", () => {
@@ -166,5 +216,75 @@ describe("createFlashcardsTool.execute", () => {
         cards: [{ front: "Noble gas?", back: "   " }],
       }),
     ).rejects.toThrow(/Card 1 \("Noble gas\?"\) had an empty back/i);
+  });
+
+  test("passes through trimmed relatedTopics, feeding Explore's knowledge graph", async () => {
+    const result = await executeFlashcards({
+      topic: "Machine Learning",
+      cards: [{ front: "Q1", back: "A1" }],
+      relatedTopics: ["  Neural Networks  ", "Supervised Learning"],
+    });
+
+    expect(result.relatedTopics).toEqual(["Neural Networks", "Supervised Learning"]);
+  });
+
+  test("omits relatedTopics entirely when none were given", async () => {
+    const result = await executeFlashcards({
+      topic: "Machine Learning",
+      cards: [{ front: "Q1", back: "A1" }],
+    });
+
+    expect(result.relatedTopics).toBeUndefined();
+  });
+
+  test("passes through a trimmed category, for nesting under a broader field", async () => {
+    const result = await executeFlashcards({
+      topic: "Binary Search Trees",
+      cards: [{ front: "Q1", back: "A1" }],
+      category: "  Data Structures and Algorithms  ",
+    });
+
+    expect(result.category).toBe("Data Structures and Algorithms");
+  });
+
+  test("omits category entirely when none was given", async () => {
+    const result = await executeFlashcards({
+      topic: "Machine Learning",
+      cards: [{ front: "Q1", back: "A1" }],
+    });
+
+    expect(result.category).toBeUndefined();
+  });
+});
+
+describe("addKnowledgeTopicTool.execute", () => {
+  test("normalizes topic whitespace", async () => {
+    const result = await executeAddKnowledgeTopic({ topic: "  World War II  " });
+    expect(result.topic).toBe("World War II");
+  });
+
+  test("rejects a topic that is empty after trimming", async () => {
+    await expect(executeAddKnowledgeTopic({ topic: "   " })).rejects.toThrow(/topic was empty/i);
+  });
+
+  test("passes through trimmed relatedTopics, category, and summary", async () => {
+    const result = await executeAddKnowledgeTopic({
+      topic: "Rust",
+      relatedTopics: ["  Ownership  ", "Borrow Checker", "Cargo"],
+      category: "  Programming Languages  ",
+      summary: "  A systems programming language focused on memory safety.  ",
+    });
+
+    expect(result.relatedTopics).toEqual(["Ownership", "Borrow Checker", "Cargo"]);
+    expect(result.category).toBe("Programming Languages");
+    expect(result.summary).toBe("A systems programming language focused on memory safety.");
+  });
+
+  test("omits relatedTopics, category, and summary entirely when none were given", async () => {
+    const result = await executeAddKnowledgeTopic({ topic: "Rust" });
+
+    expect(result.relatedTopics).toBeUndefined();
+    expect(result.category).toBeUndefined();
+    expect(result.summary).toBeUndefined();
   });
 });

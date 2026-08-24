@@ -1,32 +1,45 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useMemo } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
+import { OrbitControls, Stars } from "@react-three/drei";
 import AmbientField from "./AmbientField";
 import CameraRig from "./CameraRig";
 import KnowledgeGraph from "./KnowledgeGraph";
-import { EXPANDED_CONCEPTS, KNOWLEDGE_NODES, conceptPosition } from "../data";
-import type { TopicProgress } from "@/lib/supabase/topic-progress";
+import { computeGraphLayout, maxLayoutRadius, toVector3 } from "../graphLayout";
+import type { KnowledgeGraphNode } from "../data";
 
-// Every id CameraRig can focus on — core topics and expanded concepts
-// alike — mapped to its absolute position. Static and deterministic (no
-// props involved), so this is computed once at module scope rather than
-// per render; concepts still hidden/hinted simply never become
-// `selectedNodeId` in the first place (they aren't interactive yet — see
-// ExpandedConceptNode), so including all of them here unconditionally is
-// harmless.
-const FOCUS_POSITIONS: Record<string, [number, number, number]> = {
-  ...Object.fromEntries(KNOWLEDGE_NODES.map((node) => [node.id, node.position])),
-  ...Object.fromEntries(
-    EXPANDED_CONCEPTS.map((concept) => [concept.id, conceptPosition(concept)]),
-  ),
-};
+const FOV = 42;
+// The direction the overview camera looks from — only its distance changes
+// (see computeOverviewPosition), so the graph is always viewed from the same
+// angle regardless of how big it's grown.
+const OVERVIEW_DIRECTION: [number, number, number] = [0, 0.185, 0.983];
+const MIN_OVERVIEW_DISTANCE = 6.5;
+const MAX_OVERVIEW_DISTANCE = 20;
+// How much of the frustum's half-height the graph's own radius should
+// occupy at the overview distance — leaves margin so outer nodes aren't
+// pinned right at the frame edge.
+const FIT_FRACTION = 0.62;
+
+/** Camera distance (and therefore position) that frames a graph of the given
+ * radius: small graphs sit close so Core isn't dwarfed by empty space, large
+ * ones pull back so nothing spills off-screen — instead of one fixed
+ * distance that only ever fit one particular graph size. */
+function computeOverviewPosition(maxRadius: number): [number, number, number] {
+  const fovRad = (FOV * Math.PI) / 180;
+  const raw = maxRadius / (FIT_FRACTION * Math.tan(fovRad / 2));
+  const distance = Math.min(MAX_OVERVIEW_DISTANCE, Math.max(MIN_OVERVIEW_DISTANCE, raw));
+  return [
+    OVERVIEW_DIRECTION[0] * distance,
+    OVERVIEW_DIRECTION[1] * distance,
+    OVERVIEW_DIRECTION[2] * distance,
+  ];
+}
 
 interface SceneProps {
+  nodes: KnowledgeGraphNode[];
   selectedNodeId: string | null;
   onSelect: (id: string, trigger?: HTMLElement | null) => void;
-  progress: Record<string, TopicProgress>;
 }
 
 function isCoarsePointer(): boolean {
@@ -44,15 +57,37 @@ function getAmbientCount(): number {
   return isCoarsePointer() ? 6 : 12;
 }
 
+function getStarCount(): number {
+  return isCoarsePointer() ? 1500 : 3500;
+}
+
 // Only ever mounted once ExploreClient has confirmed WebGL support and that
 // reduced motion is off. Restrained lighting, no shadows, no
 // postprocessing — orbit/zoom is supplemental, click-to-focus (CameraRig) is
 // the primary interaction.
-export default function Scene({ selectedNodeId, onSelect, progress }: SceneProps) {
+export default function Scene({ nodes, selectedNodeId, onSelect }: SceneProps) {
+  const layout = useMemo(() => computeGraphLayout(nodes), [nodes]);
+
+  // How far back the camera needs to sit to fit the graph's actual extent —
+  // recomputed as the graph grows or shrinks, not just once at mount.
+  const overviewPosition = useMemo(
+    () => computeOverviewPosition(maxLayoutRadius(layout)),
+    [layout],
+  );
+
+  // Every node's absolute position, for CameraRig to focus on.
+  const focusPositions = useMemo(() => {
+    const positions: Record<string, [number, number, number]> = {};
+    for (const entry of layout) {
+      positions[entry.id] = toVector3(entry);
+    }
+    return positions;
+  }, [layout]);
+
   return (
     <Canvas
       dpr={getDpr()}
-      camera={{ position: [0, 1.6, 8.6], fov: 42 }}
+      camera={{ position: overviewPosition, fov: FOV }}
       gl={{ antialias: true, alpha: false }}
       onCreated={({ gl }) => gl.setClearColor("#08070c")}
     >
@@ -60,37 +95,57 @@ export default function Scene({ selectedNodeId, onSelect, progress }: SceneProps
         Matches the clear color exactly, so it reads as the far end of the
         scene fading toward its own background rather than a visible haze —
         the only depth cue here besides geometry size/perspective, since the
-        scene has nothing else to anchor "near" vs. "far" against.
+        scene has nothing else to anchor "near" vs. "far" against. Far
+        distance tracks MAX_OVERVIEW_DISTANCE so a big, pulled-back graph
+        doesn't start fading into the background before it's fully visible.
       */}
-      <fog attach="fog" args={["#08070c", 9, 20]} />
+      <fog attach="fog" args={["#08070c", 10, MAX_OVERVIEW_DISTANCE + 8]} />
       <ambientLight intensity={0.5} />
-      <directionalLight position={[4, 5, 3]} intensity={0.8} color="#c7c3ff" />
-      {/* Short-range, low-intensity: only gives Lumora and its nearest
-          neighbors a faint extra lift, not a visible light source. */}
+      <directionalLight position={[4, 5, 3]} intensity={0.8} color="#c4b5fd" />
+      {/* Short-range, low-intensity: only gives Lumora Core and its nearest
+          neighbors a faint extra lift, not a visible light source. Pink-
+          leaning (the brand gradient's hot end) rather than flat indigo, so
+          Core casts a faint warm-brand tint. */}
       <pointLight
         position={[0, 0.3, 2]}
-        intensity={0.4}
+        intensity={0.45}
         distance={5}
-        color="#7d76d9"
+        color="#e08fc4"
       />
+      {/* Fine background star-dust, well outside the graph's own radius —
+          purely decorative depth cue, distinct from AmbientField's larger
+          drifting shard/ring shapes. Default saturation=0 renders white/pale
+          points, which needs no brand-color tuning of its own. */}
+      <Stars radius={20} depth={25} count={getStarCount()} factor={1.4} fade speed={0.3} />
       <AmbientField count={getAmbientCount()} />
       <Suspense fallback={null}>
         <KnowledgeGraph
+          nodes={nodes}
+          layout={layout}
           selectedNodeId={selectedNodeId}
           onSelect={onSelect}
-          progress={progress}
         />
       </Suspense>
-      <CameraRig selectedNodeId={selectedNodeId} focusPositions={FOCUS_POSITIONS} />
+      <CameraRig
+        selectedNodeId={selectedNodeId}
+        focusPositions={focusPositions}
+        overviewPosition={overviewPosition}
+      />
       <OrbitControls
         makeDefault
         enablePan={false}
         enableDamping
         dampingFactor={0.08}
         minDistance={4}
-        maxDistance={13}
-        minPolarAngle={Math.PI / 4}
-        maxPolarAngle={Math.PI - Math.PI / 4}
+        // +1.8x margin matches CameraRig's own portrait aspect-fit cap, so a
+        // tall/narrow window's pulled-back overview never bumps this ceiling.
+        maxDistance={MAX_OVERVIEW_DISTANCE * 1.8 + 6}
+        // Free look: nearly the full vertical range (not the old ±45°
+        // band), so orbiting can look down over the top of the graph or up
+        // from underneath it. Kept just short of the exact poles (0/π) —
+        // OrbitControls' own up-vector handling degenerates there.
+        minPolarAngle={0.05}
+        maxPolarAngle={Math.PI - 0.05}
       />
     </Canvas>
   );

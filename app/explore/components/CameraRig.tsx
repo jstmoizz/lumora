@@ -6,17 +6,27 @@ import { Vector3 } from "three";
 
 // `state.controls` is typed generically (`THREE.EventDispatcher | null`) so
 // it can hold any controls implementation; drei's OrbitControls (with
-// `makeDefault`) sets it to itself, which does have `target`/`update`.
+// `makeDefault`) sets it to itself, which does have `target`/`update`, and
+// (being a real three.js EventDispatcher) `addEventListener`/
+// `removeEventListener` — used below to detect the user grabbing the camera.
 interface OrbitControlsLike {
   target: Vector3;
   update: () => void;
+  addEventListener: (type: string, listener: () => void) => void;
+  removeEventListener: (type: string, listener: () => void) => void;
 }
 
-// Must match Scene.tsx's initial `camera` prop — this is where "back to
-// overview" returns to.
-const OVERVIEW_POSITION = new Vector3(0, 1.6, 8.6);
+// How close position/target need to get to their targets before this rig
+// stops driving the camera and hands full control to OrbitControls — close
+// enough to read as "arrived," not an exact match (which an exponential
+// lerp never quite reaches).
+const SETTLE_EPSILON = 0.01;
+
+// Lumora (the origin) is always what "overview" looks at — only how far back
+// the camera sits changes, based on how big the graph actually is (see
+// Scene.tsx's `overviewPosition`, computed from the graph's extent so a
+// small graph isn't dwarfed by empty space and a big one isn't cropped).
 const OVERVIEW_TARGET = new Vector3(0, 0, 0);
-const OVERVIEW_DISTANCE = OVERVIEW_POSITION.length();
 // How far the camera leans toward the selected node's direction, and how
 // much closer it moves — both kept deliberately small, so a selection reads
 // as a gentle nudge, never a fly-through that isolates one node from the
@@ -45,31 +55,92 @@ interface CameraRigProps {
   // typed node objects, since this rig only ever needs a place to look at,
   // not anything else about what's selected.
   focusPositions: Record<string, [number, number, number]>;
+  // Where "back to overview" returns to — computed by Scene.tsx from the
+  // graph's own extent, not a fixed constant, so the framing fits whatever
+  // is actually there instead of overlapping a wide graph or leaving a
+  // sparse one adrift in empty space.
+  overviewPosition: [number, number, number];
 }
 
-export default function CameraRig({ selectedNodeId, focusPositions }: CameraRigProps) {
+export default function CameraRig({
+  selectedNodeId,
+  focusPositions,
+  overviewPosition,
+}: CameraRigProps) {
   const camera = useThree((state) => state.camera);
   const controls = useThree(
     (state) => state.controls,
   ) as unknown as OrbitControlsLike | null;
 
-  const desiredPosition = useRef(new Vector3().copy(OVERVIEW_POSITION));
+  // Each ref computes its own initial value straight from `overviewPosition`
+  // rather than another ref's `.current` — reading a ref during render (even
+  // just to seed a second one) trips `react-hooks/refs`.
+  const overviewPositionVec = useRef(new Vector3(...overviewPosition));
+  const overviewDistance = useRef(new Vector3(...overviewPosition).length());
+  const desiredPosition = useRef(new Vector3(...overviewPosition));
   const desiredTarget = useRef(new Vector3().copy(OVERVIEW_TARGET));
   const scratchNode = useRef(new Vector3());
   const scratchDir = useRef(new Vector3());
   const scratchRight = useRef(new Vector3());
   const selectedPositionRef = useRef<[number, number, number] | undefined>(undefined);
 
+  // True only while this rig is actively flying the camera to a target
+  // (just after a selection changes, or the graph's overview framing
+  // changes) — false the rest of the time, so OrbitControls' own drag/zoom
+  // fully owns the camera and free-look actually sticks instead of being
+  // fought every frame. Starts false: the Canvas's initial `camera` prop
+  // already places it at the overview position, so there's nothing to fly
+  // to on mount.
+  const isAnimating = useRef(false);
+
   useEffect(() => {
     selectedPositionRef.current = selectedNodeId
       ? focusPositions[selectedNodeId]
       : undefined;
+    isAnimating.current = true;
   }, [selectedNodeId, focusPositions]);
 
-  useFrame((_, delta) => {
+  // Recomputed whenever the graph's extent changes (a topic studied or
+  // deleted), not just on mount — growing the graph should pull the overview
+  // back to fit the new content next time nothing's selected.
+  useEffect(() => {
+    overviewPositionVec.current.set(...overviewPosition);
+    overviewDistance.current = overviewPositionVec.current.length();
+    isAnimating.current = true;
+  }, [overviewPosition]);
+
+  // The moment the user actually grabs the camera (drag to orbit, wheel to
+  // zoom), their input wins immediately rather than finishing whatever
+  // fly-to transition was in progress — cutting a transition short here
+  // reads as "my drag took over," not as a fight.
+  useEffect(() => {
     if (!controls) return;
+    const handleStart = () => {
+      isAnimating.current = false;
+    };
+    controls.addEventListener("start", handleStart);
+    return () => controls.removeEventListener("start", handleStart);
+  }, [controls]);
+
+  useFrame((_, delta) => {
+    if (!controls || !isAnimating.current) return;
 
     const selectedPosition = selectedPositionRef.current;
+
+    // `overviewPosition`/`overviewDistance` are sized to fit the graph
+    // vertically (Scene.tsx's fov is a vertical fov). On a portrait canvas
+    // (aspect < 1) the horizontal field of view is narrower than the
+    // vertical one, so a graph that fits top-to-bottom can still clip
+    // left/right — pull back further by the same factor a horizontal fit
+    // would need, so nothing (least of all a node's label) crosses the edge.
+    const perspectiveCamera = camera as unknown as { aspect?: number };
+    const aspectScale =
+      typeof perspectiveCamera.aspect === "number" && perspectiveCamera.aspect < 1
+        ? // Capped — an extremely tall/narrow window would otherwise pull the
+          // camera back further than OrbitControls' own maxDistance allows.
+          Math.min(1.8, 1 / perspectiveCamera.aspect)
+        : 1;
+    const fittedDistance = overviewDistance.current * aspectScale;
 
     if (selectedPosition) {
       const [x, y, z] = selectedPosition;
@@ -95,20 +166,31 @@ export default function CameraRig({ selectedNodeId, focusPositions }: CameraRigP
       scratchDir.current
         .copy(scratchNode.current)
         .normalize()
-        .multiplyScalar(OVERVIEW_DISTANCE);
+        .multiplyScalar(fittedDistance);
       desiredPosition.current
-        .copy(OVERVIEW_POSITION)
+        .copy(overviewPositionVec.current)
+        .multiplyScalar(aspectScale)
         .lerp(scratchDir.current, FOCUS_NUDGE)
         .multiplyScalar(FOCUS_ZOOM);
     } else {
       desiredTarget.current.copy(OVERVIEW_TARGET);
-      desiredPosition.current.copy(OVERVIEW_POSITION);
+      desiredPosition.current.copy(overviewPositionVec.current).multiplyScalar(aspectScale);
     }
 
     const t = 1 - Math.exp(-LERP_SPEED * delta);
     camera.position.lerp(desiredPosition.current, t);
     controls.target.lerp(desiredTarget.current, t);
     controls.update();
+
+    // Arrived — stop driving the camera every frame so OrbitControls' own
+    // drag/zoom fully owns it from here (free-look actually sticks) until
+    // the next selection or overview change starts a new transition.
+    if (
+      camera.position.distanceTo(desiredPosition.current) < SETTLE_EPSILON &&
+      controls.target.distanceTo(desiredTarget.current) < SETTLE_EPSILON
+    ) {
+      isAnimating.current = false;
+    }
   });
 
   return null;

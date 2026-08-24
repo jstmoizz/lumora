@@ -1,99 +1,82 @@
 import { describe, expect, test } from "vitest";
-import {
-  CENTRAL_NODE,
-  EXPANDED_CONCEPTS,
-  KNOWLEDGE_EDGES,
-  KNOWLEDGE_NODES,
-  conceptPosition,
-} from "../data";
+import { CENTRAL_NODE, NODE_ACCENTS, assignAccents, type KnowledgeGraphNode } from "../data";
 
-describe("knowledge space data", () => {
-  test("every node has a unique id", () => {
-    const ids = KNOWLEDGE_NODES.map((node) => node.id);
-    expect(new Set(ids).size).toBe(ids.length);
-  });
+function node(overrides: Partial<KnowledgeGraphNode> = {}): KnowledgeGraphNode {
+  return {
+    id: "n1",
+    topicKey: "topic",
+    label: "Topic",
+    summary: null,
+    parentId: null,
+    relatedLabels: [],
+    activityCount: 1,
+    quizCount: 1,
+    flashcardCount: 0,
+    createdAt: "2026-01-01T00:00:00Z",
+    lastStudiedAt: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
 
-  test("every edge references two existing, distinct knowledge nodes", () => {
-    const ids = new Set(KNOWLEDGE_NODES.map((node) => node.id));
-    for (const edge of KNOWLEDGE_EDGES) {
-      expect(ids.has(edge.from)).toBe(true);
-      expect(ids.has(edge.to)).toBe(true);
-      expect(edge.from).not.toBe(edge.to);
-    }
-  });
-
-  test("no edge references the central node", () => {
-    for (const edge of KNOWLEDGE_EDGES) {
-      expect(edge.from).not.toBe(CENTRAL_NODE.id);
-      expect(edge.to).not.toBe(CENTRAL_NODE.id);
-    }
-  });
-
-  test("the central node id does not collide with any knowledge node id", () => {
-    const ids = KNOWLEDGE_NODES.map((node) => node.id);
-    expect(ids).not.toContain(CENTRAL_NODE.id);
-  });
-
-  test("tier is a minority-core hierarchy, not a 50/50 split or all-one-tier", () => {
-    const coreCount = KNOWLEDGE_NODES.filter((node) => node.tier === "core").length;
-    expect(coreCount).toBeGreaterThan(0);
-    expect(coreCount).toBeLessThan(KNOWLEDGE_NODES.length / 2);
+describe("CENTRAL_NODE", () => {
+  test("has a stable id distinct from any real node id space", () => {
+    expect(CENTRAL_NODE.id).toBe("lumora-core");
+    expect(CENTRAL_NODE.label).toBe("Lumora Core");
   });
 });
 
-describe("expanded concepts (Phase 4.3)", () => {
-  test("every concept has a unique id", () => {
-    const ids = EXPANDED_CONCEPTS.map((concept) => concept.id);
-    expect(new Set(ids).size).toBe(ids.length);
-  });
-
-  test("no concept id collides with a core topic id or the central node id", () => {
-    const coreIds = new Set(KNOWLEDGE_NODES.map((node) => node.id));
-    for (const concept of EXPANDED_CONCEPTS) {
-      expect(coreIds.has(concept.id)).toBe(false);
-      expect(concept.id).not.toBe(CENTRAL_NODE.id);
+describe("NODE_ACCENTS", () => {
+  test("defines a restrained, non-empty palette", () => {
+    const ids = Object.keys(NODE_ACCENTS);
+    expect(ids.length).toBeGreaterThan(0);
+    expect(ids.length).toBeLessThanOrEqual(6);
+    for (const accent of Object.values(NODE_ACCENTS)) {
+      expect(accent.color).toMatch(/^#[0-9a-f]{6}$/i);
+      expect(accent.emissive).toMatch(/^#[0-9a-f]{6}$/i);
     }
   });
+});
 
-  test("every concept's parentId references an existing core topic", () => {
-    const coreIds = new Set(KNOWLEDGE_NODES.map((node) => node.id));
-    for (const concept of EXPANDED_CONCEPTS) {
-      expect(coreIds.has(concept.parentId)).toBe(true);
-    }
+describe("assignAccents", () => {
+  test("returns an empty map for an empty graph", () => {
+    expect(assignAccents([])).toEqual({});
   });
 
-  test("the dataset is deliberately small and curated, not exhaustive or generated", () => {
-    // A loose guardrail against silently growing this into a large/generated
-    // dataset in a later edit — not a precise product requirement.
-    expect(EXPANDED_CONCEPTS.length).toBeGreaterThan(0);
-    expect(EXPANDED_CONCEPTS.length).toBeLessThanOrEqual(20);
+  test("assigns every node an accent", () => {
+    const nodes = [
+      node({ id: "a", createdAt: "2026-01-01T00:00:00Z" }),
+      node({ id: "b", createdAt: "2026-01-02T00:00:00Z" }),
+    ];
+    const accents = assignAccents(nodes);
+    expect(Object.keys(NODE_ACCENTS)).toContain(accents.a);
+    expect(Object.keys(NODE_ACCENTS)).toContain(accents.b);
   });
 
-  test("a concept's position is deterministic: its parent's position plus its own offset", () => {
-    for (const concept of EXPANDED_CONCEPTS) {
-      const parent = KNOWLEDGE_NODES.find((node) => node.id === concept.parentId)!;
-      const [x, y, z] = conceptPosition(concept);
-      expect(x).toBeCloseTo(parent.position[0] + concept.offset[0]);
-      expect(y).toBeCloseTo(parent.position[1] + concept.offset[1]);
-      expect(z).toBeCloseTo(parent.position[2] + concept.offset[2]);
-    }
+  test("top-level nodes cycle through the palette in creation order", () => {
+    const nodes = [
+      node({ id: "a", parentId: null, createdAt: "2026-01-01T00:00:00Z" }),
+      node({ id: "b", parentId: null, createdAt: "2026-01-02T00:00:00Z" }),
+    ];
+    const accents = assignAccents(nodes);
+    expect(accents.a).not.toBe(accents.b);
   });
 
-  test("a concept's position is stable across repeated calls (no randomness)", () => {
-    const concept = EXPANDED_CONCEPTS[0];
-    expect(conceptPosition(concept)).toEqual(conceptPosition(concept));
+  test("a child inherits its top-level ancestor's accent, even several levels deep", () => {
+    const nodes = [
+      node({ id: "root", parentId: null, createdAt: "2026-01-01T00:00:00Z" }),
+      node({ id: "child", parentId: "root", createdAt: "2026-01-02T00:00:00Z" }),
+      node({ id: "grandchild", parentId: "child", createdAt: "2026-01-03T00:00:00Z" }),
+    ];
+    const accents = assignAccents(nodes);
+    expect(accents.child).toBe(accents.root);
+    expect(accents.grandchild).toBe(accents.root);
   });
 
-  test("siblings under the same parent sit at distinct positions", () => {
-    const byParent = new Map<string, [number, number, number][]>();
-    for (const concept of EXPANDED_CONCEPTS) {
-      const positions = byParent.get(concept.parentId) ?? [];
-      positions.push(conceptPosition(concept));
-      byParent.set(concept.parentId, positions);
-    }
-    for (const positions of byParent.values()) {
-      const unique = new Set(positions.map((position) => position.join(",")));
-      expect(unique.size).toBe(positions.length);
-    }
+  test("is deterministic across repeated calls", () => {
+    const nodes = [
+      node({ id: "a", createdAt: "2026-01-01T00:00:00Z" }),
+      node({ id: "b", parentId: "a", createdAt: "2026-01-02T00:00:00Z" }),
+    ];
+    expect(assignAccents(nodes)).toEqual(assignAccents(nodes));
   });
 });

@@ -8,6 +8,7 @@ import { chatModel, GENERATION_CONFIG, SYSTEM_PROMPT } from "@/lib/ai/config";
 import { smoothTextStream } from "@/lib/ai/smoothTextStream";
 import { lumoraTools, type LumoraUIMessage } from "@/lib/ai/tools";
 import { requireUser } from "@/lib/supabase/authorization";
+import { upsertKnowledgeNodeActivity } from "@/lib/supabase/knowledge-graph";
 import { createClient } from "@/lib/supabase/server";
 
 const TITLE_MAX_LENGTH = 60;
@@ -221,6 +222,51 @@ export async function POST(req: Request) {
           messageError.message,
         );
         return;
+      }
+
+      // Feeds Explore's knowledge graph: every quiz/flashcard set (or direct
+      // addKnowledgeTopic call) the model actually made this turn becomes
+      // (or updates) a node. Wrapped in try/catch on top of
+      // upsertKnowledgeNodeActivity's own internal error handling (belt-and-
+      // suspenders) — a failed write here must never affect the chat
+      // response already streamed to the client.
+      for (const part of responseMessage.parts) {
+        try {
+          if (part.type === "tool-createQuiz" && part.state === "output-available") {
+            await upsertKnowledgeNodeActivity(supabase, userId, {
+              label: part.output.topic,
+              kind: "quiz",
+              relatedTopics: part.output.relatedTopics,
+              category: part.output.category,
+            });
+          } else if (
+            part.type === "tool-createFlashcards" &&
+            part.state === "output-available"
+          ) {
+            await upsertKnowledgeNodeActivity(supabase, userId, {
+              label: part.output.topic,
+              kind: "flashcards",
+              relatedTopics: part.output.relatedTopics,
+              category: part.output.category,
+            });
+          } else if (
+            part.type === "tool-addKnowledgeTopic" &&
+            part.state === "output-available"
+          ) {
+            await upsertKnowledgeNodeActivity(supabase, userId, {
+              label: part.output.topic,
+              kind: "manual",
+              relatedTopics: part.output.relatedTopics,
+              category: part.output.category,
+              summary: part.output.summary,
+            });
+          }
+        } catch (knowledgeGraphError) {
+          console.error(
+            "[api/chat] failed to update knowledge graph:",
+            knowledgeGraphError,
+          );
+        }
       }
 
       const { error: updateError } = await supabase

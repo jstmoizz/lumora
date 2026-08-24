@@ -1,0 +1,34 @@
+/*
+ * ProfileCard.css's own `.pc-card` is sized for a near-full-viewport hero
+ * card (height: 80svh, max-height: 540px) — appropriate for the component's
+ * original demo context, not for a compact section on a content page. This
+ * override wins on specificity alone (two classes on the wrapper vs. one on
+ * `.pc-card` in the ported stylesheet), so it applies regardless of which
+ * stylesheet Next.js happens to inject first. `clamp()` keeps it reasonably
+ * sized on short viewports without needing separate breakpoint rules.
+ */
+.developer-credit-card.pc-card-wrapper .pc-card {
+  height: clamp(320px, 48svh, 420px);
+  max-height: 420px;
+}
+
+/*
+ * ProfileCard.css's hover state flips the holographic `.pc-shine::before`/
+ * `::after` layers from fully transparent to fully opaque (opacity 0 -> 1)
+ * and simultaneously boosts `.pc-shine` itself brighter/more saturated —
+ * a dramatic jump intended for the component's own full-bleed hero-card
+ * demo. Both overrides below win on specificity alone (five class-level
+ * selectors here vs. three in the ported stylesheet's own hover rule), so
+ * they apply regardless of stylesheet injection order.
+ */
+.developer-credit-card.pc-card-wrapper .pc-card:hover .pc-shine,
+.developer-credit-card.pc-card-wrapper .pc-card.active .pc-shine {
+  filter: brightness(0.68) contrast(1.1) saturate(0.28) opacity(0.35);
+}
+
+.developer-credit-card.pc-card-wrapper .pc-card:hover .pc-shine::before,
+.developer-credit-card.pc-card-wrapper .pc-card.active .pc-shine::before,
+.developer-credit-card.pc-card-wrapper .pc-card:hover .pc-shine::after,
+.developer-credit-card.pc-card-wrapper .pc-card.active .pc-shine::after {
+  opacity: 0.22;
+}
