@@ -316,6 +316,33 @@ describe("error state", () => {
     expect(regenerate).toHaveBeenCalledTimes(1);
     resolveRegenerate();
   });
+
+  // Mirrors the exact scenario /api/chat's own "regenerate-message with no
+  // conversationId" fix relies on: the very first message of a session
+  // failed before the server's `start` metadata (the only way the client
+  // learns a conversationId) ever streamed back, so no message here carries
+  // `metadata.conversationId` and no `initialConversationId` prop is
+  // passed. The client's own behavior for this case must keep calling
+  // `regenerate()` with no body — it's the server's job (not this
+  // component's) to treat that as an initial submission rather than a
+  // retry of an established conversation.
+  test("Retry with no known conversationId calls regenerate with no body", () => {
+    const regenerate = vi.fn(() => Promise.resolve());
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        status: "error",
+        messages: [userMessage("Explain entropy")],
+        error: new TypeError("Failed to fetch"),
+        regenerate,
+      }),
+    );
+    render(<ChatInterface />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledWith();
+  });
 });
 
 describe("onConversationIdKnown — GenerateWorkspace's URL/Recent Chats sync", () => {

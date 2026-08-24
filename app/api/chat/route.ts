@@ -40,6 +40,21 @@ function extractText(message: LumoraUIMessage): string | null {
   return text || null;
 }
 
+// The minimal shape every message must have before it's safe to pass to
+// titleFromMessage()/extractText() (both do `message.parts.filter(...)`) or
+// convertToModelMessages() below. `messages` being an array is checked
+// separately, before this; this only guards each element within it — a
+// `null` entry, or an object with no `parts` array, would otherwise throw
+// deep inside title/extraction before ever reaching the try/catch already
+// wrapping the model-message conversion.
+function hasValidMessageShape(message: unknown): message is LumoraUIMessage {
+  return (
+    typeof message === "object" &&
+    message !== null &&
+    Array.isArray((message as { parts?: unknown }).parts)
+  );
+}
+
 interface ChatRequestBody {
   messages: LumoraUIMessage[];
   conversationId?: string;
@@ -98,6 +113,10 @@ export async function POST(req: Request) {
     );
   }
 
+  if (!messages.every(hasValidMessageShape)) {
+    return Response.json({ error: "Invalid message format." }, { status: 400 });
+  }
+
   const supabase = await createClient();
 
   let conversationId: string;
@@ -139,12 +158,24 @@ export async function POST(req: Request) {
   }
 
   // Persist the user's turn as soon as it's accepted, independent of
-  // whether the assistant's response below succeeds. Skipped on a retry
-  // (`trigger: "regenerate-message"`), since that resends the same
+  // whether the assistant's response below succeeds. Skipped on a retry of
+  // an *established* conversation (`trigger: "regenerate-message"` with a
+  // known `requestedConversationId`), since that resends the same
   // already-persisted user message rather than a new one — the AI SDK sets
   // this field itself, not something the client crafts by hand.
+  //
+  // A retry of the very *first* message of a session is different: if that
+  // original request failed before the client ever learned a
+  // conversationId (a network failure, a missing-API-key 500, etc.), the
+  // client has nothing to send back as `conversationId` — so this request
+  // lands here as `regenerate-message` with none. Nothing could already be
+  // persisted in that case (the failed attempt never got far enough to
+  // insert it), so it has to be treated like an initial submission or the
+  // user's message is silently lost.
   const newUserMessage = messages[messages.length - 1];
-  if (trigger !== "regenerate-message" && newUserMessage?.role === "user") {
+  const isRetryOfEstablishedConversation =
+    trigger === "regenerate-message" && requestedConversationId !== null;
+  if (!isRetryOfEstablishedConversation && newUserMessage?.role === "user") {
     const { error } = await supabase.from("messages").insert({
       conversation_id: conversationId,
       role: "user",

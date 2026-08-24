@@ -274,6 +274,58 @@ describe("malformed messages", () => {
     expect(streamTextMock).not.toHaveBeenCalled();
     expect(fromMock).not.toHaveBeenCalled();
   });
+
+  // titleFromMessage()/extractText() both do `message.parts.filter(...)` —
+  // called before convertToModelMessages()'s own try/catch is ever reached,
+  // for both the new-conversation (titleFromMessage) and existing-
+  // conversation (extractText, at persistence time) branches. A message
+  // missing `parts` entirely used to throw past both of those, reaching
+  // neither this route's own error response nor the DB.
+  test("a message missing `parts` entirely is rejected with 400 before any DB work happens, for a new conversation", async () => {
+    setupSupabaseMock();
+
+    const response = await POST(
+      makeRequest({ messages: [{ id: "user-1", role: "user" }] }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid message format.",
+    });
+    expect(streamTextMock).not.toHaveBeenCalled();
+    expect(fromMock).not.toHaveBeenCalled();
+  });
+
+  test("a message missing `parts` entirely is rejected with 400 before any DB work happens, for an existing conversation", async () => {
+    setupSupabaseMock();
+
+    const response = await POST(
+      makeRequest({
+        messages: [{ id: "user-1", role: "user" }],
+        conversationId: "conv-existing",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid message format.",
+    });
+    expect(streamTextMock).not.toHaveBeenCalled();
+    expect(fromMock).not.toHaveBeenCalled();
+  });
+
+  test("a null entry in `messages` is rejected with 400 rather than throwing", async () => {
+    setupSupabaseMock();
+
+    const response = await POST(makeRequest({ messages: [null] }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid message format.",
+    });
+    expect(streamTextMock).not.toHaveBeenCalled();
+    expect(fromMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("conversation ownership", () => {
@@ -419,6 +471,60 @@ describe("persistence", () => {
     await POST(makeRequest({ messages: [userMessage("hi")] }));
 
     expect(spies.conversationsUpdateSpy).not.toHaveBeenCalled();
+  });
+});
+
+// `handleRetry` in ChatInterface.tsx always sends `trigger:
+// "regenerate-message"` (the AI SDK sets this itself), with a
+// `conversationId` in the body only when the client already knows one.
+// A retry of the very first message of a session — when the original
+// request failed before the client ever learned a conversationId — arrives
+// here exactly like an initial submission except for that trigger value.
+describe("retry (regenerate-message)", () => {
+  test("regenerate-message with no conversationId is treated like an initial submission: a conversation is created and the user message is persisted", async () => {
+    const spies = setupSupabaseMock({
+      conversationInsert: { data: { id: "conv-new" }, error: null },
+    });
+    setupStreamText();
+
+    await POST(
+      makeRequest({
+        messages: [userMessage("Explain osmosis")],
+        trigger: "regenerate-message",
+      }),
+    );
+
+    expect(spies.conversationsInsertSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ user_id: "user-1" }),
+    );
+    expect(spies.messagesInsertSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: "user",
+        content: "Explain osmosis",
+        conversation_id: "conv-new",
+      }),
+    );
+  });
+
+  test("regenerate-message with a known conversationId does not re-persist the already-saved user message", async () => {
+    const spies = setupSupabaseMock({
+      conversationLookup: { data: { id: "conv-existing" }, error: null },
+    });
+    setupStreamText();
+
+    await POST(
+      makeRequest({
+        messages: [userMessage("Explain osmosis")],
+        conversationId: "conv-existing",
+        trigger: "regenerate-message",
+      }),
+    );
+
+    expect(spies.conversationsInsertSpy).not.toHaveBeenCalled();
+    const userInserts = spies.messagesInsertSpy.mock.calls.filter(
+      ([payload]) => payload.role === "user",
+    );
+    expect(userInserts).toHaveLength(0);
   });
 });
 
