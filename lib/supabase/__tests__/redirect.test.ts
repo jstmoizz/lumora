@@ -37,4 +37,18 @@ describe("getSafeRedirect", () => {
       "/fallback",
     );
   });
+
+  // Browsers normalize `\` to `/` when resolving a URL for a special scheme
+  // (http/https), so `/\evil.example` resolves exactly like `//evil.example`
+  // — a real open-redirect bypass that the leading-`//` check alone misses,
+  // since the raw string never actually contains `//`.
+  test("rejects a backslash-prefixed host (a browser-normalized protocol-relative URL)", () => {
+    expect(getSafeRedirect("/\\evil.example", "/fallback")).toBe("/fallback");
+  });
+
+  test("rejects a backslash anywhere in the path, not just at the start", () => {
+    expect(getSafeRedirect("/generate/\\evil.example", "/fallback")).toBe(
+      "/fallback",
+    );
+  });
 });

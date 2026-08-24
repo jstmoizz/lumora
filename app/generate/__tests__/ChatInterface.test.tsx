@@ -190,6 +190,65 @@ describe("empty-state example prompts", () => {
     expect(sendMessage).toHaveBeenCalledTimes(1);
     expect(sendMessage).toHaveBeenCalledWith({ text: promptText });
   });
+
+  // M3: `handleExampleClick` shares the composer's own `isSubmittingRef`
+  // (see the composer's "rapid double-submit" test above for the full
+  // rationale on why this needs an `act()`-batched double click rather than
+  // two separate `fireEvent.click` calls — `status`/`canSend`-derived
+  // disabling only reflects a render that hasn't happened yet by the time
+  // the second click would land here).
+  test("a rapid double-click on the same example prompt calls sendMessage exactly once", () => {
+    let resolveSend!: () => void;
+    const sendMessage = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
+    render(<ChatInterface />);
+
+    const group = screen.getByRole("group", { name: "Example prompts" });
+    const [firstPrompt] = within(group).getAllByRole("button");
+
+    act(() => {
+      fireEvent.click(firstPrompt);
+      fireEvent.click(firstPrompt);
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    resolveSend();
+  });
+
+  test("the guard releases once the first example-prompt submission settles, so a later distinct example prompt still sends", async () => {
+    let resolveSend!: () => void;
+    const sendMessage = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
+    render(<ChatInterface />);
+
+    const group = screen.getByRole("group", { name: "Example prompts" });
+    const [firstPrompt, secondPrompt] = within(group).getAllByRole("button");
+    const secondPromptText = secondPrompt.textContent;
+
+    fireEvent.click(firstPrompt);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+
+    // Let the first submission's promise settle, so its `finally` block
+    // (the only place `isSubmittingRef` is cleared) actually runs.
+    await act(async () => {
+      resolveSend();
+    });
+
+    fireEvent.click(secondPrompt);
+
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage).toHaveBeenLastCalledWith({ text: secondPromptText });
+  });
 });
 
 describe("pending state", () => {

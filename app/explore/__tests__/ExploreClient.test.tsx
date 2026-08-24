@@ -1,5 +1,5 @@
 import { beforeEach, describe, test, expect, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, act } from "@testing-library/react";
 import ExploreClient from "../ExploreClient";
 import type { KnowledgeGraphNode } from "../data";
 
@@ -15,6 +15,18 @@ vi.mock("@/lib/supabase/knowledge-graph-actions", () => ({
 }));
 
 import { deleteKnowledgeNode, resetKnowledgeGraph } from "@/lib/supabase/knowledge-graph-actions";
+
+// Lets a test hold a mutation "in flight" (unresolved) across two rapid
+// Confirm clicks, then resolve it on demand — needed to actually exercise
+// the M7 double-confirm race rather than the mutation settling before the
+// second click can even fire.
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
 
 function node(overrides: Partial<KnowledgeGraphNode> = {}): KnowledgeGraphNode {
   return {
@@ -209,6 +221,69 @@ describe("ExploreClient — the topic list", () => {
   });
 });
 
+// `lastTriggerRef`/`handleBack` (see the existing "normal Back... still
+// focuses the original trigger" and delete-focus tests below) were already
+// correct for the mobile chip row and TopicPanel's own Related buttons —
+// both already passed `event.currentTarget` through `onSelect`. These two
+// cases cover the paths that didn't: the desktop OptionWheel (whose
+// `onChange` used to only report an index/label, no element) and a 3D
+// KnowledgeNode's own floating label (whose `onClick` used to call
+// `onSelect(node.id)` with no trigger at all).
+describe("ExploreClient — keyboard focus restoration (H5)", () => {
+  test("selecting a topic through the desktop Topics wheel restores focus to the wheel after Back", () => {
+    // Two nodes, not one: OptionWheel starts centered on index 0 and only
+    // fires onChange when the selection actually moves to a different index.
+    const nodes = [node(), node({ id: "la", topicKey: "linear algebra", label: "Linear Algebra" })];
+    render(<ExploreClient nodes={nodes} />);
+
+    fireEvent.click(screen.getByRole("option", { name: "Linear Algebra" }));
+    expect(screen.getByRole("heading", { name: "Linear Algebra" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to overview" }));
+
+    // The wheel's root listbox — not the individual (non-tabbable)
+    // `role="option"` row — is the real, focusable element OptionWheel's
+    // roving-focus model actually exposes; see OptionWheel.test.tsx for
+    // direct coverage of that contract.
+    expect(screen.getByRole("listbox", { name: "Topics" })).toHaveFocus();
+  });
+
+  // jsdom has no WebGL, so the real 3D <Scene>/<KnowledgeNode> never renders
+  // through ExploreClient here (see this file's own top-of-file comment) —
+  // StaticFallback is what actually renders in its place, and its overlay
+  // buttons share the exact same contract KnowledgeNode's floating label now
+  // does: `tabIndex={-1}` + `aria-hidden="true"` (H6), while still passing
+  // `event.currentTarget` as the selection trigger (H5). This test proves
+  // that combination round-trips correctly at the ExploreClient/focus-
+  // management level; KnowledgeNode.test.tsx separately proves the real 3D
+  // label itself has that same wiring.
+  test("selecting a topic through its 3D-space overlay control restores focus to that control after Back", () => {
+    render(<ExploreClient nodes={[node()]} />);
+
+    const graphRegion = screen.getByLabelText(
+      "Interactive 3D knowledge space. Use the topic list for keyboard access.",
+    );
+    // Scoped to the graph region, and queried with `hidden: true` and no
+    // `name` filter: an aria-hidden element has no computable accessible
+    // name at all (by spec — that's the whole point of H6, it's no longer a
+    // normal, discoverable tab stop), so `hidden: true` is what's needed to
+    // find it here at all. With a single node rendered, this is the only
+    // button in the graph region.
+    const trigger = within(graphRegion).getByRole("button", { hidden: true });
+    expect(trigger).toHaveTextContent("Machine Learning");
+
+    fireEvent.click(trigger);
+    expect(screen.getByRole("heading", { name: "Machine Learning" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to overview" }));
+
+    // tabIndex={-1} only removes an element from the natural Tab sequence —
+    // it doesn't stop `.focus()` (programmatic or, as here, restored via
+    // `lastTriggerRef.current?.focus()`) from landing on it.
+    expect(trigger).toHaveFocus();
+  });
+});
+
 describe("ExploreClient — delete", () => {
   test("deleting a node requires confirmation before it's removed", async () => {
     render(<ExploreClient nodes={[node()]} />);
@@ -269,6 +344,38 @@ describe("ExploreClient — delete", () => {
     expect(deleteKnowledgeNode).toHaveBeenCalledTimes(2);
   });
 
+  // M7: closes the window where two Confirm clicks land before React has
+  // committed any re-render at all (not just before the visible disabled
+  // style paints). A plain pair of sequential `fireEvent.click()` calls
+  // doesn't reproduce this: each is independently flushed via its own
+  // `act()`, and by the second call the dialog has already closed and
+  // unmounted the button (confirmed via a throwaway diagnostic — the
+  // button's `isConnected` was already `false`), so it would "pass" even
+  // with no guard at all. Wrapping both clicks in one outer `act()` batches
+  // them together with no commit in between, which is what actually
+  // exercises the race — and does reproduce two calls without the
+  // `isDeletingRef` guard in ExploreClient.tsx (verified the same way).
+  test("rapid double-confirm on delete triggers exactly one mutation call", async () => {
+    const { promise, resolve } = deferred<{ ok: boolean }>();
+    vi.mocked(deleteKnowledgeNode).mockReturnValueOnce(promise);
+    render(<ExploreClient nodes={[node()]} />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Machine Learning" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Topic" }));
+    const confirmButton = within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" });
+
+    act(() => {
+      fireEvent.click(confirmButton);
+      fireEvent.click(confirmButton);
+    });
+
+    expect(deleteKnowledgeNode).toHaveBeenCalledTimes(1);
+
+    resolve({ ok: true });
+    await vi.waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1));
+    expect(deleteKnowledgeNode).toHaveBeenCalledTimes(1);
+  });
+
   test("a successful delete of the selected node still refreshes, and closes the panel", async () => {
     render(<ExploreClient nodes={[node()]} />);
 
@@ -326,6 +433,30 @@ describe("ExploreClient — reset", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Reset Graph" }));
     expect(resetKnowledgeGraph).toHaveBeenCalled();
+  });
+
+  // M7: same guard, and same "why a plain pair of fireEvent.click() calls
+  // doesn't prove anything" reasoning, as delete's rapid-double-confirm test
+  // above — applied to ResetGraphControl's own separate mutation/pending
+  // state (`isResettingRef`).
+  test("rapid double-confirm on reset triggers exactly one mutation call", async () => {
+    const { promise, resolve } = deferred<{ ok: boolean }>();
+    vi.mocked(resetKnowledgeGraph).mockReturnValueOnce(promise);
+    render(<ExploreClient nodes={[node()]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset Knowledge Graph" }));
+    const confirmButton = screen.getByRole("button", { name: "Reset Graph" });
+
+    act(() => {
+      fireEvent.click(confirmButton);
+      fireEvent.click(confirmButton);
+    });
+
+    expect(resetKnowledgeGraph).toHaveBeenCalledTimes(1);
+
+    resolve({ ok: true });
+    await vi.waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1));
+    expect(resetKnowledgeGraph).toHaveBeenCalledTimes(1);
   });
 
   test("a failed reset surfaces an accessible error and does not refresh, leaving the graph as-is", async () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { RotateCcwIcon } from "lucide-react";
 import ConfirmDialog from "./ConfirmDialog";
@@ -20,20 +20,30 @@ export default function ResetGraphControl() {
   // reset attempt.
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  // See ExploreClient.tsx's `isDeletingRef` for why `isPending` alone can't
+  // close this window — same pattern, same reason, applied to this
+  // component's own separate reset mutation.
+  const isResettingRef = useRef(false);
 
   function handleConfirm() {
+    if (isResettingRef.current) return;
+    isResettingRef.current = true;
     startTransition(async () => {
-      const result = await resetKnowledgeGraph();
-      if (!result.ok) {
-        // Reset failed server-side — leave the graph exactly as it was
-        // instead of refreshing as though it had been cleared. The dialog
-        // itself already closed on confirm (see ConfirmDialog), so the
-        // user's natural retry path is just clicking Reset Knowledge Graph
-        // again.
-        setError("Couldn't reset your knowledge graph. Please try again.");
-        return;
+      try {
+        const result = await resetKnowledgeGraph();
+        if (!result.ok) {
+          // Reset failed server-side — leave the graph exactly as it was
+          // instead of refreshing as though it had been cleared. The
+          // dialog itself already closed on confirm (see ConfirmDialog),
+          // so the user's natural retry path is just clicking Reset
+          // Knowledge Graph again.
+          setError("Couldn't reset your knowledge graph. Please try again.");
+          return;
+        }
+        router.refresh();
+      } finally {
+        isResettingRef.current = false;
       }
-      router.refresh();
     });
   }
 
@@ -58,6 +68,7 @@ export default function ResetGraphControl() {
         description="This will remove all studied topics and return your graph to Lumora Core. This can't be undone."
         confirmLabel="Reset Graph"
         onConfirm={handleConfirm}
+        confirmDisabled={isPending}
       />
       {/*
         `role="alert"` is an implicit assertive live region — announced to

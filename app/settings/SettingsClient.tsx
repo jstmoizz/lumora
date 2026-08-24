@@ -110,6 +110,13 @@ function StudyPreferenceRow({
   const [error, setError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
+  // `isPending`/`current` are React state — two clicks fired in the same
+  // synchronous pass (before React commits a render) both still see the
+  // pre-click values, so `option === current || isPending` alone can't stop
+  // both from starting a save. This ref closes that window; it's an
+  // additional synchronous layer on top of that check, not a replacement
+  // for it — same pattern as `isSubmittingRef` in ChatInterface.tsx.
+  const isSavingRef = useRef(false);
 
   // Clears the transient "Saved" confirmation a couple seconds after it
   // appears — never fires for a save that never actually succeeded, since
@@ -122,17 +129,23 @@ function StudyPreferenceRow({
   }, [justSaved]);
 
   function handleSelect(option: string) {
+    if (isSavingRef.current) return;
     if (option === current || isPending) return;
     setError(null);
     setJustSaved(false);
+    isSavingRef.current = true;
     startTransition(async () => {
-      const result = await updateUserSetting(field, option);
-      if (result.error) {
-        setError(result.error);
-        return;
+      try {
+        const result = await updateUserSetting(field, option);
+        if (result.error) {
+          setError(result.error);
+          return;
+        }
+        setCurrent(option);
+        setJustSaved(true);
+      } finally {
+        isSavingRef.current = false;
       }
-      setCurrent(option);
-      setJustSaved(true);
     });
   }
 
@@ -212,6 +225,10 @@ function AppearanceRow({ initialTheme }: { initialTheme: ThemePreference }) {
   const [error, setError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
+  // See StudyPreferenceRow's `isSavingRef` above for why `isPending`/
+  // `current` alone can't close the same-tick double-click window — same
+  // pattern, applied to this row's own separate theme mutation.
+  const isSavingRef = useRef(false);
 
   // Reconciles the durable (database) value into this browser's local
   // storage/DOM, but ONLY on a browser that has never made a local theme
@@ -242,18 +259,24 @@ function AppearanceRow({ initialTheme }: { initialTheme: ThemePreference }) {
   }, [justSaved]);
 
   function handleSelect(option: ThemePreference) {
+    if (isSavingRef.current) return;
     if (option === current || isPending) return;
     setError(null);
     setJustSaved(false);
     applyThemePreference(option);
     setCurrent(option);
+    isSavingRef.current = true;
     startTransition(async () => {
-      const result = await updateUserSetting("theme", option);
-      if (result.error) {
-        setError(result.error);
-        return;
+      try {
+        const result = await updateUserSetting("theme", option);
+        if (result.error) {
+          setError(result.error);
+          return;
+        }
+        setJustSaved(true);
+      } finally {
+        isSavingRef.current = false;
       }
-      setJustSaved(true);
     });
   }
 

@@ -18,7 +18,16 @@ import "./OptionWheel.css";
 export interface OptionWheelProps {
   items: string[];
   defaultSelected?: number;
-  onChange?: (index: number, item: string) => void;
+  // The third argument is the wheel's own root listbox element — the sole
+  // real, focusable DOM node in this "virtual/roving focus" control (its
+  // individual `role="option"` rows are plain, non-tabbable divs; the
+  // container itself is what actually holds keyboard focus and receives
+  // arrow-key input). Passed on every selection change regardless of how it
+  // was triggered (click, drag, wheel, or arrow keys), so a caller wanting
+  // to restore focus after navigating away has a real element to focus —
+  // not `document.activeElement`, which this component's own roving-focus
+  // model wouldn't otherwise expose reliably.
+  onChange?: (index: number, item: string, element: HTMLDivElement | null) => void;
   textColor?: string;
   activeColor?: string;
   side?: "left" | "right";
@@ -278,7 +287,7 @@ export default function OptionWheel({
       if (idx !== selectedRef.current) {
         selectedRef.current = idx;
         setSelectedIndex(idx);
-        onChangeRef.current?.(idx, cfg.items[idx]);
+        onChangeRef.current?.(idx, cfg.items[idx], rootRef.current);
         playTick();
       }
       startLoop();

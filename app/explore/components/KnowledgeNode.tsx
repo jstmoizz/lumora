@@ -163,11 +163,23 @@ export default function KnowledgeNode({
       {/* A plain HTML overlay, not 3D text — every node shows its own name
           directly on the graph so identifying a topic never requires
           clicking it first. Sits on the outer group (not inside the bobbing
-          mesh) so the label itself stays still while its node breathes. */}
+          mesh) so the label itself stays still while its node breathes.
+
+          Pointer-operable only, same as StaticFallback's equivalent overlay
+          buttons: the Topics list (OptionWheel on desktop, a chip row on
+          mobile) renders this exact same set of topics as real, accessible
+          controls, so this label would otherwise be a second, redundant tab
+          stop with the same accessible name. `tabIndex={-1}` + `aria-hidden`
+          keep it clickable for mouse/touch (and still a valid target for
+          `.focus()` — a `-1` tabIndex only removes an element from the
+          natural Tab sequence, it doesn't make it unfocusable) while
+          removing that duplication for keyboard and screen-reader users. */}
       <Html center position={[0, -(radius + 0.24), 0]} zIndexRange={[10, 0]} occlude={false}>
         <button
           type="button"
-          onClick={() => onSelect(node.id)}
+          tabIndex={-1}
+          aria-hidden="true"
+          onClick={(event) => onSelect(node.id, event.currentTarget)}
           className="cursor-pointer rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap backdrop-blur-sm transition-opacity"
           style={{
             opacity,

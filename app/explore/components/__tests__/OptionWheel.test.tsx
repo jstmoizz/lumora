@@ -24,7 +24,25 @@ describe("OptionWheel", () => {
 
     fireEvent.click(screen.getByRole("option", { name: "Transformers" }));
 
-    expect(onChange).toHaveBeenCalledWith(1, "Transformers");
+    expect(onChange).toHaveBeenCalledWith(1, "Transformers", screen.getByRole("listbox"));
+  });
+
+  // The listbox root — not the individual (non-tabbable) `role="option"`
+  // row — is the sole real, focusable DOM node in this roving/virtual-focus
+  // control, so it's what a caller wanting to restore keyboard focus after
+  // navigating away actually needs. Asserted as its own case (not just
+  // folded into the assertion above) since this is the one part of the
+  // contract callers rely on for focus restoration, not just "some element
+  // was passed."
+  test("the element passed to onChange is the listbox root, not the clicked option row", () => {
+    const onChange = vi.fn();
+    render(<OptionWheel items={["Neural Networks", "Transformers"]} onChange={onChange} />);
+
+    const listbox = screen.getByRole("listbox");
+    fireEvent.click(screen.getByRole("option", { name: "Transformers" }));
+
+    const [, , element] = onChange.mock.calls[0];
+    expect(element).toBe(listbox);
   });
 
   test("marks the item at defaultSelected as aria-selected", () => {
@@ -55,9 +73,10 @@ describe("OptionWheel", () => {
       <OptionWheel items={["Neural Networks", "Transformers", "CNNs"]} onChange={onChange} />,
     );
 
-    fireEvent.keyDown(screen.getByRole("listbox"), { key: "ArrowDown" });
+    const listbox = screen.getByRole("listbox");
+    fireEvent.keyDown(listbox, { key: "ArrowDown" });
 
-    expect(onChange).toHaveBeenCalledWith(1, "Transformers");
+    expect(onChange).toHaveBeenCalledWith(1, "Transformers", listbox);
   });
 
   test("ArrowUp does not move past the first item when loop is false", () => {
@@ -83,9 +102,10 @@ describe("OptionWheel", () => {
     const onChange = vi.fn();
     render(<OptionWheel items={["Neural Networks", "Transformers"]} onChange={onChange} loop />);
 
-    fireEvent.keyDown(screen.getByRole("listbox"), { key: "ArrowUp" });
+    const listbox = screen.getByRole("listbox");
+    fireEvent.keyDown(listbox, { key: "ArrowUp" });
 
-    expect(onChange).toHaveBeenCalledWith(1, "Transformers");
+    expect(onChange).toHaveBeenCalledWith(1, "Transformers", listbox);
   });
 
   test("clicking the already-selected item does not re-fire onChange", () => {

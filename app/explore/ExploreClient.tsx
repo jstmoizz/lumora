@@ -59,6 +59,15 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
   // topic-list layout (desktop wheel vs. mobile chip row) is currently
   // visible, so it's usable no matter what's rendered.
   const graphRegionRef = useRef<HTMLDivElement>(null);
+  // `isPending` is derived React state — it doesn't update synchronously
+  // within the same event-handling pass, so two Confirm clicks fired before
+  // React commits a render (a fast double-click, or one landing during the
+  // dialog's own close animation — see ConfirmDialog's `confirmDisabled`
+  // comment) can both read it as still `false` and both start a delete. This
+  // ref closes that window; it's an additional synchronous layer on top of
+  // `isPending`, not a replacement for it — same pattern as
+  // `isSubmittingRef` in ChatInterface.tsx.
+  const isDeletingRef = useRef(false);
 
   const handleSelect = useCallback((id: string, trigger?: HTMLElement | null) => {
     lastTriggerRef.current = trigger ?? null;
@@ -122,35 +131,41 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
   }
 
   function handleConfirmDelete() {
+    if (isDeletingRef.current) return;
     if (!deleteTarget) return;
     const id = deleteTarget.id;
+    isDeletingRef.current = true;
     startTransition(async () => {
-      const result = await deleteKnowledgeNode(id);
-      if (!result.ok) {
-        // Deletion failed server-side — leave the node selected and the
-        // graph untouched, exactly as if the delete had never been
-        // requested, and surface why instead of quietly refreshing as if
-        // it had succeeded (the previous behavior: closing the dialog and
-        // refreshing regardless of the result made a failed delete look
-        // successful until the "deleted" node reappeared with no
-        // explanation). The dialog itself already closed on confirm (see
-        // ConfirmDialog), so the user's natural retry path is just clicking
-        // Delete Topic again.
-        setDeleteError("Couldn't delete this topic. Please try again.");
-        return;
+      try {
+        const result = await deleteKnowledgeNode(id);
+        if (!result.ok) {
+          // Deletion failed server-side — leave the node selected and the
+          // graph untouched, exactly as if the delete had never been
+          // requested, and surface why instead of quietly refreshing as if
+          // it had succeeded (the previous behavior: closing the dialog and
+          // refreshing regardless of the result made a failed delete look
+          // successful until the "deleted" node reappeared with no
+          // explanation). The dialog itself already closed on confirm (see
+          // ConfirmDialog), so the user's natural retry path is just
+          // clicking Delete Topic again.
+          setDeleteError("Couldn't delete this topic. Please try again.");
+          return;
+        }
+        if (selectedNodeId === id) {
+          // Deliberately not `handleBack()` here: that focuses
+          // `lastTriggerRef`, but the trigger that opened this node is the
+          // very thing that just got deleted — it won't survive the
+          // `router.refresh()` below. Close the panel the same way, but
+          // send focus to the stable graph region instead.
+          setSelectedNodeId(null);
+          setPreviewLabel(null);
+          lastTriggerRef.current = null;
+          graphRegionRef.current?.focus();
+        }
+        router.refresh();
+      } finally {
+        isDeletingRef.current = false;
       }
-      if (selectedNodeId === id) {
-        // Deliberately not `handleBack()` here: that focuses
-        // `lastTriggerRef`, but the trigger that opened this node is the
-        // very thing that just got deleted — it won't survive the
-        // `router.refresh()` below. Close the panel the same way, but send
-        // focus to the stable graph region instead.
-        setSelectedNodeId(null);
-        setPreviewLabel(null);
-        lastTriggerRef.current = null;
-        graphRegionRef.current?.focus();
-      }
-      router.refresh();
     });
   }
 
@@ -263,7 +278,7 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
               inset={20}
               textColor="var(--muted-foreground)"
               activeColor="var(--foreground)"
-              onChange={(_index, label) => handleTopicChoice(label)}
+              onChange={(_index, label, element) => handleTopicChoice(label, element)}
               aria-label="Topics"
             />
           </aside>
@@ -308,6 +323,7 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
         description="This removes the topic and anything nested under it from your knowledge graph. This can't be undone."
         confirmLabel="Delete"
         onConfirm={handleConfirmDelete}
+        confirmDisabled={isPending}
       />
       {/*
         `role="alert"` is an implicit assertive live region — announced to

@@ -17,6 +17,12 @@ interface ConfirmDialogProps {
   description: string;
   confirmLabel: string;
   onConfirm: () => void;
+  // True while the caller's mutation from a previous confirm is still in
+  // flight. Radix keeps this dialog (and its Confirm button) mounted for its
+  // exit animation after `onOpenChange(false)` fires below, so without this
+  // the button stays clickable — and thus able to fire a second mutation —
+  // for that entire animation window, not just for one JS tick.
+  confirmDisabled?: boolean;
 }
 
 // Shared confirmation step for Explore's two destructive actions (deleting a
@@ -30,6 +36,7 @@ export default function ConfirmDialog({
   description,
   confirmLabel,
   onConfirm,
+  confirmDisabled = false,
 }: ConfirmDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -45,6 +52,7 @@ export default function ConfirmDialog({
           <Button
             type="button"
             variant="destructive"
+            disabled={confirmDisabled}
             onClick={() => {
               onConfirm();
               onOpenChange(false);

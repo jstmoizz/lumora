@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import SettingsClient from "../SettingsClient";
 
 vi.mock("@/lib/supabase/settings-actions", () => ({
@@ -117,6 +117,90 @@ describe("SettingsClient — Study Preferences", () => {
     resolveUpdate({ error: null });
   });
 
+  // Same race already found and fixed for Explore's delete/reset confirms
+  // and Generate's composer/example prompts: `isPending`/`current` are
+  // React state, which only reflects a click once a render has happened.
+  // The existing "a second click while a save is pending" test above
+  // deliberately waits for the button to become disabled before its second
+  // click, so it can't catch this — both clicks need to land inside one
+  // `act()` block so neither gets a commit in between (see
+  // ChatInterface.test.tsx's identical composer test for the full
+  // rationale on why two separate `fireEvent.click()` calls prove nothing
+  // here).
+  test("a rapid double-click on two different options (before React can re-render) calls updateUserSetting exactly once", async () => {
+    let resolveUpdate!: (value: { error: string | null }) => void;
+    vi.mocked(updateUserSetting).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveUpdate = resolve;
+        }),
+    );
+    render(<SettingsClient account={null} preferences={preferences} />);
+
+    const group = responseStyleGroup();
+    const detailedButton = within(group).getByRole("button", { name: "Detailed" });
+    const conversationalButton = within(group).getByRole("button", {
+      name: "Conversational",
+    });
+
+    act(() => {
+      fireEvent.click(detailedButton);
+      fireEvent.click(conversationalButton);
+    });
+
+    expect(updateUserSetting).toHaveBeenCalledTimes(1);
+
+    // `updateUserSetting` is one shared mock reused by every test in this
+    // file (unlike ChatInterface.test.tsx's per-test `sendMessage`), so a
+    // promise resolved without awaiting its flush here would have its
+    // continuation (the `finally` that clears `isSavingRef`) run on a later
+    // microtask that can bleed into whichever test happens to run next —
+    // fully flushing it inside `act()` before this test ends avoids that.
+    await act(async () => {
+      resolveUpdate({ error: null });
+    });
+  });
+
+  test("the guard releases once a save settles, so a later legitimate selection still saves", async () => {
+    let resolveUpdate!: (value: { error: string | null }) => void;
+    vi.mocked(updateUserSetting).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveUpdate = resolve;
+        }),
+    );
+    render(<SettingsClient account={null} preferences={preferences} />);
+
+    const group = responseStyleGroup();
+    fireEvent.click(within(group).getByRole("button", { name: "Detailed" }));
+    expect(updateUserSetting).toHaveBeenCalledTimes(1);
+
+    // Let the first save's promise settle, so its `finally` block (the
+    // only place `isSavingRef` is cleared) actually runs.
+    await act(async () => {
+      resolveUpdate({ error: null });
+    });
+
+    fireEvent.click(within(group).getByRole("button", { name: "Conversational" }));
+
+    expect(updateUserSetting).toHaveBeenCalledTimes(2);
+    expect(updateUserSetting).toHaveBeenLastCalledWith(
+      "response_style",
+      "Conversational",
+    );
+
+    // `updateUserSetting` is one shared mock reused by every test in this
+    // file — an unresolved transition left dangling here (the second
+    // click's promise) doesn't just leak in this test, it's been observed
+    // to stall unrelated *later* tests' own saves, since `useTransition`'s
+    // underlying scheduler is a process-wide singleton, not reset between
+    // tests. Always fully settle every promise this mock hands out before
+    // a test using it ends.
+    await act(async () => {
+      resolveUpdate({ error: null });
+    });
+  });
+
   test("clicking the already-selected option does not call updateUserSetting at all", () => {
     render(<SettingsClient account={null} preferences={preferences} />);
 
@@ -181,6 +265,36 @@ describe("SettingsClient — Study Preferences", () => {
     );
   });
 
+  test("the theme guard releases once a save settles, so a later legitimate selection still saves", async () => {
+    let resolveUpdate!: (value: { error: string | null }) => void;
+    vi.mocked(updateUserSetting).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveUpdate = resolve;
+        }),
+    );
+    render(<SettingsClient account={null} preferences={preferences} />);
+
+    const group = screen.getByRole("group", { name: "Appearance" });
+    fireEvent.click(within(group).getByRole("button", { name: "Dark" }));
+    expect(updateUserSetting).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveUpdate({ error: null });
+    });
+
+    fireEvent.click(within(group).getByRole("button", { name: "Light" }));
+
+    expect(updateUserSetting).toHaveBeenCalledTimes(2);
+    expect(updateUserSetting).toHaveBeenLastCalledWith("theme", "light");
+
+    // See the Study Preferences version of this test for why the second
+    // click's promise needs to be fully settled here too.
+    await act(async () => {
+      resolveUpdate({ error: null });
+    });
+  });
+
   test("a failed theme save keeps the theme applied but shows an error", async () => {
     vi.mocked(updateUserSetting).mockResolvedValue({
       error: "Couldn't save that change. Please try again.",
@@ -197,6 +311,36 @@ describe("SettingsClient — Study Preferences", () => {
           "Couldn't save that change. Please try again.",
         ),
       ).toBeInTheDocument();
+    });
+  });
+
+  // Same race and same technique as the Study Preferences version above,
+  // applied to AppearanceRow's own separate `isSavingRef`.
+  test("a rapid double-click on two different theme options (before React can re-render) calls updateUserSetting exactly once", async () => {
+    let resolveUpdate!: (value: { error: string | null }) => void;
+    vi.mocked(updateUserSetting).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveUpdate = resolve;
+        }),
+    );
+    render(<SettingsClient account={null} preferences={preferences} />);
+
+    const group = screen.getByRole("group", { name: "Appearance" });
+    const darkButton = within(group).getByRole("button", { name: "Dark" });
+    const lightButton = within(group).getByRole("button", { name: "Light" });
+
+    act(() => {
+      fireEvent.click(darkButton);
+      fireEvent.click(lightButton);
+    });
+
+    expect(updateUserSetting).toHaveBeenCalledTimes(1);
+
+    // See the Study Preferences version of this test for why the resolution
+    // needs to be fully flushed here rather than fired and forgotten.
+    await act(async () => {
+      resolveUpdate({ error: null });
     });
   });
 

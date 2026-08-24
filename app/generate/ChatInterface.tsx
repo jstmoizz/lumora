@@ -628,9 +628,22 @@ export default function ChatInterface({
     }
   }
 
-  function handleExampleClick(prompt: string) {
+  // Same race as `handleSubmit` (see `isSubmittingRef`'s own comment above)
+  // and the same fix, reusing the identical ref rather than a second one —
+  // both paths funnel through the one `sendChatMessage` choke point, so one
+  // guard covering both is enough to stop either from double-firing, and
+  // also stops one path from double-firing together with the other (e.g. an
+  // example-prompt click landing mid-composer-submit).
+  async function handleExampleClick(prompt: string) {
+    if (isSubmittingRef.current) return;
     if (status !== "ready") return;
-    sendChatMessage({ text: prompt });
+
+    isSubmittingRef.current = true;
+    try {
+      await sendChatMessage({ text: prompt });
+    } finally {
+      isSubmittingRef.current = false;
+    }
   }
 
   // Re-requests the failed turn via the SDK's own `regenerate` — it drops
