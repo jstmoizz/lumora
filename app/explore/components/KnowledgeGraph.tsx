@@ -12,6 +12,7 @@ interface KnowledgeGraphProps {
   layout: LayoutEntry[];
   selectedNodeId: string | null;
   onSelect: (id: string, trigger?: HTMLElement | null) => void;
+  onDragEnd: (id: string, position: [number, number, number]) => void;
 }
 
 // A node's own parent/children (direct graph neighbors), plus anything it
@@ -37,6 +38,7 @@ export default function KnowledgeGraph({
   layout,
   selectedNodeId,
   onSelect,
+  onDragEnd,
 }: KnowledgeGraphProps) {
   const accents = assignAccents(nodes);
   const positions = new Map(layout.map((entry) => [entry.id, entry]));
@@ -62,6 +64,7 @@ export default function KnowledgeGraph({
               selectedNodeId !== null && node.id !== selectedNodeId && !relatedIds.has(node.id)
             }
             onSelect={onSelect}
+            onDragEnd={onDragEnd}
           />
         );
       })}

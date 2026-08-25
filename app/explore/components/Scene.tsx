@@ -1,12 +1,12 @@
 "use client";
 
-import { Suspense, useMemo } from "react";
+import { Suspense, useCallback, useMemo, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Stars } from "@react-three/drei";
 import AmbientField from "./AmbientField";
 import CameraRig from "./CameraRig";
 import KnowledgeGraph from "./KnowledgeGraph";
-import { computeGraphLayout, maxLayoutRadius, toVector3 } from "../graphLayout";
+import { applyManualOverrides, computeGraphLayout, maxLayoutRadius, toVector3 } from "../graphLayout";
 import type { KnowledgeGraphNode } from "../data";
 
 const FOV = 42;
@@ -66,7 +66,25 @@ function getStarCount(): number {
 // postprocessing — orbit/zoom is supplemental, click-to-focus (CameraRig) is
 // the primary interaction.
 export default function Scene({ nodes, selectedNodeId, onSelect }: SceneProps) {
-  const layout = useMemo(() => computeGraphLayout(nodes), [nodes]);
+  const baseLayout = useMemo(() => computeGraphLayout(nodes), [nodes]);
+
+  // Session-only manual positions (Step 7: no persistence layer exists for
+  // this yet — see graphLayout.ts's own comment on applyManualOverrides).
+  // Lives here, not in ExploreClient, since Scene is the one component that
+  // actually stays mounted across a `nodes` prop change (a new topic
+  // studied elsewhere, a delete's `router.refresh()`) — keeping this state
+  // local, rather than lifted, is what lets a dragged position survive
+  // those updates without the automatic placement system ever needing to
+  // know a node was moved.
+  const [manualPositions, setManualPositions] = useState<Record<string, [number, number, number]>>({});
+  const handleNodeDragEnd = useCallback((id: string, dragged: [number, number, number]) => {
+    setManualPositions((prev) => ({ ...prev, [id]: dragged }));
+  }, []);
+
+  const layout = useMemo(
+    () => applyManualOverrides(baseLayout, manualPositions),
+    [baseLayout, manualPositions],
+  );
 
   // How far back the camera needs to sit to fit the graph's actual extent —
   // recomputed as the graph grows or shrinks, not just once at mount.
@@ -124,6 +142,7 @@ export default function Scene({ nodes, selectedNodeId, onSelect }: SceneProps) {
           layout={layout}
           selectedNodeId={selectedNodeId}
           onSelect={onSelect}
+          onDragEnd={handleNodeDragEnd}
         />
       </Suspense>
       <CameraRig

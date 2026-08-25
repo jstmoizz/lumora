@@ -15,6 +15,13 @@ import type { KnowledgeGraphNode } from "../../data";
 // this component produces, with no reimplementation of KnowledgeNode itself.
 vi.mock("@react-three/fiber", () => ({
   useFrame: () => {},
+  // A minimal stand-in so KnowledgeNode's drag-handling code (camera/
+  // controls lookups) doesn't throw during these tests — none of the tests
+  // here actually exercise pointer-drag (jsdom has no WebGL/raycasting to
+  // make that meaningful; see this file's own top-of-file comment), they
+  // only ever click the Html label button, which never reaches this code.
+  useThree: (selector: (state: { camera: { getWorldDirection: () => void }; controls: null }) => unknown) =>
+    selector({ camera: { getWorldDirection: () => {} }, controls: null }),
 }));
 vi.mock("@react-three/drei", () => ({
   Html: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -48,6 +55,7 @@ function renderNode(onSelect = vi.fn()) {
       isRelated={false}
       isDimmed={false}
       onSelect={onSelect}
+      onDragEnd={vi.fn()}
     />,
   );
   return onSelect;

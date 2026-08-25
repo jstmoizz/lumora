@@ -1,11 +1,28 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { useFrame, type ThreeEvent } from "@react-three/fiber";
+import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Html } from "@react-three/drei";
-import { MathUtils, type Mesh } from "three";
+import { MathUtils, Plane, Vector3, type Group, type Mesh } from "three";
 import { NODE_ACCENTS, type AccentId, type KnowledgeGraphNode } from "../data";
+import { isDragGesture } from "../dragGesture";
 import Glow from "./Glow";
+
+// The subset of drei's OrbitControls this component actually touches —
+// mirrors CameraRig.tsx's own narrow `OrbitControlsLike` typing of the same
+// generically-typed `state.controls`, for the same reason.
+interface OrbitControlsLike {
+  enabled: boolean;
+}
+
+// A plain module-level function, not a closure — mirrors OptionWheel.tsx's
+// own `runFrame`: this sidesteps `react-hooks/immutability` flagging a
+// mutation of `controls` (a live, imperative OrbitControls instance handed
+// back by `useThree`, not React-managed render state) inside a handler
+// that's passed to JSX.
+function setControlsEnabled(controls: OrbitControlsLike | null, enabled: boolean): void {
+  if (controls) controls.enabled = enabled;
+}
 
 interface KnowledgeNodeProps {
   node: KnowledgeGraphNode;
@@ -22,6 +39,10 @@ interface KnowledgeNodeProps {
   isRelated: boolean;
   isDimmed: boolean;
   onSelect: (id: string, trigger?: HTMLElement | null) => void;
+  // Fired once, on release, after a real drag (not a plain click) — never
+  // per pointer-move, so this never causes a full-graph re-layout or a
+  // React state update on every frame (see this file's own drag handlers).
+  onDragEnd: (id: string, position: [number, number, number]) => void;
 }
 
 // Interactive scale is a multiplier on top of the depth's geometry radius
@@ -51,13 +72,108 @@ export default function KnowledgeNode({
   isRelated,
   isDimmed,
   onSelect,
+  onDragEnd,
 }: KnowledgeNodeProps) {
   const meshRef = useRef<Mesh>(null);
+  // Position comes from the `position` prop under normal circumstances
+  // (as before); during an active drag, this ref's transform is driven
+  // imperatively frame-by-frame instead, so dragging never triggers a React
+  // re-render (and therefore never a full-graph re-layout) until release.
+  const groupRef = useRef<Group>(null);
   const [hovered, setHovered] = useState(false);
   const currentScale = useRef(BASE_SCALE);
   // Randomized once per node (lazy initializer, so the impure call only
   // ever runs on mount) so nodes don't bob in lockstep.
   const [bobOffset] = useState(() => Math.random() * Math.PI * 2);
+
+  const camera = useThree((state) => state.camera);
+  const controls = useThree((state) => state.controls) as unknown as OrbitControlsLike | null;
+
+  // Gesture-scoped refs, not state: none of this needs to trigger a
+  // re-render while it's happening, only the one `onDragEnd` call at the end.
+  const pointerDownAt = useRef<{ x: number; y: number } | null>(null);
+  const isDragging = useRef(false);
+  const dragPlane = useRef(new Plane());
+  const dragPoint = useRef(new Vector3());
+  const controlsWereEnabled = useRef(true);
+
+  function handlePointerDown(event: ThreeEvent<PointerEvent>) {
+    event.stopPropagation();
+    pointerDownAt.current = { x: event.clientX, y: event.clientY };
+    isDragging.current = false;
+
+    // A plane through the node's current position, facing the camera —
+    // dragging moves the node across this plane, since a single 2D pointer
+    // coordinate has no unique 3D answer on its own.
+    const worldPosition = new Vector3();
+    groupRef.current?.getWorldPosition(worldPosition);
+    const normal = new Vector3();
+    camera.getWorldDirection(normal);
+    dragPlane.current.setFromNormalAndCoplanarPoint(normal, worldPosition);
+
+    // Disabled for the whole gesture, from pointerdown, not just once a drag
+    // is confirmed — OrbitControls listens on the same canvas element, and
+    // waiting for the drag threshold to be crossed would let it start
+    // orbiting first. Restored on release either way (see handlePointerUp).
+    if (controls) controlsWereEnabled.current = controls.enabled;
+    setControlsEnabled(controls, false);
+    (event.target as Element).setPointerCapture(event.pointerId);
+  }
+
+  function handlePointerMove(event: ThreeEvent<PointerEvent>) {
+    const start = pointerDownAt.current;
+    if (!start) return;
+
+    if (!isDragging.current) {
+      if (!isDragGesture(start, { x: event.clientX, y: event.clientY })) return;
+      isDragging.current = true;
+    }
+
+    event.stopPropagation();
+    const group = groupRef.current;
+    if (!group || !event.ray.intersectPlane(dragPlane.current, dragPoint.current)) return;
+
+    // `position` is in the KnowledgeGraph <group>'s local space (the same
+    // space graphLayout.ts's own coordinates are in) — converting the
+    // plane-intersection's world point back into that space keeps the value
+    // this drag eventually commits consistent with it, rather than drifting
+    // if that parent group is ever itself transformed.
+    const local = group.parent ? group.parent.worldToLocal(dragPoint.current.clone()) : dragPoint.current;
+    group.position.set(local.x, local.y, local.z);
+  }
+
+  // Shared cleanup for both a normal release and an aborted gesture
+  // (pointercancel — e.g. the OS interrupts the touch) — always restores
+  // OrbitControls, since leaving it disabled after the pointer is gone would
+  // strand the camera. Returns whether there was actually a gesture in
+  // progress to react to.
+  function resetGesture(): boolean {
+    const hadPointerDown = pointerDownAt.current !== null;
+    pointerDownAt.current = null;
+    isDragging.current = false;
+    setControlsEnabled(controls, controlsWereEnabled.current);
+    return hadPointerDown;
+  }
+
+  function handlePointerUp(event: ThreeEvent<PointerEvent>) {
+    const wasDragging = isDragging.current;
+    if (!resetGesture()) return;
+
+    event.stopPropagation();
+    if (wasDragging) {
+      const position = groupRef.current?.position;
+      if (position) onDragEnd(node.id, [position.x, position.y, position.z]);
+    } else {
+      onSelect(node.id);
+    }
+  }
+
+  // A cancelled gesture (pointercancel) is neither a click nor a completed
+  // drag — just abandon it and restore normal camera control, with no
+  // onSelect/onDragEnd call either way.
+  function handlePointerCancel() {
+    resetGesture();
+  }
 
   useFrame((state) => {
     const mesh = meshRef.current;
@@ -81,11 +197,6 @@ export default function KnowledgeNode({
     event.stopPropagation();
     setHovered(false);
     document.body.style.cursor = "auto";
-  }
-
-  function handleClick(event: ThreeEvent<MouseEvent>) {
-    event.stopPropagation();
-    onSelect(node.id);
   }
 
   const isCore = depth === 0;
@@ -123,12 +234,15 @@ export default function KnowledgeNode({
   const radius = isCore ? CORE_RADIUS : SECONDARY_RADIUS;
 
   return (
-    <group position={position}>
+    <group ref={groupRef} position={position}>
       <mesh
         ref={meshRef}
         onPointerOver={handlePointerOver}
         onPointerOut={handlePointerOut}
-        onClick={handleClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
       >
         {isCore ? (
           <icosahedronGeometry args={[CORE_RADIUS, 0]} />

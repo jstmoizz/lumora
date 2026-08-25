@@ -1,7 +1,7 @@
 "use client";
 
 import { CENTRAL_NODE, type KnowledgeGraphNode } from "./data";
-import { computeGraphLayout, toPercentPosition } from "./graphLayout";
+import { computeGraphLayout, maxLayoutRadius, toPercentPosition } from "./graphLayout";
 
 interface StaticFallbackProps {
   nodes: KnowledgeGraphNode[];
@@ -16,7 +16,7 @@ interface StaticFallbackProps {
 // Scene uses, since node ids/counts are per-user and arbitrary.
 export default function StaticFallback({ nodes, selectedNodeId, onSelect }: StaticFallbackProps) {
   const layout = computeGraphLayout(nodes);
-  const maxRadius = layout.reduce((max, entry) => Math.max(max, entry.radius), 1);
+  const maxRadius = maxLayoutRadius(layout);
   const positions = new Map(layout.map((entry) => [entry.id, toPercentPosition(entry, maxRadius)]));
   const byId = new Map(nodes.map((node) => [node.id, node]));
 
