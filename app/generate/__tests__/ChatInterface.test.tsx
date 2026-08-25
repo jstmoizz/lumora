@@ -4,10 +4,12 @@ import { useChat } from "@ai-sdk/react";
 import ChatInterface from "../ChatInterface";
 import { makeUseChatReturn, type MockUseChatReturn } from "./useChatMock";
 import {
+  assistantExtractionMessage,
   assistantMessageWithParts,
   assistantTextMessage,
   outputAvailableFlashcardsPart,
   outputAvailableQuizPart,
+  SAMPLE_EXTRACTION,
   userMessage,
 } from "./fixtures";
 
@@ -293,6 +295,301 @@ describe("pending state", () => {
   });
 });
 
+describe("pending status copy — reflecting what the current turn is doing", () => {
+  test("shows the quiz-specific copy while the Create Quiz handoff is pending", () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        messages: [userMessage("What is this?"), assistantExtractionMessage()],
+      }),
+    );
+    const { rerender } = render(<ChatInterface />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Quiz" }));
+
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        status: "submitted",
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+          userMessage(`Create a quiz based on ${SAMPLE_EXTRACTION.title}.`, "user-2"),
+        ],
+      }),
+    );
+    rerender(<ChatInterface />);
+
+    expect(screen.getByText("Creating your quiz…")).toBeInTheDocument();
+    expect(screen.queryByText("Thinking…")).not.toBeInTheDocument();
+  });
+
+  test("shows the flashcards-specific copy while the Create Flashcards handoff is pending", () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        messages: [userMessage("What is this?"), assistantExtractionMessage()],
+      }),
+    );
+    const { rerender } = render(<ChatInterface />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Flashcards" }));
+
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        status: "submitted",
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+          userMessage(`Create flashcards based on ${SAMPLE_EXTRACTION.title}.`, "user-2"),
+        ],
+      }),
+    );
+    rerender(<ChatInterface />);
+
+    expect(screen.getByText("Creating your flashcards…")).toBeInTheDocument();
+  });
+
+  test("an ordinary text turn keeps the generic Thinking… copy, not a handoff-specific one", () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
+    const { rerender } = render(<ChatInterface />);
+
+    fireEvent.change(screen.getByLabelText("Message"), {
+      target: { value: "Explain osmosis" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        status: "submitted",
+        messages: [userMessage("Explain osmosis")],
+      }),
+    );
+    rerender(<ChatInterface />);
+
+    expect(screen.getByText("Thinking…")).toBeInTheDocument();
+  });
+
+  test("a stale intent from a finished turn never leaks into the next, unrelated turn", async () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        messages: [userMessage("What is this?"), assistantExtractionMessage()],
+      }),
+    );
+    const { rerender } = render(<ChatInterface />);
+
+    // First turn: a quiz handoff. `sendMessage` here is a synchronous
+    // `vi.fn()`, so `await act(async () => {})` is enough to flush
+    // handleExtractionAction's own `await` and let its `finally` release
+    // `isSubmittingRef` — without this, the second send below would be
+    // silently dropped by that same guard (it's shared across every send
+    // path on purpose — see isSubmittingRef's own comment).
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create Quiz" }));
+    });
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        status: "ready",
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+          userMessage("Create a quiz based on Photosynthesis notes.", "user-2"),
+          assistantTextMessage("Here's a quiz — open Resources to take it!", "assistant-2"),
+        ],
+      }),
+    );
+    rerender(<ChatInterface />);
+
+    // Second, unrelated turn: a plain text question — must show the
+    // generic copy, not "Creating your quiz…" left over from the first.
+    fireEvent.change(screen.getByLabelText("Message"), {
+      target: { value: "Explain photosynthesis in more depth" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    });
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        status: "submitted",
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+          userMessage("Create a quiz based on Photosynthesis notes.", "user-2"),
+          assistantTextMessage("Here's a quiz — open Resources to take it!", "assistant-2"),
+          userMessage("Explain photosynthesis in more depth", "user-3"),
+        ],
+      }),
+    );
+    rerender(<ChatInterface />);
+
+    expect(screen.getByText("Thinking…")).toBeInTheDocument();
+    expect(screen.queryByText("Creating your quiz…")).not.toBeInTheDocument();
+  });
+
+  // Same guarantee as the test above, but reached via Retry recovering from
+  // a failure rather than a first-try success — once a failed quiz handoff
+  // is retried successfully, a later *unrelated* message must not still
+  // show "Creating your quiz…" (the composer only allows sending once
+  // `status` is back to "ready", which here only happens by retrying the
+  // failed turn — there's no way to send a fresh message straight out of
+  // the error state itself).
+  test("a stale intent from a *failed-then-retried* turn never leaks into the next, unrelated turn", async () => {
+    const sendMessage = vi.fn();
+    const regenerate = vi.fn(() => Promise.resolve());
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        messages: [userMessage("What is this?"), assistantExtractionMessage()],
+      }),
+    );
+    const { rerender } = render(<ChatInterface />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create Quiz" }));
+    });
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        regenerate,
+        status: "error",
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+          userMessage("Create a quiz based on Photosynthesis notes.", "user-2"),
+        ],
+        error: new Error("RATE_LIMITED"),
+      }),
+    );
+    rerender(<ChatInterface />);
+    expect(screen.getByText("AI usage is temporarily limited.")).toBeInTheDocument();
+
+    // Retry succeeds this time.
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        regenerate,
+        status: "ready",
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+          userMessage("Create a quiz based on Photosynthesis notes.", "user-2"),
+          assistantTextMessage("Here's a quiz — open Resources to take it!", "assistant-2"),
+        ],
+      }),
+    );
+    rerender(<ChatInterface />);
+    expect(screen.queryByText("AI usage is temporarily limited.")).not.toBeInTheDocument();
+
+    // Now a brand-new, unrelated message.
+    fireEvent.change(screen.getByLabelText("Message"), {
+      target: { value: "Explain photosynthesis in more depth" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    });
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        regenerate,
+        status: "submitted",
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+          userMessage("Create a quiz based on Photosynthesis notes.", "user-2"),
+          assistantTextMessage("Here's a quiz — open Resources to take it!", "assistant-2"),
+          userMessage("Explain photosynthesis in more depth", "user-3"),
+        ],
+      }),
+    );
+    rerender(<ChatInterface />);
+
+    expect(screen.getByText("Thinking…")).toBeInTheDocument();
+    expect(screen.queryByText("Creating your quiz…")).not.toBeInTheDocument();
+  });
+});
+
+describe("image attachment — Vision-processing hint", () => {
+  function pngFile(name = "photo.png") {
+    return new File([new Uint8Array([1, 2, 3, 4])], name, { type: "image/png" });
+  }
+
+  test("attaching an image shows a subtle hint that Vision processing will be used", async () => {
+    mockUseChat.mockReturnValue(makeUseChatReturn());
+    render(<ChatInterface />);
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [pngFile()] } });
+
+    expect(await screen.findByText("Image attached · Vision processing")).toBeInTheDocument();
+  });
+
+  test("Fast is disabled in the mode picker while an image is attached, Auto/Vision remain usable", async () => {
+    mockUseChat.mockReturnValue(makeUseChatReturn());
+    render(<ChatInterface />);
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [pngFile()] } });
+    await screen.findByText("Image attached · Vision processing");
+
+    const modeButton = screen.getByRole("button", { name: /^Mode:/ });
+    fireEvent.pointerDown(modeButton, { button: 0, pointerId: 1, isPrimary: true });
+    fireEvent.click(modeButton);
+
+    const fastItem = await screen.findByRole("menuitemradio", { name: /Fast/ });
+    expect(fastItem).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitemradio", { name: /Auto/ })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByRole("menuitemradio", { name: /Vision/ })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+});
+
+describe("mode picker", () => {
+  test("lists Auto, Fast, and Vision with their capability descriptions", async () => {
+    mockUseChat.mockReturnValue(makeUseChatReturn());
+    render(<ChatInterface />);
+
+    const modeButton = screen.getByRole("button", { name: /^Mode:/ });
+    fireEvent.pointerDown(modeButton, { button: 0, pointerId: 1, isPrimary: true });
+    fireEvent.click(modeButton);
+
+    expect(await screen.findByRole("menuitemradio", { name: /Auto/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: /Fast/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: /Vision/ })).toBeInTheDocument();
+    expect(screen.getByText("Best model for the task")).toBeInTheDocument();
+    expect(screen.getByText("Fastest text responses")).toBeInTheDocument();
+    expect(screen.getByText("Analyze images and visual content")).toBeInTheDocument();
+    // No provider/model name anywhere in the picker.
+    expect(screen.queryByText(/qwen|gpt-oss/i)).not.toBeInTheDocument();
+  });
+
+  test("the trigger is keyboard reachable and opens the menu on Enter", async () => {
+    mockUseChat.mockReturnValue(makeUseChatReturn());
+    render(<ChatInterface />);
+
+    const modeButton = screen.getByRole("button", { name: /^Mode:/ });
+    modeButton.focus();
+    expect(modeButton).toHaveFocus();
+
+    fireEvent.keyDown(modeButton, { key: "Enter" });
+    expect(await screen.findByRole("menuitemradio", { name: /Vision/ })).toBeInTheDocument();
+  });
+});
+
 describe("streaming text rendering", () => {
   test("growing text replaces rather than duplicates prior content", () => {
     mockUseChat.mockReturnValue(
@@ -414,6 +711,151 @@ describe("error state", () => {
 
     expect(regenerate).toHaveBeenCalledTimes(1);
     expect(regenerate).toHaveBeenCalledWith({ body: { mode: "auto" } });
+  });
+});
+
+describe("provider/quota error copy — the server only ever sends a safe AIErrorCode", () => {
+  test("RATE_LIMITED from a normal chat failure shows the usage-limit copy with a mode-switch hint", () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
+    const { rerender } = render(<ChatInterface />);
+
+    fireEvent.change(screen.getByLabelText("Message"), {
+      target: { value: "Explain osmosis" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        status: "error",
+        messages: [userMessage("Explain osmosis")],
+        error: new Error("RATE_LIMITED"),
+      }),
+    );
+    rerender(<ChatInterface />);
+
+    expect(screen.getByText("AI usage is temporarily limited.")).toBeInTheDocument();
+    expect(screen.getByText(/different mode/)).toBeInTheDocument();
+  });
+
+  test("PROVIDER_UNAVAILABLE from a normal chat failure shows the temporary-unavailable copy", () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
+    const { rerender } = render(<ChatInterface />);
+
+    fireEvent.change(screen.getByLabelText("Message"), {
+      target: { value: "Explain osmosis" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        status: "error",
+        messages: [userMessage("Explain osmosis")],
+        error: new Error("PROVIDER_UNAVAILABLE"),
+      }),
+    );
+    rerender(<ChatInterface />);
+
+    expect(
+      screen.getByText("The AI service is temporarily unavailable."),
+    ).toBeInTheDocument();
+  });
+
+  function attachTestImage() {
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File([new Uint8Array([1, 2, 3, 4])], "photo.png", { type: "image/png" });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    return screen.findByText("Image attached · Vision processing");
+  }
+
+  test("RATE_LIMITED from a failed image submission shows the image-analysis-specific copy, not the generic one, and omits the mode-switch hint", async () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
+    const { rerender } = render(<ChatInterface />);
+
+    await attachTestImage();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        status: "error",
+        messages: [userMessage("What is this?")],
+        error: new Error("RATE_LIMITED"),
+      }),
+    );
+    rerender(<ChatInterface />);
+
+    expect(
+      screen.getByText("Image analysis is temporarily unavailable."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("AI usage is temporarily limited.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/different mode/)).not.toBeInTheDocument();
+  });
+
+  test("a generic (non-quota) failure during image extraction shows the extraction-specific default, not the normal-chat default", async () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
+    const { rerender } = render(<ChatInterface />);
+
+    await attachTestImage();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        status: "error",
+        messages: [userMessage("What is this?")],
+        error: new Error("GENERATION_FAILED"),
+      }),
+    );
+    rerender(<ChatInterface />);
+
+    expect(screen.getByText("Couldn't analyze this image.")).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't finish that response")).not.toBeInTheDocument();
+  });
+
+  test("retrying a failed image submission still shows the image-specific pending copy during the retry, not generic Thinking…", async () => {
+    const regenerate = vi.fn(() => Promise.resolve());
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage, regenerate }));
+    const { rerender } = render(<ChatInterface />);
+
+    // Establish pendingIntent "image" the same way a real image send would.
+    await attachTestImage();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        regenerate,
+        status: "error",
+        messages: [userMessage("What is this?")],
+        error: new Error("RATE_LIMITED"),
+      }),
+    );
+    rerender(<ChatInterface />);
+    expect(
+      screen.getByText("Image analysis is temporarily unavailable."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        regenerate,
+        status: "submitted",
+        messages: [userMessage("What is this?")],
+      }),
+    );
+    rerender(<ChatInterface />);
+
+    expect(screen.getByText("Understanding your image…")).toBeInTheDocument();
+    expect(screen.queryByText("Thinking…")).not.toBeInTheDocument();
   });
 });
 
@@ -648,6 +1090,459 @@ describe("onFlashcardsGenerated — capturing flashcard data for Practice", () =
         exact: false,
       }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("ExtractionCard — reviewing an image's extracted content", () => {
+  test("renders the card with the heading, title, summary, and extracted content", () => {
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+        ],
+      }),
+    );
+
+    render(<ChatInterface />);
+
+    expect(screen.getByText("I found this in your image")).toBeInTheDocument();
+    expect(screen.getByText(SAMPLE_EXTRACTION.title as string)).toBeInTheDocument();
+    expect(screen.getByText(SAMPLE_EXTRACTION.summary)).toBeInTheDocument();
+    expect(screen.getByText(SAMPLE_EXTRACTION.extractedContent)).toBeInTheDocument();
+    expect(screen.getByText("Chlorophyll")).toBeInTheDocument();
+  });
+
+  test("does not also render the extraction as plain chat text alongside the card", () => {
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+        ],
+      }),
+    );
+
+    render(<ChatInterface />);
+
+    // The card renders the summary once (asserted above); the sibling text
+    // part carrying the identical string must be suppressed, not rendered a
+    // second time through Streamdown.
+    expect(screen.getAllByText(SAMPLE_EXTRACTION.summary)).toHaveLength(1);
+  });
+
+  test("Create Quiz and Create Flashcards are real, keyboard-reachable buttons", () => {
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+        ],
+      }),
+    );
+
+    render(<ChatInterface />);
+
+    const quizButton = screen.getByRole("button", { name: "Create Quiz" });
+    const flashcardsButton = screen.getByRole("button", { name: "Create Flashcards" });
+    expect(quizButton.tagName).toBe("BUTTON");
+    expect(flashcardsButton.tagName).toBe("BUTTON");
+
+    quizButton.focus();
+    expect(quizButton).toHaveFocus();
+    flashcardsButton.focus();
+    expect(flashcardsButton).toHaveFocus();
+  });
+
+  test("Create Quiz sends a new GPT-OSS request naming the extracted topic, with no image attached", () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+        ],
+      }),
+    );
+
+    render(<ChatInterface />);
+    fireEvent.click(screen.getByRole("button", { name: "Create Quiz" }));
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const [message, options] = sendMessage.mock.calls[0];
+    expect(message.text).toContain(SAMPLE_EXTRACTION.title);
+    expect(message.files).toBeUndefined();
+    expect(options.body.mode).toBe("auto");
+  });
+
+  test("Create Flashcards sends a new GPT-OSS request naming the extracted topic, with no image attached", () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+        ],
+      }),
+    );
+
+    render(<ChatInterface />);
+    fireEvent.click(screen.getByRole("button", { name: "Create Flashcards" }));
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const [message, options] = sendMessage.mock.calls[0];
+    expect(message.text).toContain(SAMPLE_EXTRACTION.title);
+    expect(message.files).toBeUndefined();
+    expect(options.body.mode).toBe("auto");
+  });
+
+  // The whole point of forcing mode "auto" here (see sendChatMessage's own
+  // comment in ChatInterface.tsx) is that it must NOT matter which mode the
+  // composer happens to be showing — even "vision" (which the user could
+  // still be on, having just sent the image) must not route this follow-up
+  // back to Qwen.
+  test("Create Quiz still forces GPT-OSS even if the composer is still set to Vision mode", async () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+        ],
+      }),
+    );
+
+    render(<ChatInterface />);
+    // Radix's DropdownMenuTrigger opens on `pointerdown`, not `click` — see
+    // SettingsClient.test.tsx's openGenerateAccentMenu for the same fix.
+    const modeButton = screen.getByRole("button", { name: /^Mode:/ });
+    fireEvent.pointerDown(modeButton, { button: 0, pointerId: 1, isPrimary: true });
+    fireEvent.click(modeButton);
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /Vision/ }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Quiz" }));
+
+    const [, options] = sendMessage.mock.calls[0];
+    expect(options.body.mode).toBe("auto");
+  });
+
+  test("clicking Create Quiz twice rapidly only sends one request", () => {
+    let resolveSend!: () => void;
+    const sendMessage = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+        ],
+      }),
+    );
+
+    render(<ChatInterface />);
+    const quizButton = screen.getByRole("button", { name: "Create Quiz" });
+
+    act(() => {
+      fireEvent.click(quizButton);
+      fireEvent.click(quizButton);
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    resolveSend();
+  });
+
+  test("Ask about this moves focus to the composer instead of sending anything", () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+        ],
+      }),
+    );
+
+    render(<ChatInterface />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask about this" }));
+
+    expect(screen.getByLabelText("Message")).toHaveFocus();
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  test("the card's actions are disabled while a turn is already generating", () => {
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        status: "streaming",
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+          userMessage("Create a quiz based on Photosynthesis notes.", "user-2"),
+        ],
+      }),
+    );
+
+    render(<ChatInterface />);
+
+    expect(screen.getByRole("button", { name: "Create Quiz" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create Flashcards" })).toBeDisabled();
+  });
+
+  test("the card's actions re-enable after a failed handoff, not stuck disabled", () => {
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        status: "error",
+        error: new Error("RATE_LIMITED"),
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+          userMessage("Create a quiz based on Photosynthesis notes.", "user-2"),
+        ],
+      }),
+    );
+
+    render(<ChatInterface />);
+
+    expect(screen.getByRole("button", { name: "Create Quiz" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Create Flashcards" })).toBeEnabled();
+  });
+
+  // Renders extraction/handoff messages the same way a resumed conversation
+  // would arrive (via `initialMessages`, not a live stream) — see
+  // lib/supabase/conversations.ts's getConversationMessages, which loads
+  // `parts` straight from Supabase's jsonb column with no transformation,
+  // so a persisted `data-extraction` part comes back byte-for-byte
+  // identical to how it streamed in originally. ChatInterface doesn't (and
+  // shouldn't need to) distinguish the two sources.
+  test("a reloaded conversation renders the extraction card from persisted data and its actions still work", () => {
+    const sendMessage = vi.fn();
+    const initialMessages = [
+      userMessage("What is this?", "msg-1"),
+      assistantExtractionMessage(),
+    ];
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage, messages: initialMessages }));
+
+    render(
+      <ChatInterface initialConversationId="conv-1" initialMessages={initialMessages} />,
+    );
+
+    expect(screen.getByText("I found this in your image")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create Quiz" }));
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const [, options] = sendMessage.mock.calls[0];
+    expect(options.body).toEqual({ conversationId: "conv-1", mode: "auto" });
+  });
+
+  // Mirrors the documented Groq quirk already noted in lib/ai/tools.ts
+  // (a blank string in place of an omitted optional value) — title being
+  // `""` rather than `null` must be treated identically by every place that
+  // reads it: the card itself, and the handoff's own subject line.
+  test("a blank-string title (not null) is treated as 'no title', same as null", () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage({ title: "" }),
+        ],
+      }),
+    );
+
+    render(<ChatInterface />);
+    expect(screen.queryByText(SAMPLE_EXTRACTION.title as string)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Quiz" }));
+    const [message] = sendMessage.mock.calls[0];
+    expect(message.text).toBe("Create a quiz based on the image I shared.");
+  });
+
+  test("Ask about this never changes the composer's selected mode", async () => {
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        messages: [userMessage("What is this?"), assistantExtractionMessage()],
+      }),
+    );
+
+    render(<ChatInterface />);
+    expect(screen.getByRole("button", { name: /^Mode: Auto\./ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask about this" }));
+
+    expect(screen.getByRole("button", { name: /^Mode: Auto\./ })).toBeInTheDocument();
+  });
+});
+
+describe("quiz/flashcard handoff retry — must never fall back to Qwen", () => {
+  // This is the core regression this describe block exists for: before this
+  // fix, `handleRetry` sent the composer's raw `mode` state on every retry.
+  // If the user was still on "Vision" (e.g. from having just sent the
+  // image), retrying a failed quiz/flashcards handoff would resend that
+  // text-only follow-up with `mode: "vision"` — routing it straight back to
+  // Qwen (with the full tool registry, since it carries no image) instead
+  // of GPT-OSS, and silently spending a Qwen call that was never supposed
+  // to happen. `pendingIntent` (already tracked for the loading-copy work)
+  // is what lets Retry tell a handoff apart from every other kind of turn.
+  test("retrying a failed Create Quiz handoff forces mode auto even if the composer is still set to Vision", async () => {
+    const sendMessage = vi.fn();
+    const regenerate = vi.fn(() => Promise.resolve());
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        messages: [userMessage("What is this?"), assistantExtractionMessage()],
+      }),
+    );
+    const { rerender } = render(<ChatInterface />);
+
+    // Switch the composer to Vision — plausible after having just sent the
+    // image in Vision mode, and nothing in the app resets it afterward.
+    const modeButton = screen.getByRole("button", { name: /^Mode:/ });
+    fireEvent.pointerDown(modeButton, { button: 0, pointerId: 1, isPrimary: true });
+    fireEvent.click(modeButton);
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /Vision/ }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create Quiz" }));
+    });
+
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        regenerate,
+        status: "error",
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+          userMessage("Create a quiz based on Photosynthesis notes.", "user-2"),
+        ],
+        error: new Error("RATE_LIMITED"),
+      }),
+    );
+    rerender(<ChatInterface />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledWith({ body: { mode: "auto" } });
+  });
+
+  test("retrying a failed Create Flashcards handoff forces mode auto the same way", async () => {
+    const sendMessage = vi.fn();
+    const regenerate = vi.fn(() => Promise.resolve());
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        messages: [userMessage("What is this?"), assistantExtractionMessage()],
+      }),
+    );
+    const { rerender } = render(<ChatInterface />);
+
+    const modeButton = screen.getByRole("button", { name: /^Mode:/ });
+    fireEvent.pointerDown(modeButton, { button: 0, pointerId: 1, isPrimary: true });
+    fireEvent.click(modeButton);
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /Vision/ }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create Flashcards" }));
+    });
+
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        regenerate,
+        status: "error",
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+          userMessage("Create flashcards based on Photosynthesis notes.", "user-2"),
+        ],
+        error: new Error("PROVIDER_UNAVAILABLE"),
+      }),
+    );
+    rerender(<ChatInterface />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledWith({ body: { mode: "auto" } });
+  });
+
+  // The counterpart case: an *image extraction* retry must keep whichever
+  // mode is currently selected (both Auto and Vision correctly route an
+  // image back to Qwen's extraction path) — forcing "auto" here would be
+  // harmless in practice (Auto also routes an image to Qwen) but the point
+  // is that `handleRetry` makes this decision based on what actually
+  // failed, not a blanket override.
+  test("retrying a failed image extraction keeps the currently selected mode, unlike a handoff retry", async () => {
+    const sendMessage = vi.fn();
+    const regenerate = vi.fn(() => Promise.resolve());
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
+    const { rerender } = render(<ChatInterface />);
+
+    const modeButton = screen.getByRole("button", { name: /^Mode:/ });
+    fireEvent.pointerDown(modeButton, { button: 0, pointerId: 1, isPrimary: true });
+    fireEvent.click(modeButton);
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /Vision/ }));
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File([new Uint8Array([1, 2, 3, 4])], "photo.png", { type: "image/png" });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    await screen.findByText("Image attached · Vision processing");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    });
+
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        regenerate,
+        status: "error",
+        messages: [userMessage("What is this?")],
+        error: new Error("RATE_LIMITED"),
+      }),
+    );
+    rerender(<ChatInterface />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledWith({ body: { mode: "vision" } });
+  });
+
+  test("Retry never calls sendMessage — only the SDK's own regenerate — so it can't duplicate or re-trigger an ExtractionCard action", async () => {
+    const sendMessage = vi.fn();
+    const regenerate = vi.fn(() => Promise.resolve());
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({
+        sendMessage,
+        regenerate,
+        status: "error",
+        messages: [
+          userMessage("What is this?"),
+          assistantExtractionMessage(),
+          userMessage("Create a quiz based on Photosynthesis notes.", "user-2"),
+        ],
+        error: new Error("RATE_LIMITED"),
+      }),
+    );
+
+    render(<ChatInterface />);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(sendMessage).not.toHaveBeenCalled();
+    // The original extraction card is still there, untouched by the retry.
+    expect(screen.getByText("I found this in your image")).toBeInTheDocument();
   });
 });
 

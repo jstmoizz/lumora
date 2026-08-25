@@ -10,7 +10,14 @@ function sseBody(chunks: object[]): string {
   );
 }
 
-async function fulfillSse(route: Route, chunks: object[]) {
+async function fulfillSse(
+  route: Route,
+  chunks: object[],
+  { delayMs = 0 }: { delayMs?: number } = {},
+) {
+  if (delayMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
   await route.fulfill({
     status: 200,
     headers: {
@@ -28,6 +35,33 @@ function assistantTextChunks(text: string): object[] {
     { type: "start-step" },
     { type: "text-start", id: textId },
     { type: "text-delta", id: textId, delta: text },
+    { type: "text-end", id: textId },
+    { type: "finish-step" },
+    { type: "finish" },
+  ];
+}
+
+function extractionChunks(): object[] {
+  const textId = "extraction-text";
+  return [
+    { type: "start" },
+    { type: "start-step" },
+    {
+      type: "data-extraction",
+      id: "extraction",
+      data: {
+        title: "Plant Cell Diagram",
+        summary: "A labeled diagram of a plant cell.",
+        extractedContent: "Cell wall, chloroplast, nucleus, vacuole.",
+        keyConcepts: ["Cell wall", "Chloroplast", "Nucleus"],
+      },
+    },
+    { type: "text-start", id: textId },
+    {
+      type: "text-delta",
+      id: textId,
+      delta: "A labeled diagram of a plant cell.",
+    },
     { type: "text-end", id: textId },
     { type: "finish-step" },
     { type: "finish" },
@@ -63,6 +97,40 @@ function quizToolChunks(): object[] {
     { type: "finish-step" },
     { type: "finish" },
   ];
+}
+
+function flashcardsToolChunks(): object[] {
+  const toolCallId = "call-1";
+  const input = {
+    topic: "This image",
+    cards: [{ front: "What is shown in the image?", back: "A plant cell." }],
+  };
+  return [
+    { type: "start" },
+    { type: "start-step" },
+    {
+      type: "tool-input-available",
+      toolCallId,
+      toolName: "createFlashcards",
+      input,
+    },
+    {
+      type: "tool-output-available",
+      toolCallId,
+      output: { flashcardSetId: "flashcards-1", ...input },
+    },
+    { type: "finish-step" },
+    { type: "finish" },
+  ];
+}
+
+// Mirrors what app/api/chat/route.ts's onError callbacks actually put on
+// the wire (see lib/ai/errors.ts) — only ever one of the three safe
+// `AIErrorCode` strings, never the raw provider error. No `finish` chunk
+// follows an `error` chunk (confirmed directly against
+// node_modules/ai/dist/index.js) — a real failure never completes a turn.
+function errorChunks(code: "RATE_LIMITED" | "PROVIDER_UNAVAILABLE" | "GENERATION_FAILED"): object[] {
+  return [{ type: "start" }, { type: "start-step" }, { type: "error", errorText: code }];
 }
 
 // A syntactically valid 2x2 red PNG — enough for client-side attach/preview
@@ -208,6 +276,282 @@ test("image -> quiz: an attached image can produce a quiz, shown as a ready noti
   await expect(page.getByText(/Quiz ready/)).toBeVisible();
 });
 
+test("sending an image shows 'Understanding your image…' while extraction is pending, then the card replaces it", async ({
+  page,
+}) => {
+  await page.route("**/api/chat", async (route) => {
+    await fulfillSse(route, extractionChunks(), { delayMs: 300 });
+  });
+
+  await page.goto("/generate");
+  await attachImage(page);
+
+  const composer = page.getByLabel("Message");
+  await composer.fill("What is this?");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.getByText("Understanding your image…")).toBeVisible();
+
+  await expect(page.getByText("I found this in your image")).toBeVisible();
+  await expect(page.getByText("Understanding your image…")).not.toBeVisible();
+  // The card's own text is never duplicated as a separate plain-text bubble.
+  await expect(
+    page.getByText("A labeled diagram of a plant cell.", { exact: true }),
+  ).toHaveCount(1);
+});
+
+test("image -> extraction card -> Create Quiz hands off to GPT-OSS, not Qwen, with no image", async ({
+  page,
+}) => {
+  let requestCount = 0;
+  let secondRequestBody:
+    | { mode?: string; messages?: Array<{ parts?: Array<{ type?: string }> }> }
+    | undefined;
+  await page.route("**/api/chat", async (route) => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      await fulfillSse(route, extractionChunks());
+      return;
+    }
+    secondRequestBody = route.request().postDataJSON();
+    await fulfillSse(route, quizToolChunks(), { delayMs: 300 });
+  });
+
+  await page.goto("/generate");
+  await attachImage(page);
+
+  const composer = page.getByLabel("Message");
+  await composer.fill("What is this?");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.getByText("I found this in your image")).toBeVisible();
+  await expect(page.getByText("A labeled diagram of a plant cell.")).toBeVisible();
+  await expect(page.getByText("Cell wall, chloroplast, nucleus, vacuole.")).toBeVisible();
+
+  const quizButton = page.getByRole("button", { name: "Create Quiz" });
+  await quizButton.click();
+
+  // The generation state is shown using the existing chat/loading
+  // infrastructure — the conversation (including the card above) stays
+  // visible the whole time, no second loading screen appears.
+  await expect(page.getByText("Creating your quiz…")).toBeVisible();
+  await expect(page.getByText("I found this in your image")).toBeVisible();
+  await expect(quizButton).toBeDisabled();
+
+  await expect(page.getByText(/Quiz ready/)).toBeVisible();
+  await expect(page.getByText("Creating your quiz…")).not.toBeVisible();
+  expect(requestCount).toBe(2);
+  // Mode is forced to "auto" (GPT-OSS) for this handoff request regardless
+  // of the composer's own mode, and no image ever rides along with it.
+  expect(secondRequestBody?.mode).toBe("auto");
+  const lastMessage = secondRequestBody?.messages?.at(-1);
+  expect(lastMessage?.parts?.some((part) => part.type === "file")).toBe(false);
+});
+
+test("image extraction rate-limit failure shows the image-analysis-specific copy, never the raw code or provider name", async ({
+  page,
+}) => {
+  await page.route("**/api/chat", async (route) => {
+    await fulfillSse(route, errorChunks("RATE_LIMITED"));
+  });
+
+  await page.goto("/generate");
+  await attachImage(page);
+  await page.getByLabel("Message").fill("What is this?");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(
+    page.getByText("Image analysis is temporarily unavailable."),
+  ).toBeVisible();
+  await expect(page.getByText("Understanding your image…")).not.toBeVisible();
+  // Never the generic normal-chat copy, and never a mode-switch hint —
+  // Fast/Auto can't process the image any better than Vision could.
+  await expect(page.getByText("AI usage is temporarily limited.")).not.toBeVisible();
+  await expect(page.getByText(/different mode/)).not.toBeVisible();
+
+  const bodyText = await page.locator("body").innerText();
+  expect(bodyText).not.toMatch(/RATE_LIMITED|groq|qwen|gpt-oss|429|tpd|tpm/i);
+
+  // Composer isn't stuck.
+  await expect(page.getByLabel("Message")).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+});
+
+test("image extraction generic failure shows the extraction-specific default copy", async ({
+  page,
+}) => {
+  await page.route("**/api/chat", async (route) => {
+    await fulfillSse(route, errorChunks("GENERATION_FAILED"));
+  });
+
+  await page.goto("/generate");
+  await attachImage(page);
+  await page.getByLabel("Message").fill("What is this?");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.getByText("Couldn't analyze this image.")).toBeVisible();
+  await expect(page.getByText("Couldn't finish that response")).not.toBeVisible();
+});
+
+test("a Retry after a failed image extraction succeeds without duplicating the user's message", async ({
+  page,
+}) => {
+  let requestCount = 0;
+  await page.route("**/api/chat", async (route) => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      await fulfillSse(route, errorChunks("PROVIDER_UNAVAILABLE"));
+      return;
+    }
+    await fulfillSse(route, extractionChunks());
+  });
+
+  await page.goto("/generate");
+  await attachImage(page);
+  await page.getByLabel("Message").fill("What is this?");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(
+    page.getByText("Image analysis is temporarily unavailable."),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Retry" }).click();
+
+  await expect(page.getByText("I found this in your image")).toBeVisible();
+  expect(requestCount).toBe(2);
+  await expect(page.getByText("What is this?")).toHaveCount(1);
+});
+
+test("quiz generation rate-limit failure after an image extraction shows the usage-limit copy", async ({
+  page,
+}) => {
+  let requestCount = 0;
+  await page.route("**/api/chat", async (route) => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      await fulfillSse(route, extractionChunks());
+      return;
+    }
+    await fulfillSse(route, errorChunks("RATE_LIMITED"));
+  });
+
+  await page.goto("/generate");
+  await attachImage(page);
+  await page.getByLabel("Message").fill("What is this?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("I found this in your image")).toBeVisible();
+
+  await page.getByRole("button", { name: "Create Quiz" }).click();
+
+  await expect(page.getByText("AI usage is temporarily limited.")).toBeVisible();
+  await expect(page.getByText("Creating your quiz…")).not.toBeVisible();
+  // The card above is still there — the failure doesn't wipe the
+  // conversation, and Retry is still available for this new turn.
+  await expect(page.getByText("I found this in your image")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+});
+
+test("retrying a failed quiz handoff while the composer is on Vision mode still forces GPT-OSS, not Qwen, on retry", async ({
+  page,
+}) => {
+  // Regression coverage for a real bug found during Step 5's audit:
+  // Retry used to resend the composer's raw selected mode, so a handoff
+  // retry while still on "Vision" (exactly what's set up below) silently
+  // routed the retry back to Qwen instead of GPT-OSS.
+  let requestCount = 0;
+  const requestModes: Array<string | undefined> = [];
+  await page.route("**/api/chat", async (route) => {
+    requestCount += 1;
+    const body = route.request().postDataJSON() as { mode?: string };
+    requestModes.push(body.mode);
+    if (requestCount === 1) {
+      await fulfillSse(route, extractionChunks());
+      return;
+    }
+    if (requestCount === 2) {
+      await fulfillSse(route, errorChunks("RATE_LIMITED"));
+      return;
+    }
+    await fulfillSse(route, quizToolChunks());
+  });
+
+  await page.goto("/generate");
+
+  // Explicitly select Vision mode before sending the image — the
+  // composer's own mode state stays "vision" from here on, since nothing
+  // in the app resets it after the image turn completes.
+  await page.getByRole("button", { name: /^Mode:/ }).click();
+  await page.getByRole("menuitemradio", { name: /Vision/ }).click();
+
+  await attachImage(page);
+  await page.getByLabel("Message").fill("What is this?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("I found this in your image")).toBeVisible();
+
+  await page.getByRole("button", { name: "Create Quiz" }).click();
+  await expect(page.getByText("AI usage is temporarily limited.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByText(/Quiz ready/)).toBeVisible();
+
+  expect(requestCount).toBe(3);
+  // Request 1 is the real image extraction (mode is whatever routes an
+  // image to Qwen — "vision" here, since that's what's selected). Requests
+  // 2 and 3 are the quiz handoff and its retry — both must be "auto",
+  // regardless of the composer still showing Vision.
+  expect(requestModes[1]).toBe("auto");
+  expect(requestModes[2]).toBe("auto");
+});
+
+test("flashcard generation rate-limit failure after an image extraction shows the usage-limit copy", async ({
+  page,
+}) => {
+  let requestCount = 0;
+  await page.route("**/api/chat", async (route) => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      await fulfillSse(route, extractionChunks());
+      return;
+    }
+    await fulfillSse(route, errorChunks("RATE_LIMITED"));
+  });
+
+  await page.goto("/generate");
+  await attachImage(page);
+  await page.getByLabel("Message").fill("What is this?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("I found this in your image")).toBeVisible();
+
+  await page.getByRole("button", { name: "Create Flashcards" }).click();
+
+  await expect(page.getByText("AI usage is temporarily limited.")).toBeVisible();
+  await expect(page.getByText("Creating your flashcards…")).not.toBeVisible();
+});
+
+test("a flashcards handoff still succeeds normally after Step 4's changes (regression check)", async ({
+  page,
+}) => {
+  let requestCount = 0;
+  await page.route("**/api/chat", async (route) => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      await fulfillSse(route, extractionChunks());
+      return;
+    }
+    await fulfillSse(route, flashcardsToolChunks());
+  });
+
+  await page.goto("/generate");
+  await attachImage(page);
+  await page.getByLabel("Message").fill("What is this?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("I found this in your image")).toBeVisible();
+
+  await page.getByRole("button", { name: "Create Flashcards" }).click();
+
+  await expect(page.getByText(/Flashcards ready/)).toBeVisible();
+});
+
 test("fast mode with an image is rejected by the server with a specific message", async ({
   page,
 }) => {
@@ -266,6 +610,38 @@ test("mode selector and attach button are reachable and operable by keyboard", a
   await attachButton.focus();
   await expect(attachButton).toBeFocused();
   await expect(attachButton).toBeEnabled();
+});
+
+test("ExtractionCard buttons are keyboard reachable and the card fits a mobile viewport without horizontal overflow", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 720 });
+  await page.route("**/api/chat", async (route) => {
+    await fulfillSse(route, extractionChunks());
+  });
+
+  await page.goto("/generate");
+  await attachImage(page);
+
+  const composer = page.getByLabel("Message");
+  await composer.fill("What is this?");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const quizButton = page.getByRole("button", { name: "Create Quiz" });
+  await expect(quizButton).toBeVisible();
+  await quizButton.focus();
+  await expect(quizButton).toBeFocused();
+
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "Create Flashcards" })).toBeFocused();
+
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "Ask about this" })).toBeFocused();
+
+  const hasHorizontalOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  );
+  expect(hasHorizontalOverflow).toBe(false);
 });
 
 test("composer with mode selector and attach button fits on a mobile viewport", async ({

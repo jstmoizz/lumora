@@ -42,6 +42,30 @@ async function fulfillAssistantReply(
   });
 }
 
+// Mirrors what app/api/chat/route.ts's onError callbacks actually put on
+// the wire (see lib/ai/errors.ts): only ever one of the three safe
+// `AIErrorCode` strings, never the raw provider error. Mid-stream, matching
+// how a real streamText failure reaches the client (`{type:"error",
+// errorText}`, no finish chunk after it — confirmed directly against
+// node_modules/ai/dist/index.js).
+function errorSseBody(code: "RATE_LIMITED" | "PROVIDER_UNAVAILABLE" | "GENERATION_FAILED"): string {
+  return sseBody([{ type: "start" }, { type: "start-step" }, { type: "error", errorText: code }]);
+}
+
+async function fulfillError(
+  route: Route,
+  code: "RATE_LIMITED" | "PROVIDER_UNAVAILABLE" | "GENERATION_FAILED",
+) {
+  await route.fulfill({
+    status: 200,
+    headers: {
+      "content-type": "text/event-stream",
+      "x-vercel-ai-ui-message-stream": "v1",
+    },
+    body: errorSseBody(code),
+  });
+}
+
 test("primary flow: ask a question and read the streamed reply", async ({ page }) => {
   await page.route("**/api/chat", async (route) => {
     await fulfillAssistantReply(
@@ -107,4 +131,77 @@ test("a failed turn shows the error card and Retry recovers it", async ({ page }
   ).toBeVisible();
   await expect(page.getByText("Couldn't finish that response")).not.toBeVisible();
   expect(requestCount).toBe(2);
+});
+
+test("a rate-limited turn shows the usage-limit copy — never the code, provider name, or raw error — and Retry recovers it", async ({
+  page,
+}) => {
+  let requestCount = 0;
+  await page.route("**/api/chat", async (route) => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      await fulfillError(route, "RATE_LIMITED");
+      return;
+    }
+    await fulfillAssistantReply(route, "Newton's laws describe motion and force.");
+  });
+
+  await page.goto("/generate");
+
+  const composer = page.getByLabel("Message");
+  await composer.fill("Explain Newton's laws");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.getByText("AI usage is temporarily limited.")).toBeVisible();
+  await expect(page.getByText(/different mode/)).toBeVisible();
+  await expect(page.getByText("Thinking…")).not.toBeVisible();
+  // The wire code, any provider name, and raw provider text must never
+  // reach the page.
+  const bodyText = await page.locator("body").innerText();
+  expect(bodyText).not.toMatch(/RATE_LIMITED|groq|qwen|gpt-oss|429|tpd|tpm/i);
+
+  // Composer isn't stuck: still fillable, Send still reachable once ready.
+  await expect(composer).toBeEnabled();
+
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(
+    page.getByText("Newton's laws describe motion and force."),
+  ).toBeVisible();
+  await expect(page.getByText("AI usage is temporarily limited.")).not.toBeVisible();
+  expect(requestCount).toBe(2);
+});
+
+test("a provider-unavailable turn shows the temporary-unavailable copy", async ({ page }) => {
+  await page.route("**/api/chat", async (route) => {
+    await fulfillError(route, "PROVIDER_UNAVAILABLE");
+  });
+
+  await page.goto("/generate");
+  await page.getByLabel("Message").fill("Explain entropy");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(
+    page.getByText("The AI service is temporarily unavailable."),
+  ).toBeVisible();
+});
+
+test("an error card on a 375px viewport stays clean, with no horizontal overflow", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 720 });
+  await page.route("**/api/chat", async (route) => {
+    await fulfillError(route, "RATE_LIMITED");
+  });
+
+  await page.goto("/generate");
+  await page.getByLabel("Message").fill("Explain entropy");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.getByText("AI usage is temporarily limited.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+
+  const hasHorizontalOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  );
+  expect(hasHorizontalOverflow).toBe(false);
 });

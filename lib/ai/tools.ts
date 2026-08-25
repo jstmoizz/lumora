@@ -14,10 +14,10 @@ import { randomUUID } from "node:crypto";
 import {
   tool,
   type InferUITools,
-  type UIDataTypes,
   type UIMessage,
 } from "ai";
 import { z } from "zod";
+import type { ImageExtraction } from "./extraction";
 
 // Groq's tool-calling sometimes emits "" for an omitted optional field
 // instead of leaving the key out (reproduced in production: createQuiz
@@ -335,15 +335,28 @@ export interface LumoraMessageMetadata {
 }
 
 /**
+ * Custom "data-*" UI part types the server can stream to the client outside
+ * the tool-call/text vocabulary above. Currently just one: the vision
+ * extraction path (lib/ai/extraction.ts, wired up in app/api/chat/route.ts)
+ * sends a `data-extraction` part carrying the full `ImageExtraction` so
+ * ChatInterface.tsx's ExtractionCard can render it directly from structured
+ * data instead of parsing it back out of freeform text.
+ */
+export type LumoraUIDataTypes = {
+  extraction: ImageExtraction;
+};
+
+/**
  * The chat message type shared by client and server, parameterized with
  * Lumora's registered tools (via `InferUITools`, which converts each raw
  * `Tool` into the `{ input, output }` shape `UIMessage` expects) so
  * `message.parts` narrows correctly — e.g. a `tool-createQuiz` part's
  * `output` is typed as `CreateQuizOutput`, not `unknown` — without manual
- * casts at the render boundary.
+ * casts at the render boundary. `LumoraUIDataTypes` above does the same for
+ * `data-*` parts.
  */
 export type LumoraUIMessage = UIMessage<
   LumoraMessageMetadata,
-  UIDataTypes,
+  LumoraUIDataTypes,
   InferUITools<typeof lumoraTools>
 >;

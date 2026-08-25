@@ -1,10 +1,38 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { APICallError } from "ai";
 import {
   assistantMessageWithParts,
   userMessage,
 } from "@/app/generate/__tests__/fixtures";
 import { MAX_IMAGE_BYTES } from "@/lib/ai/model";
 import type { LumoraUIMessage } from "@/lib/ai/tools";
+
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+
+// Real `APICallError` instances (not mocked — see the `vi.mock("ai", ...)`
+// below, which only overrides streamText/generateText/createUIMessageStream/
+// createUIMessageStreamResponse) so these tests exercise the actual
+// `classifyAIError` logic end to end, the same way a real Groq 429/5xx
+// response would surface through `@ai-sdk/groq`.
+function rateLimitedProviderError(): APICallError {
+  return new APICallError({
+    message: "Rate limit reached for model qwen/qwen3.6-27b. Please try again in 7m25s.",
+    url: GROQ_URL,
+    requestBodyValues: {},
+    statusCode: 429,
+    isRetryable: true,
+  });
+}
+
+function providerUnavailableError(): APICallError {
+  return new APICallError({
+    message: "The server had an error while processing your request.",
+    url: GROQ_URL,
+    requestBodyValues: {},
+    statusCode: 503,
+    isRetryable: true,
+  });
+}
 
 // Builds a syntactically valid (but not a real decodable image) base64
 // data URL of a controlled byte size — the route never decodes the image
@@ -43,18 +71,27 @@ const {
   fromMock,
   createClientMock,
   streamTextMock,
+  generateTextMock,
+  createUIMessageStreamMock,
+  createUIMessageStreamResponseMock,
   upsertKnowledgeNodeActivityMock,
 } = vi.hoisted(() => {
   const requireUserMock = vi.fn();
   const fromMock = vi.fn();
   const createClientMock = vi.fn(async () => ({ from: fromMock }));
   const streamTextMock = vi.fn();
+  const generateTextMock = vi.fn();
+  const createUIMessageStreamMock = vi.fn();
+  const createUIMessageStreamResponseMock = vi.fn();
   const upsertKnowledgeNodeActivityMock = vi.fn(() => Promise.resolve());
   return {
     requireUserMock,
     fromMock,
     createClientMock,
     streamTextMock,
+    generateTextMock,
+    createUIMessageStreamMock,
+    createUIMessageStreamResponseMock,
     upsertKnowledgeNodeActivityMock,
   };
 });
@@ -79,7 +116,13 @@ vi.mock("@/lib/ai/config", () => ({
 }));
 vi.mock("ai", async (importOriginal) => {
   const actual = await importOriginal<typeof import("ai")>();
-  return { ...actual, streamText: streamTextMock };
+  return {
+    ...actual,
+    streamText: streamTextMock,
+    generateText: generateTextMock,
+    createUIMessageStream: createUIMessageStreamMock,
+    createUIMessageStreamResponse: createUIMessageStreamResponseMock,
+  };
 });
 
 import { POST } from "../route";
@@ -216,6 +259,168 @@ function setupStreamText(onEndEvent?: FakeOnEndEvent) {
       },
     ),
   });
+}
+
+// Simulates a provider/model failure reaching streamText's own `onError` —
+// the real AI SDK calls this mid-stream (before any content, after some has
+// streamed, or during tool execution all funnel through the same hook), so
+// this is the one place that needs testing regardless of when the failure
+// actually happened. Captures the route's `onError` return value (the safe
+// `AIErrorCode` — see lib/ai/errors.ts) in the mocked Response body so the
+// test can assert on it directly, since a real stream error never produces
+// a completed assistant turn for `onEnd` to receive.
+function setupStreamTextError(error: unknown) {
+  streamTextMock.mockReturnValue({
+    toUIMessageStreamResponse: vi.fn(
+      async (options: {
+        onEnd?: (event: {
+          responseMessage: LumoraUIMessage;
+          isAborted: boolean;
+          isContinuation: boolean;
+          messages: LumoraUIMessage[];
+          finishReason?: string;
+        }) => Promise<void> | void;
+        onError?: (error: unknown) => string;
+      }) => {
+        const errorText = options.onError?.(error);
+        await options.onEnd?.({
+          responseMessage: { id: "assistant-1", role: "assistant", parts: [] },
+          isAborted: false,
+          isContinuation: false,
+          messages: [],
+          finishReason: undefined,
+        });
+        return new Response(JSON.stringify({ errorText }));
+      },
+    ),
+  });
+}
+
+const SAMPLE_EXTRACTION = {
+  title: "Photosynthesis notes" as string | null,
+  summary: "A diagram of the light-dependent reactions.",
+  extractedContent: "Chlorophyll absorbs light energy...",
+  keyConcepts: ["Chlorophyll", "Light-dependent reactions", "ATP"],
+};
+
+// Stands in for the image-extraction path's `createUIMessageStream(...)` +
+// `createUIMessageStreamResponse(...)` pair — mirrors setupStreamText's own
+// "await onEnd deterministically" approach so tests can assert on
+// persistence without racing a real background stream. `createUIMessageStream`
+// normally returns a plain synchronous ReadableStream; here it returns a
+// Promise instead, which `createUIMessageStreamResponseMock` awaits before
+// resolving — and since `POST`'s own `return createUIMessageStreamResponse(...)`
+// is itself awaited via return-promise-chaining, `await POST(...)` in a test
+// still doesn't resolve until the whole execute()+onEnd() sequence below has
+// finished, exactly like the streamText path already does.
+function setupImageExtraction(
+  options: { extraction?: Partial<typeof SAMPLE_EXTRACTION>; rejectWith?: Error } = {},
+) {
+  if (options.rejectWith) {
+    generateTextMock.mockRejectedValue(options.rejectWith);
+  } else {
+    generateTextMock.mockResolvedValue({
+      toolCalls: [
+        {
+          toolCallId: "call-1",
+          toolName: "recordExtraction",
+          input: { ...SAMPLE_EXTRACTION, ...options.extraction },
+        },
+      ],
+    });
+  }
+
+  createUIMessageStreamMock.mockImplementation(
+    (streamOptions: {
+      execute: (args: { writer: { write: (chunk: unknown) => void } }) => Promise<void>;
+      onEnd?: (event: {
+        responseMessage: LumoraUIMessage;
+        isAborted: boolean;
+        isContinuation: boolean;
+        messages: LumoraUIMessage[];
+        finishReason?: string;
+      }) => Promise<void> | void;
+      onError?: (error: unknown) => string;
+    }) =>
+      (async () => {
+        const chunks: Array<{
+          type: string;
+          delta?: string;
+          id?: string;
+          data?: unknown;
+          errorText?: unknown;
+        }> = [];
+        const writer = {
+          write: (chunk: unknown) => {
+            chunks.push(
+              chunk as { type: string; delta?: string; id?: string; data?: unknown },
+            );
+          },
+        };
+        let responseMessage: LumoraUIMessage = { id: "assistant-1", role: "assistant", parts: [] };
+        let finishReason: string | undefined = "stop";
+        try {
+          await streamOptions.execute({ writer });
+          const text = chunks
+            .filter((chunk) => chunk.type === "text-delta")
+            .map((chunk) => chunk.delta ?? "")
+            .join("");
+          // Mirrors the route's real behavior: a `data-*` chunk (e.g.
+          // `data-extraction`) becomes a non-transient part on the
+          // finished message, same as a real UIMessageStreamWriter would
+          // assemble it — see app/generate/ChatInterface.tsx's
+          // `hasExtraction` logic, which depends on that part actually
+          // being present on `responseMessage.parts`.
+          const dataParts = chunks
+            .filter((chunk) => chunk.type.startsWith("data-"))
+            .map((chunk) => ({ type: chunk.type, id: chunk.id, data: chunk.data }));
+          const parts = [
+            ...dataParts,
+            ...(text ? [{ type: "text" as const, text, state: "done" as const }] : []),
+          ] as LumoraUIMessage["parts"];
+          if (parts.length > 0) {
+            responseMessage = { id: "assistant-1", role: "assistant", parts };
+          }
+        } catch (error) {
+          finishReason = undefined;
+          // Mirrors the real createUIMessageStream behavior confirmed
+          // earlier (node_modules/ai/dist/index.js): an execute() throw is
+          // caught and enqueued as `{type: "error", errorText: onError(error)}`
+          // — the only place the route's classified, safe error code (see
+          // lib/ai/errors.ts) is observable from outside.
+          const errorText = streamOptions.onError?.(error);
+          chunks.push({ type: "error", errorText });
+        }
+        await streamOptions.onEnd?.({
+          responseMessage,
+          isAborted: false,
+          isContinuation: false,
+          messages: [],
+          finishReason,
+        });
+        return chunks;
+      })(),
+  );
+
+  createUIMessageStreamResponseMock.mockImplementation(
+    async ({ stream }: { stream: unknown }) => {
+      await stream;
+      return new Response("ok");
+    },
+  );
+}
+
+// Reads back the chunk list `setupImageExtraction`'s mock produced for the
+// most recent `POST()` call — the only way to observe what the extraction
+// branch actually wrote to the stream (including, on failure, the `error`
+// chunk's classified `errorText`), since `createUIMessageStreamResponseMock`
+// itself only ever returns a plain `Response("ok")`.
+async function getLastExtractionChunks(): Promise<
+  Array<{ type: string; errorText?: unknown; data?: unknown }>
+> {
+  const lastCall = createUIMessageStreamMock.mock.results.at(-1);
+  if (!lastCall || lastCall.type !== "return") return [];
+  return lastCall.value as Promise<Array<{ type: string; errorText?: unknown; data?: unknown }>>;
 }
 
 function makeRequest(body: unknown) {
@@ -378,16 +583,18 @@ describe("mode routing and image attachments", () => {
     expect(callArgs.model).toBe("mock-text-model");
   });
 
-  test("auto mode with an attached image routes to the vision model", async () => {
+  test("auto mode with an attached image routes to the vision model via the extraction path, not streamText", async () => {
     setupSupabaseMock();
-    setupStreamText();
+    setupImageExtraction();
 
     await POST(
       makeRequest({ messages: [userMessageWithImage("What is this?")] }),
     );
 
-    const [[callArgs]] = streamTextMock.mock.calls;
+    expect(generateTextMock).toHaveBeenCalledTimes(1);
+    const [callArgs] = generateTextMock.mock.calls[0];
     expect(callArgs.model).toBe("mock-vision-model");
+    expect(streamTextMock).not.toHaveBeenCalled();
   });
 
   test("vision mode with no image still routes to the vision model", async () => {
@@ -400,6 +607,23 @@ describe("mode routing and image attachments", () => {
 
     const [[callArgs]] = streamTextMock.mock.calls;
     expect(callArgs.model).toBe("mock-vision-model");
+  });
+
+  test("vision mode with an attached image also routes to the vision model via the extraction path", async () => {
+    setupSupabaseMock();
+    setupImageExtraction();
+
+    await POST(
+      makeRequest({
+        messages: [userMessageWithImage("What is this?")],
+        mode: "vision",
+      }),
+    );
+
+    expect(generateTextMock).toHaveBeenCalledTimes(1);
+    const [callArgs] = generateTextMock.mock.calls[0];
+    expect(callArgs.model).toBe("mock-vision-model");
+    expect(streamTextMock).not.toHaveBeenCalled();
   });
 
   test("fast mode with an attached image is rejected with a clear 400, never reaching streamText", async () => {
@@ -483,7 +707,7 @@ describe("mode routing and image attachments", () => {
 
   test("an attached image is stripped before the user message is persisted (no permanent image storage)", async () => {
     const spies = setupSupabaseMock();
-    setupStreamText();
+    setupImageExtraction();
 
     await POST(
       makeRequest({ messages: [userMessageWithImage("What is this?")] }),
@@ -495,6 +719,322 @@ describe("mode routing and image attachments", () => {
     expect(userInsert).toBeDefined();
     const persistedParts = userInsert?.[0].parts as LumoraUIMessage["parts"];
     expect(persistedParts.some((part) => part.type === "file")).toBe(false);
+  });
+
+  test("Qwen never receives the application tool registry for an image request", async () => {
+    setupSupabaseMock();
+    setupImageExtraction();
+
+    await POST(
+      makeRequest({ messages: [userMessageWithImage("Quiz me on this")] }),
+    );
+
+    const [callArgs] = generateTextMock.mock.calls[0];
+    // The critical requirement: verified directly on the outgoing request,
+    // not inferred from "no tool calls happened to be made". Exactly one
+    // tool is registered for this call, and it isn't one of the
+    // application's — see lib/ai/extraction.ts's own comment on why a
+    // non-application `recordExtraction` tool exists at all.
+    const toolNames = Object.keys(callArgs.tools);
+    expect(toolNames).toEqual(["recordExtraction"]);
+    expect(toolNames).not.toContain("createQuiz");
+    expect(toolNames).not.toContain("createFlashcards");
+    expect(toolNames).not.toContain("addKnowledgeTopic");
+  });
+
+  test("vision mode with no image still uses the normal tool-enabled streamText path, not extraction", async () => {
+    setupSupabaseMock();
+    setupStreamText();
+
+    await POST(
+      makeRequest({ messages: [userMessage("Explain osmosis")], mode: "vision" }),
+    );
+
+    expect(streamTextMock).toHaveBeenCalled();
+    const [[callArgs]] = streamTextMock.mock.calls;
+    expect(callArgs.tools).toBeDefined();
+    expect(generateTextMock).not.toHaveBeenCalled();
+  });
+
+  test("an image request's extraction is persisted as the assistant's plain-text reply", async () => {
+    const spies = setupSupabaseMock();
+    setupImageExtraction({
+      extraction: {
+        summary: "A labeled diagram of a plant cell.",
+        extractedContent: "Cell wall, chloroplast, nucleus.",
+        keyConcepts: ["Cell wall", "Chloroplast", "Nucleus"],
+      },
+    });
+
+    await POST(
+      makeRequest({ messages: [userMessageWithImage("What is this?")] }),
+    );
+
+    const assistantInsert = spies.messagesInsertSpy.mock.calls.find(
+      ([payload]) => payload.role === "assistant",
+    );
+    expect(assistantInsert).toBeDefined();
+    const content = assistantInsert?.[0].content as string;
+    expect(content).toContain("A labeled diagram of a plant cell.");
+    expect(content).toContain("Cell wall, chloroplast, nucleus.");
+    expect(content).toContain("Cell wall, Chloroplast, Nucleus");
+  });
+
+  test("a failed extraction does not persist a fake assistant message", async () => {
+    const spies = setupSupabaseMock();
+    setupImageExtraction({ rejectWith: new Error("provider error") });
+
+    await POST(
+      makeRequest({ messages: [userMessageWithImage("What is this?")] }),
+    );
+
+    const assistantInserts = spies.messagesInsertSpy.mock.calls.filter(
+      ([payload]) => payload.role === "assistant",
+    );
+    expect(assistantInserts).toHaveLength(0);
+  });
+
+  test("the extraction is persisted as a structured data-extraction part, not just plain text", async () => {
+    const spies = setupSupabaseMock();
+    setupImageExtraction();
+
+    await POST(
+      makeRequest({ messages: [userMessageWithImage("What is this?")] }),
+    );
+
+    const assistantInsert = spies.messagesInsertSpy.mock.calls.find(
+      ([payload]) => payload.role === "assistant",
+    );
+    const parts = assistantInsert?.[0].parts as LumoraUIMessage["parts"];
+    const dataPart = parts.find((part) => part.type === "data-extraction");
+    expect(dataPart).toBeDefined();
+    expect((dataPart as { data: unknown }).data).toEqual(SAMPLE_EXTRACTION);
+    // The plain-text mirror still rides alongside it — see
+    // formatExtractionAsText's comment in the route for why (conversation
+    // history for a later GPT-OSS turn, not for direct display).
+    expect(parts.some((part) => part.type === "text")).toBe(true);
+  });
+
+  test("a later GPT-OSS turn never receives an image from earlier in the same conversation's history", async () => {
+    setupSupabaseMock();
+    setupStreamText();
+
+    const priorImageTurn = userMessageWithImage("What is this?", {}, "user-1");
+    const priorExtractionTurn: LumoraUIMessage = {
+      id: "assistant-1",
+      role: "assistant",
+      parts: [
+        { type: "data-extraction", id: "extraction", data: SAMPLE_EXTRACTION },
+        {
+          type: "text",
+          text: "A diagram of the light-dependent reactions.",
+          state: "done",
+        },
+      ],
+    };
+    const followUp = userMessage(
+      "Create a quiz based on Photosynthesis notes.",
+      "user-2",
+    );
+
+    await POST(
+      makeRequest({
+        messages: [priorImageTurn, priorExtractionTurn, followUp],
+        mode: "auto",
+      }),
+    );
+
+    expect(streamTextMock).toHaveBeenCalled();
+    const [[callArgs]] = streamTextMock.mock.calls;
+    // The real convertToModelMessages runs here (only streamText itself is
+    // mocked) — asserting on its actual output, not a stand-in.
+    const serialized = JSON.stringify(callArgs.messages);
+    expect(serialized).not.toContain("data:image");
+  });
+
+  // End-to-end across two real POST() calls, using the route's own actual
+  // extraction persistence for the history fed into the second call —
+  // not a hand-built stand-in for what formatExtractionAsText produces.
+  // Proves GPT-OSS genuinely receives enough to act on: title, summary,
+  // extractedContent, and keyConcepts all have to survive the full
+  // extraction -> persistence -> next-turn-history -> convertToModelMessages
+  // chain intact.
+  test("the extracted title/summary/extractedContent/keyConcepts all reach GPT-OSS on the handoff turn", async () => {
+    const spies = setupSupabaseMock();
+    setupImageExtraction();
+
+    await POST(makeRequest({ messages: [userMessageWithImage("What is this?")] }));
+
+    const assistantInsert = spies.messagesInsertSpy.mock.calls.find(
+      ([payload]) => payload.role === "assistant",
+    );
+    const persistedExtractionTurn = {
+      id: "assistant-1",
+      role: "assistant" as const,
+      parts: assistantInsert?.[0].parts as LumoraUIMessage["parts"],
+    };
+
+    setupStreamText();
+    const followUp = userMessage(
+      `Create a quiz based on ${SAMPLE_EXTRACTION.title}.`,
+      "user-2",
+    );
+
+    await POST(
+      makeRequest({
+        messages: [
+          userMessageWithImage("What is this?"),
+          persistedExtractionTurn,
+          followUp,
+        ],
+        mode: "auto",
+      }),
+    );
+
+    const [[callArgs]] = streamTextMock.mock.calls;
+    const serialized = JSON.stringify(callArgs.messages);
+    expect(serialized).toContain(SAMPLE_EXTRACTION.title);
+    expect(serialized).toContain(SAMPLE_EXTRACTION.summary);
+    expect(serialized).toContain(SAMPLE_EXTRACTION.extractedContent);
+    for (const concept of SAMPLE_EXTRACTION.keyConcepts) {
+      expect(serialized).toContain(concept);
+    }
+  });
+
+  // Qwen returning genuinely weak content (no invented text — see
+  // lib/ai/extraction.ts) must not crash the pipeline or produce garbage
+  // like "undefined"/"null" in the follow-up context. The existing GPT-OSS
+  // clarification behavior (SYSTEM_PROMPT) is the intended fallback for
+  // "not enough to act on", not anything this route needs to special-case.
+  test("weak extraction content (no title, empty optional fields) still produces a valid, crash-free handoff turn", async () => {
+    const spies = setupSupabaseMock();
+    setupImageExtraction({
+      extraction: { title: null, extractedContent: "", keyConcepts: [] },
+    });
+
+    const response = await POST(
+      makeRequest({ messages: [userMessageWithImage("What is this?")] }),
+    );
+    expect(response.status).toBe(200);
+
+    const assistantInsert = spies.messagesInsertSpy.mock.calls.find(
+      ([payload]) => payload.role === "assistant",
+    );
+    const parts = assistantInsert?.[0].parts as LumoraUIMessage["parts"];
+    const textPart = parts.find((part) => part.type === "text");
+    // Only the summary is guaranteed non-empty here — no placeholder text
+    // like "undefined" or "null" leaks in for the fields that were blank.
+    expect((textPart as { text: string } | undefined)?.text).not.toMatch(/undefined|null/i);
+  });
+});
+
+describe("provider/quota error handling", () => {
+  const FORBIDDEN_LEAK_PATTERN = /groq|qwen|gpt-oss|tpd|tpm|please try again in \d/i;
+
+  describe("image extraction failures", () => {
+    test("a rate-limited extraction failure surfaces the safe RATE_LIMITED code, never the raw provider error", async () => {
+      setupSupabaseMock();
+      setupImageExtraction({ rejectWith: rateLimitedProviderError() });
+
+      await POST(makeRequest({ messages: [userMessageWithImage("What is this?")] }));
+
+      const chunks = await getLastExtractionChunks();
+      const errorChunk = chunks.find((chunk) => chunk.type === "error");
+      expect(errorChunk?.errorText).toBe("RATE_LIMITED");
+      expect(JSON.stringify(chunks)).not.toMatch(FORBIDDEN_LEAK_PATTERN);
+    });
+
+    test("a provider-unavailable extraction failure surfaces the safe PROVIDER_UNAVAILABLE code", async () => {
+      setupSupabaseMock();
+      setupImageExtraction({ rejectWith: providerUnavailableError() });
+
+      await POST(makeRequest({ messages: [userMessageWithImage("What is this?")] }));
+
+      const chunks = await getLastExtractionChunks();
+      const errorChunk = chunks.find((chunk) => chunk.type === "error");
+      expect(errorChunk?.errorText).toBe("PROVIDER_UNAVAILABLE");
+    });
+
+    test("a generic extraction failure surfaces the safe GENERATION_FAILED code", async () => {
+      setupSupabaseMock();
+      setupImageExtraction({
+        rejectWith: new Error("The vision model did not report an extraction."),
+      });
+
+      await POST(makeRequest({ messages: [userMessageWithImage("What is this?")] }));
+
+      const chunks = await getLastExtractionChunks();
+      const errorChunk = chunks.find((chunk) => chunk.type === "error");
+      expect(errorChunk?.errorText).toBe("GENERATION_FAILED");
+    });
+
+    test("none of the three extraction failure cases ever persist an assistant message", async () => {
+      const spies = setupSupabaseMock();
+      for (const error of [
+        rateLimitedProviderError(),
+        providerUnavailableError(),
+        new Error("boom"),
+      ]) {
+        setupImageExtraction({ rejectWith: error });
+        await POST(makeRequest({ messages: [userMessageWithImage("What is this?")] }));
+      }
+
+      const assistantInserts = spies.messagesInsertSpy.mock.calls.filter(
+        ([payload]) => payload.role === "assistant",
+      );
+      expect(assistantInserts).toHaveLength(0);
+    });
+  });
+
+  describe("normal generation (GPT-OSS/Qwen text) failures", () => {
+    test("a rate-limited generation failure surfaces the safe RATE_LIMITED code, never the raw provider error", async () => {
+      const spies = setupSupabaseMock();
+      setupStreamTextError(rateLimitedProviderError());
+
+      const response = await POST(makeRequest({ messages: [userMessage("Explain osmosis")] }));
+
+      const body = (await response.json()) as { errorText?: string };
+      expect(body.errorText).toBe("RATE_LIMITED");
+      expect(JSON.stringify(body)).not.toMatch(FORBIDDEN_LEAK_PATTERN);
+      expect(
+        spies.messagesInsertSpy.mock.calls.filter(([payload]) => payload.role === "assistant"),
+      ).toHaveLength(0);
+    });
+
+    test("a provider-unavailable generation failure surfaces the safe PROVIDER_UNAVAILABLE code", async () => {
+      setupSupabaseMock();
+      setupStreamTextError(providerUnavailableError());
+
+      const response = await POST(makeRequest({ messages: [userMessage("Explain osmosis")] }));
+
+      const body = (await response.json()) as { errorText?: string };
+      expect(body.errorText).toBe("PROVIDER_UNAVAILABLE");
+    });
+
+    test("a generic generation failure surfaces the safe GENERATION_FAILED code", async () => {
+      setupSupabaseMock();
+      setupStreamTextError(new Error("Something unrelated broke."));
+
+      const response = await POST(makeRequest({ messages: [userMessage("Explain osmosis")] }));
+
+      const body = (await response.json()) as { errorText?: string };
+      expect(body.errorText).toBe("GENERATION_FAILED");
+    });
+
+    test("a rate-limited failure during the createQuiz handoff (mode: auto, text-only) is classified the same way", async () => {
+      setupSupabaseMock();
+      setupStreamTextError(rateLimitedProviderError());
+
+      const response = await POST(
+        makeRequest({
+          messages: [userMessage("Create a quiz based on Photosynthesis notes.")],
+          mode: "auto",
+        }),
+      );
+
+      const body = (await response.json()) as { errorText?: string };
+      expect(body.errorText).toBe("RATE_LIMITED");
+    });
   });
 });
 

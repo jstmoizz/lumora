@@ -1,10 +1,14 @@
 import {
   convertToModelMessages,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
   isTextUIPart,
   stepCountIs,
   streamText,
 } from "ai";
 import { GENERATION_CONFIG, SYSTEM_PROMPT, resolveModel, visionModel } from "@/lib/ai/config";
+import { classifyAIError } from "@/lib/ai/errors";
+import { extractImageContent, type ImageExtraction } from "@/lib/ai/extraction";
 import {
   CHAT_MODES,
   DEFAULT_CHAT_MODE,
@@ -76,6 +80,27 @@ function isFilePart(part: LumoraUIMessage["parts"][number]): part is FilePart {
 // routed to the vision model.
 function withoutImageParts(parts: LumoraUIMessage["parts"]): LumoraUIMessage["parts"] {
   return parts.filter((part) => !isFilePart(part));
+}
+
+// The extraction itself is rendered client-side as a structured
+// `data-extraction` part (ChatInterface.tsx's ExtractionCard — see the
+// branch below). This plain-text mirror rides alongside it in the same
+// assistant message purely so the extraction survives as ordinary
+// conversation history: `convertToModelMessages` silently drops `data-*`
+// parts unless a `convertDataPart` callback is supplied (none is, here), so
+// without this text part a later "Create Quiz"/"Create Flashcards" turn
+// (routed to GPT-OSS, not Qwen — see the branch below) would have no way to
+// see what was actually found in the image. ChatInterface.tsx hides this
+// text part from view whenever its message also carries a `data-extraction`
+// part, so the user only ever sees the card.
+function formatExtractionAsText(extraction: ImageExtraction): string {
+  const sections = [
+    extraction.title ? `**${extraction.title}**` : null,
+    extraction.summary,
+    extraction.extractedContent,
+    extraction.keyConcepts.length > 0 ? `Key concepts: ${extraction.keyConcepts.join(", ")}` : null,
+  ].filter((section): section is string => Boolean(section));
+  return sections.join("\n\n");
 }
 
 const ALLOWED_IMAGE_SUBTYPES = ALLOWED_IMAGE_MEDIA_TYPES.map((type) => type.split("/")[1]).join("|");
@@ -266,10 +291,161 @@ export async function POST(req: Request) {
 
   const model = resolveModel(mode, imageValidation.hasImage);
 
+  // Runs once the assistant's turn is done (success, error, or abort) —
+  // shared between the normal streamText path below and the image
+  // extraction-only path, since both need the exact same persistence
+  // behavior. `onEnd`, not the deprecated `onFinish`. Persistence happens
+  // after the stream, not in place of it, so the client keeps seeing
+  // tokens live.
+  async function persistAssistantTurn({
+    responseMessage,
+    isAborted,
+    finishReason,
+  }: {
+    responseMessage: LumoraUIMessage;
+    isAborted: boolean;
+    finishReason?: string;
+  }) {
+    // No `finish` event ever arrived (the model call itself failed) or the
+    // user hit Stop — either way, there's no complete assistant turn to
+    // persist. Never write a partial/fake assistant message.
+    if (isAborted || finishReason == null) return;
+
+    const { error: messageError } = await supabase.from("messages").insert({
+      conversation_id: conversationId,
+      role: "assistant",
+      content: extractText(responseMessage),
+      parts: responseMessage.parts,
+    });
+    if (messageError) {
+      console.error(
+        "[api/chat] failed to persist assistant message:",
+        messageError.message,
+      );
+      return;
+    }
+
+    // Feeds Explore's knowledge graph: each quiz/flashcard/addKnowledgeTopic
+    // call this turn becomes (or updates) a node. try/catch on top of
+    // upsertKnowledgeNodeActivity's own handling — a failed write here must
+    // never affect the chat response already streamed to the client.
+    for (const part of responseMessage.parts) {
+      try {
+        if (part.type === "tool-createQuiz" && part.state === "output-available") {
+          await upsertKnowledgeNodeActivity(supabase, userId, {
+            label: part.output.topic,
+            kind: "quiz",
+            relatedTopics: part.output.relatedTopics,
+            category: part.output.category,
+          });
+        } else if (
+          part.type === "tool-createFlashcards" &&
+          part.state === "output-available"
+        ) {
+          await upsertKnowledgeNodeActivity(supabase, userId, {
+            label: part.output.topic,
+            kind: "flashcards",
+            relatedTopics: part.output.relatedTopics,
+            category: part.output.category,
+          });
+        } else if (
+          part.type === "tool-addKnowledgeTopic" &&
+          part.state === "output-available"
+        ) {
+          await upsertKnowledgeNodeActivity(supabase, userId, {
+            label: part.output.topic,
+            kind: "manual",
+            relatedTopics: part.output.relatedTopics,
+            category: part.output.category,
+            summary: part.output.summary,
+          });
+        }
+      } catch (knowledgeGraphError) {
+        console.error(
+          "[api/chat] failed to update knowledge graph:",
+          knowledgeGraphError,
+        );
+      }
+    }
+
+    const { error: updateError } = await supabase
+      .from("conversations")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("id", conversationId);
+    if (updateError) {
+      console.error(
+        "[api/chat] failed to update conversation timestamp:",
+        updateError.message,
+      );
+    }
+  }
+
+  // Image pipeline: an image turn routed to the vision model never gets the
+  // normal tool-enabled SYSTEM_PROMPT request at all — it goes through a
+  // dedicated extraction-only call instead (lib/ai/extraction.ts), which
+  // never receives the application tool registry (createQuiz/
+  // createFlashcards/addKnowledgeTopic — see that module's own comment on
+  // the one internal, non-application tool it does use, and why). The
+  // extraction is written as a structured `data-extraction` part, which
+  // ChatInterface.tsx's ExtractionCard renders as a review card with
+  // "Create Quiz"/"Create Flashcards"/"Ask about this" actions — the user
+  // decides what happens next, nothing is generated automatically. Those
+  // actions are just a normal new chat message from the client; there is no
+  // separate GPT-OSS handoff codepath here — the existing streamText branch
+  // below already handles it once that message arrives, picking up the
+  // extraction from this turn's own text part (see formatExtractionAsText's
+  // comment above) as ordinary conversation history.
+  if (model === visionModel && imageValidation.hasImage) {
+    const imagePart = newUserMessage.parts.find(isFilePart);
+    // imageValidation.hasImage already guarantees exactly one valid file
+    // part exists on this message — see validateImageParts above.
+    if (!imagePart) {
+      return Response.json({ error: "Invalid message format." }, { status: 400 });
+    }
+
+    const stream = createUIMessageStream<LumoraUIMessage>({
+      execute: async ({ writer }) => {
+        writer.write({ type: "start", messageMetadata: { conversationId } });
+        writer.write({ type: "start-step" });
+
+        const extraction = await extractImageContent({
+          image: {
+            mediaType: imagePart.mediaType,
+            filename: imagePart.filename,
+            url: imagePart.url,
+          },
+          userText: extractText(newUserMessage) ?? undefined,
+        });
+
+        writer.write({ type: "data-extraction", id: "extraction", data: extraction });
+
+        const extractionText = formatExtractionAsText(extraction);
+        writer.write({ type: "text-start", id: "extraction-text" });
+        writer.write({ type: "text-delta", id: "extraction-text", delta: extractionText });
+        writer.write({ type: "text-end", id: "extraction-text" });
+
+        writer.write({ type: "finish-step" });
+        writer.write({ type: "finish" });
+      },
+      onError: (error) => {
+        // Logged server-side only. The client never sees `error` itself —
+        // only the safe classification below (see lib/ai/errors.ts for why
+        // that's enough to pick the right copy without ever forwarding
+        // provider/model details).
+        console.error("[api/chat] image extraction failed:", error);
+        return classifyAIError(error);
+      },
+      onEnd: persistAssistantTurn,
+    });
+
+    return createUIMessageStreamResponse({ stream });
+  }
+
   // Only the turn actually routed to the vision model may send image
   // content to the provider — otherwise an image attached earlier in this
   // same conversation would still be sitting in history and get sent to a
-  // model that can't accept it.
+  // model that can't accept it. (The branch above already returned for the
+  // one case that both routes to the vision model *and* has an image.)
   const messagesForModel =
     model === visionModel
       ? messages
@@ -313,89 +489,12 @@ export async function POST(req: Request) {
     // (never replaced), so this doesn't need repeating below.
     messageMetadata: ({ part }) =>
       part.type === "start" ? { conversationId } : undefined,
-    // Runs once the assistant's turn is done (success, error, or abort) —
-    // `onEnd`, not the deprecated `onFinish`. Persistence happens after the
-    // stream, not in place of it, so the client keeps seeing tokens live.
-    onEnd: async ({ responseMessage, isAborted, finishReason }) => {
-      // No `finish` event ever arrived (the model call itself failed) or
-      // the user hit Stop — either way, there's no complete assistant turn
-      // to persist. Never write a partial/fake assistant message.
-      if (isAborted || finishReason == null) return;
-
-      const { error: messageError } = await supabase.from("messages").insert({
-        conversation_id: conversationId,
-        role: "assistant",
-        content: extractText(responseMessage),
-        parts: responseMessage.parts,
-      });
-      if (messageError) {
-        console.error(
-          "[api/chat] failed to persist assistant message:",
-          messageError.message,
-        );
-        return;
-      }
-
-      // Feeds Explore's knowledge graph: each quiz/flashcard/addKnowledgeTopic
-      // call this turn becomes (or updates) a node. try/catch on top of
-      // upsertKnowledgeNodeActivity's own handling — a failed write here must
-      // never affect the chat response already streamed to the client.
-      for (const part of responseMessage.parts) {
-        try {
-          if (part.type === "tool-createQuiz" && part.state === "output-available") {
-            await upsertKnowledgeNodeActivity(supabase, userId, {
-              label: part.output.topic,
-              kind: "quiz",
-              relatedTopics: part.output.relatedTopics,
-              category: part.output.category,
-            });
-          } else if (
-            part.type === "tool-createFlashcards" &&
-            part.state === "output-available"
-          ) {
-            await upsertKnowledgeNodeActivity(supabase, userId, {
-              label: part.output.topic,
-              kind: "flashcards",
-              relatedTopics: part.output.relatedTopics,
-              category: part.output.category,
-            });
-          } else if (
-            part.type === "tool-addKnowledgeTopic" &&
-            part.state === "output-available"
-          ) {
-            await upsertKnowledgeNodeActivity(supabase, userId, {
-              label: part.output.topic,
-              kind: "manual",
-              relatedTopics: part.output.relatedTopics,
-              category: part.output.category,
-              summary: part.output.summary,
-            });
-          }
-        } catch (knowledgeGraphError) {
-          console.error(
-            "[api/chat] failed to update knowledge graph:",
-            knowledgeGraphError,
-          );
-        }
-      }
-
-      const { error: updateError } = await supabase
-        .from("conversations")
-        .update({ updated_at: new Date().toISOString() })
-        .eq("id", conversationId);
-      if (updateError) {
-        console.error(
-          "[api/chat] failed to update conversation timestamp:",
-          updateError.message,
-        );
-      }
-    },
+    onEnd: persistAssistantTurn,
     onError(error) {
-      // Logged server-side only, for local diagnosis. The AI SDK already
-      // keeps the client-facing message generic by default; we keep that
-      // behavior explicit here rather than forwarding `error` to the client.
+      // Same reasoning as the extraction branch's onError above: log the
+      // real error server-side only, return just the safe classification.
       console.error("[api/chat] streamText error:", error);
-      return "Something went wrong while generating a response. Please try again.";
+      return classifyAIError(error);
     },
   });
 }

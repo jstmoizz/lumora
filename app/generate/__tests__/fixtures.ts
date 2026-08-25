@@ -37,6 +37,34 @@ export function assistantMessageWithParts(
   return { id, role: "assistant", parts };
 }
 
+export const SAMPLE_EXTRACTION = {
+  title: "Photosynthesis notes" as string | null,
+  summary: "A diagram of the light-dependent reactions.",
+  extractedContent: "Chlorophyll absorbs light energy and converts it to ATP.",
+  keyConcepts: ["Chlorophyll", "Light-dependent reactions", "ATP"],
+};
+
+// An assistant turn shaped like app/api/chat/route.ts's image-extraction
+// branch: a `data-extraction` part (what ExtractionCard renders) plus a
+// sibling plain-text part (conversation-history-only — see
+// formatExtractionAsText's comment in the route; ChatInterface.tsx hides it
+// from view whenever a `data-extraction` part is present on the same
+// message).
+export function assistantExtractionMessage(
+  overrides: Partial<typeof SAMPLE_EXTRACTION> = {},
+  id = "assistant-1",
+): LumoraUIMessage {
+  const extraction = { ...SAMPLE_EXTRACTION, ...overrides };
+  return {
+    id,
+    role: "assistant",
+    parts: [
+      { type: "data-extraction", id: "extraction", data: extraction },
+      { type: "text", text: extraction.summary, state: "done" },
+    ],
+  };
+}
+
 const SAMPLE_QUIZ_INPUT = {
   topic: "Photosynthesis",
   questions: [

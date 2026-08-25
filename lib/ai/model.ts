@@ -18,18 +18,21 @@ export type ChatMode = "auto" | "fast" | "vision";
 
 export const DEFAULT_CHAT_MODE: ChatMode = "auto";
 
+// Copy describes capability, not provider — the user is picking what they
+// want done, not which model does it (see ChatInterface.tsx's ExtractionCard/
+// pending-status copy for the same principle applied to in-progress turns).
 export const CHAT_MODES: Record<ChatMode, { label: string; description: string }> = {
   auto: {
     label: "Auto",
-    description: "Uses the vision model automatically when you attach an image.",
+    description: "Best model for the task",
   },
   fast: {
     label: "Fast",
-    description: "Fastest responses. Text only — no image attachments.",
+    description: "Fastest text responses",
   },
   vision: {
     label: "Vision",
-    description: "Always uses the vision-capable model.",
+    description: "Analyze images and visual content",
   },
 };
 

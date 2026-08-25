@@ -28,6 +28,7 @@ import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { getAIErrorCopy, isAIErrorCode, type AIErrorContext } from "@/lib/ai/errors";
 import {
   ALLOWED_IMAGE_MEDIA_TYPES,
   CHAT_MODES,
@@ -40,6 +41,7 @@ import type {
   CreateQuizOutput,
   LumoraUIMessage,
 } from "@/lib/ai/tools";
+import { ExtractionCard } from "./ExtractionCard";
 import { AddKnowledgeTopicToolPart, FlashcardsToolPart, QuizToolPart } from "./PracticeToolPart";
 
 // A single attached image, held only in this component's state — never
@@ -140,35 +142,65 @@ function prefersReducedMotion() {
 }
 
 // The AI SDK surfaces every chat failure as a plain `Error` with no
-// discriminated type. Only network errors (detectable as a TypeError from
-// a fetch that never reached the server) get their own copy; everything
-// else collapses into one generic message. `error.message` itself is never
-// rendered — it may contain provider/internal detail.
-function getChatErrorCopy(error: Error | undefined) {
+// discriminated type. A network failure (a fetch that never reached the
+// server — detectable as a TypeError) gets its own copy first. Otherwise,
+// `error.message` is checked against our own known-safe AIErrorCode strings
+// (see lib/ai/errors.ts) — the *only* thing app/api/chat/route.ts's
+// onError callbacks ever return, so this can never accidentally match a raw
+// provider error. Anything that isn't a recognized code (including truly
+// unexpected error shapes) falls back to the existing generic copy via
+// getAIErrorCopy's own "GENERATION_FAILED" default — `error.message` itself
+// is never rendered directly either way.
+function getChatErrorCopy(error: Error | undefined, context: AIErrorContext) {
   const isNetworkError =
     error instanceof TypeError && /fetch|network/i.test(error.message);
+  if (isNetworkError) {
+    return {
+      title: "Couldn't reach Lumora",
+      description: "Check your connection, then retry.",
+    };
+  }
 
-  return isNetworkError
-    ? {
-        title: "Couldn't reach Lumora",
-        description: "Check your connection, then retry.",
-      }
-    : {
-        title: "Couldn't finish that response",
-        description: "Your message wasn't lost — you can retry it.",
-      };
+  const code = error && isAIErrorCode(error.message) ? error.message : "GENERATION_FAILED";
+  return getAIErrorCopy(code, context);
+}
+
+// What the current pending assistant turn is actually doing, purely for
+// picking the right loading copy below — never for deciding routing (the
+// server, via resolveModel, remains the sole authority on which model
+// handles a request; this only remembers which client action started the
+// turn currently in flight, and never a model/provider name). `null` covers
+// an ordinary text turn, which keeps the existing generic "Thinking…" copy.
+type PendingIntent = "image" | "quiz" | "flashcards" | null;
+
+function pendingStatusText(intent: PendingIntent): string {
+  switch (intent) {
+    case "image":
+      return "Understanding your image…";
+    case "quiz":
+      return "Creating your quiz…";
+    case "flashcards":
+      return "Creating your flashcards…";
+    default:
+      return "Thinking…";
+  }
 }
 
 function ChatErrorCard({
   error,
+  context,
   retrying,
   onRetry,
 }: {
   error: Error | undefined;
+  // Which kind of turn failed — an image extraction (Qwen) or a normal
+  // chat/tool-generation (GPT-OSS) turn — so the copy's recovery guidance
+  // fits (see getAIErrorCopy's own comment on why these differ).
+  context: AIErrorContext;
   retrying: boolean;
   onRetry: () => void;
 }) {
-  const { title, description } = getChatErrorCopy(error);
+  const { title, description } = getChatErrorCopy(error, context);
 
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4">
@@ -314,7 +346,15 @@ export default function ChatInterface({
   const [mode, setMode] = useState<ChatMode>(DEFAULT_CHAT_MODE);
   const [imageAttachment, setImageAttachment] = useState<ImageAttachment | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
+  // Set right before each send that should show non-generic loading copy
+  // (see PendingIntent above); read only while a turn is actually pending,
+  // so a stale value from a prior turn never matters once the next one sets
+  // its own. A retry (`handleRetry`) deliberately never touches this — it's
+  // re-attempting the exact turn that just failed, so keeping its original
+  // intent is correct, not stale.
+  const [pendingIntent, setPendingIntent] = useState<PendingIntent>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const { messages, sendMessage, regenerate, status, stop, error } =
     useChat<LumoraUIMessage>({
       messages: initialMessages,
@@ -338,8 +378,17 @@ export default function ChatInterface({
   // request (the server defaults to "auto" if it's ever missing); an
   // attached image, if any, goes along as a `files` part per the AI SDK's
   // own `sendMessage({ text, files })` shape.
-  function sendChatMessage(message: { text: string }) {
-    const body = conversationId ? { conversationId, mode } : { mode };
+  //
+  // `modeOverride` exists for the ExtractionCard's Create Quiz/Create
+  // Flashcards actions (see `handleExtractionAction` below): those must
+  // always land on the text-only GPT-OSS path regardless of whatever mode
+  // the composer's own selector currently shows — if the user were still on
+  // "Vision" from having just sent the image, reusing that mode here would
+  // route the follow-up back to Qwen (with the full tool registry, since
+  // this message carries no image) instead of GPT-OSS.
+  function sendChatMessage(message: { text: string }, options: { modeOverride?: ChatMode } = {}) {
+    const effectiveMode = options.modeOverride ?? mode;
+    const body = conversationId ? { conversationId, mode: effectiveMode } : { mode: effectiveMode };
     if (!imageAttachment) {
       return sendMessage(message, { body });
     }
@@ -720,6 +769,7 @@ export default function ChatInterface({
 
     isSubmittingRef.current = true;
     const text = input;
+    setPendingIntent(imageAttachment ? "image" : null);
     setInput("");
     setImageAttachment(null);
     setImageError(null);
@@ -766,6 +816,46 @@ export default function ChatInterface({
     setImageError(null);
   }
 
+  // The text of the follow-up message an ExtractionCard action sends. Kept
+  // short and natural-sounding rather than re-dumping the full extraction
+  // (which is already in this conversation's history via the extraction
+  // turn's own hidden text part — see formatExtractionAsText's comment in
+  // app/api/chat/route.ts) — naming the extracted title, when there is one,
+  // gives GPT-OSS a concrete subject without that repetition.
+  function extractionActionText(title: string | null, kind: "quiz" | "flashcards"): string {
+    const subject = title?.trim() || "the image I shared";
+    return kind === "quiz"
+      ? `Create a quiz based on ${subject}.`
+      : `Create flashcards based on ${subject}.`;
+  }
+
+  // Same double-submit race as handleSubmit/handleExampleClick above, same
+  // fix. `modeOverride: "auto"` (not the composer's current `mode` state) is
+  // what actually keeps this on the GPT-OSS path — see sendChatMessage's own
+  // comment for why. No image is ever attached at this point (it was
+  // cleared when the extraction turn itself was sent), so this always goes
+  // out as a plain text-only message.
+  async function handleExtractionAction(title: string | null, kind: "quiz" | "flashcards") {
+    if (isSubmittingRef.current || status !== "ready") return;
+    isSubmittingRef.current = true;
+    setPendingIntent(kind);
+    try {
+      await sendChatMessage(
+        { text: extractionActionText(title, kind) },
+        { modeOverride: "auto" },
+      );
+    } finally {
+      isSubmittingRef.current = false;
+    }
+  }
+
+  // The ExtractionCard's "Ask about this" affordance — chat is already
+  // free-form, so this just moves focus to the composer rather than sending
+  // anything on the user's behalf.
+  function handleAskAboutThis() {
+    composerTextareaRef.current?.focus();
+  }
+
   // Same race as `handleSubmit` (see `isSubmittingRef`'s own comment above)
   // and the same fix, reusing the identical ref rather than a second one —
   // both paths funnel through the one `sendChatMessage` choke point, so one
@@ -777,6 +867,7 @@ export default function ChatInterface({
     if (status !== "ready") return;
 
     isSubmittingRef.current = true;
+    setPendingIntent(null);
     try {
       await sendChatMessage({ text: prompt });
     } finally {
@@ -788,14 +879,29 @@ export default function ChatInterface({
   // failed assistant message and resends from the last user message, never
   // appending a duplicate. `regenerate` resolves rather than throws even on
   // a failed retry, since AbstractChat routes that into `status` instead.
+  //
+  // A quiz/flashcards handoff retry must force `mode: "auto"` the same way
+  // its original send did (see sendChatMessage's `modeOverride`) — the
+  // composer's own `mode` state is never changed by that override, so if
+  // the user was on "Vision" when they sent the image (or picked it any
+  // time earlier in this same conversation), `mode` here would still be
+  // "vision". Retrying with that raw value would resend the handoff's
+  // text-only message to Qwen (with the full tool registry, since it
+  // carries no image) instead of GPT-OSS — silently burning Qwen's
+  // constrained daily quota on a request that was always meant for GPT-OSS.
+  // An image-extraction retry (`pendingIntent === "image"`) is the opposite
+  // case: it must keep whatever mode is currently selected, since that's
+  // what correctly routes the resent image back to Qwen's extraction path.
   async function handleRetry() {
     if (isRetryingRef.current || status !== "error") return;
     isRetryingRef.current = true;
     setIsRetrying(true);
     try {
+      const effectiveMode: ChatMode =
+        pendingIntent === "quiz" || pendingIntent === "flashcards" ? "auto" : mode;
       await (conversationId
-        ? regenerate({ body: { conversationId, mode } })
-        : regenerate({ body: { mode } }));
+        ? regenerate({ body: { conversationId, mode: effectiveMode } })
+        : regenerate({ body: { mode: effectiveMode } }));
     } finally {
       isRetryingRef.current = false;
       setIsRetrying(false);
@@ -815,6 +921,11 @@ export default function ChatInterface({
   // row — mirrors `awaitingAssistantMessage` above.
   const erroredBeforeAssistantMessage =
     hasError && (!lastMessage || lastMessage.role === "user");
+  // Which copy ChatErrorCard shows — driven by the same `pendingIntent` set
+  // for the turn that's now failing (see PendingIntent's own comment: it's
+  // never reset except by a fresh, unrelated send, so it's still correct
+  // here even though the turn ended in error rather than success).
+  const errorContext: AIErrorContext = pendingIntent === "image" ? "extraction" : "generation";
 
   const composer = (
     <div className="flex w-full flex-col gap-2">
@@ -826,9 +937,21 @@ export default function ChatInterface({
             alt=""
             className="size-12 shrink-0 rounded-lg object-cover"
           />
-          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-            {imageAttachment.filename}
-          </span>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-xs text-muted-foreground">
+              {imageAttachment.filename}
+            </span>
+            {/*
+              Auto and Vision both handle an attached image the same way
+              (Fast is simply unavailable — see the ModeSelector's own
+              fastDisabled prop) — this explains that without pushing the
+              user toward switching modes themselves, and without naming
+              any provider/model.
+            */}
+            <span className="truncate text-[11px] text-muted-foreground/70">
+              Image attached · Vision processing
+            </span>
+          </div>
           <Button
             type="button"
             variant="ghost"
@@ -874,6 +997,7 @@ export default function ChatInterface({
           <PaperclipIcon aria-hidden="true" className="size-4" />
         </Button>
         <textarea
+          ref={composerTextareaRef}
           value={input}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={handleKeyDown}
@@ -990,7 +1114,18 @@ export default function ChatInterface({
                       (part.type === "text" && part.text.length > 0) ||
                       part.type === "tool-createQuiz" ||
                       part.type === "tool-createFlashcards" ||
-                      part.type === "tool-addKnowledgeTopic",
+                      part.type === "tool-addKnowledgeTopic" ||
+                      part.type === "data-extraction",
+                  );
+                  // A message carrying a `data-extraction` part also carries
+                  // a sibling plain-text part with the same content (see
+                  // formatExtractionAsText's comment in
+                  // app/api/chat/route.ts) — kept only so the extraction
+                  // survives as conversation history for a later GPT-OSS
+                  // turn, never meant to be shown; the ExtractionCard is
+                  // this message's entire visible rendering.
+                  const hasExtraction = message.parts.some(
+                    (part) => part.type === "data-extraction",
                   );
                   const isPending =
                     !isUser &&
@@ -1024,7 +1159,7 @@ export default function ChatInterface({
                               role="status"
                               className="text-muted-foreground motion-safe:animate-pulse"
                             >
-                              Thinking&hellip;
+                              {pendingStatusText(pendingIntent)}
                             </span>
                           ) : (
                             // Walk parts in the order the model produced
@@ -1035,11 +1170,27 @@ export default function ChatInterface({
                             <div className="flex flex-col gap-3">
                               {message.parts.map((part, partIndex) => {
                                 if (part.type === "text") {
-                                  if (!part.text) return null;
+                                  if (hasExtraction || !part.text) return null;
                                   return (
                                     <Streamdown key={partIndex}>
                                       {part.text}
                                     </Streamdown>
+                                  );
+                                }
+                                if (part.type === "data-extraction") {
+                                  return (
+                                    <ExtractionCard
+                                      key={partIndex}
+                                      extraction={part.data}
+                                      disabled={isGenerating}
+                                      onCreateQuiz={() =>
+                                        handleExtractionAction(part.data.title, "quiz")
+                                      }
+                                      onCreateFlashcards={() =>
+                                        handleExtractionAction(part.data.title, "flashcards")
+                                      }
+                                      onAskAboutThis={handleAskAboutThis}
+                                    />
                                   );
                                 }
                                 if (part.type === "tool-createQuiz") {
@@ -1071,6 +1222,7 @@ export default function ChatInterface({
                               {isErroredMessage && (
                                 <ChatErrorCard
                                   error={error}
+                                  context={errorContext}
                                   retrying={isRetrying}
                                   onRetry={handleRetry}
                                 />
@@ -1089,7 +1241,7 @@ export default function ChatInterface({
                       role="status"
                       className="text-[15px] text-muted-foreground motion-safe:animate-pulse"
                     >
-                      Thinking&hellip;
+                      {pendingStatusText(pendingIntent)}
                     </span>
                   </div>
                 )}
@@ -1099,6 +1251,7 @@ export default function ChatInterface({
                     <div className="w-full max-w-sm">
                       <ChatErrorCard
                         error={error}
+                        context={errorContext}
                         retrying={isRetrying}
                         onRetry={handleRetry}
                       />
