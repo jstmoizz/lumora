@@ -1,7 +1,10 @@
 import { describe, test, expect } from "vitest";
 import {
+  addKnowledgeTopicInputSchema,
   addKnowledgeTopicTool,
+  createFlashcardsInputSchema,
   createFlashcardsTool,
+  createQuizInputSchema,
   createQuizTool,
   type AddKnowledgeTopicOutput,
   type CreateFlashcardsOutput,
@@ -286,5 +289,96 @@ describe("addKnowledgeTopicTool.execute", () => {
     expect(result.relatedTopics).toBeUndefined();
     expect(result.category).toBeUndefined();
     expect(result.summary).toBeUndefined();
+  });
+});
+
+// Regression coverage for a production bug: Groq's tool-calling sometimes
+// emits `category: ""` instead of omitting the key, even though it's
+// `.optional()` and SYSTEM_PROMPT tells the model to leave it out entirely
+// for a broad topic. A plain `.min(1)` on an optional field only guards
+// against a missing key, not this "present but blank" case, so the raw
+// model output failed schema validation before execute() ever ran — never
+// reaching execute()'s own trim-then-omit handling. These tests exercise
+// `inputSchema` directly (the same validation the AI SDK runs against the
+// model's raw tool-call arguments), not `execute()`, since that's the layer
+// the bug actually lived in.
+describe("tool input schemas tolerate a blank category (production bug regression)", () => {
+  const quizArgs = (category: unknown) => ({
+    topic: "Operating Systems",
+    questions: [{ question: "Q1", options: ["A", "B", "C", "D"], correctIndex: 0 }],
+    ...(category === undefined ? {} : { category }),
+  });
+
+  const flashcardsArgs = (category: unknown) => ({
+    topic: "Operating Systems",
+    cards: [{ front: "Q1", back: "A1" }],
+    ...(category === undefined ? {} : { category }),
+  });
+
+  test("createQuiz: an empty-string category (the exact reported failure) parses successfully with category omitted", () => {
+    const result = createQuizInputSchema.safeParse(quizArgs(""));
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.category).toBeUndefined();
+  });
+
+  test("createQuiz: 'quiz me on [topic] and make 5 flashcards' — both tool calls independently tolerate a blank category", () => {
+    const quizResult = createQuizInputSchema.safeParse(quizArgs(""));
+    const flashcardsResult = createFlashcardsInputSchema.safeParse(flashcardsArgs(""));
+
+    expect(quizResult.success).toBe(true);
+    expect(flashcardsResult.success).toBe(true);
+    expect(quizResult.success && quizResult.data.topic).toBe("Operating Systems");
+    expect(flashcardsResult.success && flashcardsResult.data.topic).toBe("Operating Systems");
+  });
+
+  test("createQuiz: 'make me a quiz about [topic]' (category omitted entirely) still parses successfully", () => {
+    const result = createQuizInputSchema.safeParse(quizArgs(undefined));
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.category).toBeUndefined();
+  });
+
+  test("createQuiz: a real, non-blank category is still trimmed and kept, not dropped by the fix", () => {
+    const result = createQuizInputSchema.safeParse({
+      topic: "Binary Search Trees",
+      questions: [{ question: "Q1", options: ["A", "B", "C", "D"], correctIndex: 0 }],
+      category: "  Data Structures and Algorithms  ",
+    });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.category).toBe("Data Structures and Algorithms");
+  });
+
+  test("createQuiz: a whitespace-only category is also treated as not provided", () => {
+    const result = createQuizInputSchema.safeParse(quizArgs("   "));
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.category).toBeUndefined();
+  });
+
+  test("createFlashcards: an empty-string category parses successfully with category omitted", () => {
+    const result = createFlashcardsInputSchema.safeParse(flashcardsArgs(""));
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.category).toBeUndefined();
+  });
+
+  test("addKnowledgeTopic: an empty-string category parses successfully with category omitted", () => {
+    const result = addKnowledgeTopicInputSchema.safeParse({
+      topic: "Rust",
+      category: "",
+    });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.category).toBeUndefined();
+  });
+
+  test("createQuiz: an empty topic is still rejected — the fix does not weaken the required topic field", () => {
+    const result = createQuizInputSchema.safeParse({
+      ...quizArgs(undefined),
+      topic: "",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("createQuiz: a missing topic is still rejected", () => {
+    const { topic: _topic, ...withoutTopic } = quizArgs(undefined);
+    const result = createQuizInputSchema.safeParse(withoutTopic);
+    expect(result.success).toBe(false);
   });
 });

@@ -19,13 +19,34 @@ import {
 } from "ai";
 import { z } from "zod";
 
+// Groq's tool-calling sometimes emits "" for an omitted optional field
+// instead of leaving the key out (reproduced in production: createQuiz
+// rejected with `/category: length must be >= 1, but got 0` even though
+// SYSTEM_PROMPT tells the model to omit category entirely when there isn't
+// one). A plain `.min(1)` on an `.optional()` field only guards against a
+// missing key, not this "present but blank" case, so it fails validation
+// before execute() ever runs and can apply its own trim-then-omit handling.
+// This treats a blank value the same as "not provided" instead of
+// rejecting the whole tool call, while still enforcing the same non-blank/
+// length bounds on any real value.
+function optionalNonBlankString(max: number) {
+  return z
+    .string()
+    .max(max)
+    .transform((value) => {
+      const trimmed = value.trim();
+      return trimmed ? trimmed : undefined;
+    })
+    .optional();
+}
+
 const quizQuestionInputSchema = z.object({
   question: z.string().min(1).max(300),
   options: z.array(z.string().min(1).max(120)).length(4),
   correctIndex: z.number().int().min(0).max(3),
 });
 
-const createQuizInputSchema = z.object({
+export const createQuizInputSchema = z.object({
   topic: z.string().min(1).max(80),
   questions: z.array(quizQuestionInputSchema).min(1).max(5),
   // Feeds Explore's knowledge graph (lib/supabase/knowledge-graph.ts) as
@@ -39,7 +60,7 @@ const createQuizInputSchema = z.object({
   // nest it under that category even the very first time it's studied,
   // without needing the category to already exist as its own node. Omitted
   // when `topic` is itself already a broad top-level subject.
-  category: z.string().min(1).max(80).optional(),
+  category: optionalNonBlankString(80),
 });
 
 export type CreateQuizInput = z.infer<typeof createQuizInputSchema>;
@@ -147,12 +168,12 @@ const flashcardInputSchema = z.object({
   explanation: z.string().max(400).optional(),
 });
 
-const createFlashcardsInputSchema = z.object({
+export const createFlashcardsInputSchema = z.object({
   topic: z.string().min(1).max(80),
   cards: z.array(flashcardInputSchema).min(1).max(10),
   // See createQuizInputSchema's relatedTopics/category for what these feed.
   relatedTopics: z.array(z.string().min(1).max(60)).min(3).max(6).optional(),
-  category: z.string().min(1).max(80).optional(),
+  category: optionalNonBlankString(80),
 });
 
 export type CreateFlashcardsInput = z.infer<typeof createFlashcardsInputSchema>;
@@ -228,13 +249,13 @@ export const createFlashcardsTool = tool({
   },
 });
 
-const addKnowledgeTopicInputSchema = z.object({
+export const addKnowledgeTopicInputSchema = z.object({
   topic: z.string().min(1).max(80),
   // See createQuizInputSchema's relatedTopics/category for what these feed —
   // same fields, same meaning, just supplied without a quiz/flashcard set
   // attached.
   relatedTopics: z.array(z.string().min(1).max(60)).min(3).max(6).optional(),
-  category: z.string().min(1).max(80).optional(),
+  category: optionalNonBlankString(80),
   // Explore's TopicPanel shows this when present. createQuiz/createFlashcards
   // never supply one — their own content is the "detail" — but a topic
   // added this way has nothing else to show. Capped well above what
