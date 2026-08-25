@@ -3,7 +3,40 @@ import {
   assistantMessageWithParts,
   userMessage,
 } from "@/app/generate/__tests__/fixtures";
+import { MAX_IMAGE_BYTES } from "@/lib/ai/model";
 import type { LumoraUIMessage } from "@/lib/ai/tools";
+
+// Builds a syntactically valid (but not a real decodable image) base64
+// data URL of a controlled byte size — the route never decodes the image
+// itself, only measures/pattern-matches the transmitted string, so a
+// repeated-character payload exercises the same code paths as a real one.
+function makeDataUrl(mediaType: string, byteLength: number): string {
+  const base64Length = Math.ceil((byteLength * 4) / 3 / 4) * 4;
+  return `data:${mediaType};base64,${"A".repeat(base64Length)}`;
+}
+
+function userMessageWithImage(
+  text: string,
+  options: { mediaType?: string; byteLength?: number; extraImages?: number } = {},
+  id = "user-1",
+): LumoraUIMessage {
+  const { mediaType = "image/png", byteLength = 1024, extraImages = 0 } = options;
+  const imagePart = {
+    type: "file" as const,
+    mediaType,
+    filename: "photo.png",
+    url: makeDataUrl(mediaType, byteLength),
+  };
+  return {
+    id,
+    role: "user",
+    parts: [
+      { type: "text", text },
+      imagePart,
+      ...Array.from({ length: extraImages }, () => imagePart),
+    ],
+  };
+}
 
 const {
   requireUserMock,
@@ -34,7 +67,13 @@ vi.mock("@/lib/supabase/knowledge-graph", () => ({
   upsertKnowledgeNodeActivity: upsertKnowledgeNodeActivityMock,
 }));
 vi.mock("@/lib/ai/config", () => ({
-  chatModel: "mock-model",
+  textModel: "mock-text-model",
+  visionModel: "mock-vision-model",
+  resolveModel: (mode: string, hasImage: boolean) => {
+    if (mode === "vision") return "mock-vision-model";
+    if (mode === "fast") return "mock-text-model";
+    return hasImage ? "mock-vision-model" : "mock-text-model";
+  },
   GENERATION_CONFIG: {},
   SYSTEM_PROMPT: "test system prompt",
 }));
@@ -325,6 +364,137 @@ describe("malformed messages", () => {
     });
     expect(streamTextMock).not.toHaveBeenCalled();
     expect(fromMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("mode routing and image attachments", () => {
+  test("defaults to auto mode and the text model when no mode/image is given", async () => {
+    setupSupabaseMock();
+    setupStreamText();
+
+    await POST(makeRequest({ messages: [userMessage("Explain osmosis")] }));
+
+    const [[callArgs]] = streamTextMock.mock.calls;
+    expect(callArgs.model).toBe("mock-text-model");
+  });
+
+  test("auto mode with an attached image routes to the vision model", async () => {
+    setupSupabaseMock();
+    setupStreamText();
+
+    await POST(
+      makeRequest({ messages: [userMessageWithImage("What is this?")] }),
+    );
+
+    const [[callArgs]] = streamTextMock.mock.calls;
+    expect(callArgs.model).toBe("mock-vision-model");
+  });
+
+  test("vision mode with no image still routes to the vision model", async () => {
+    setupSupabaseMock();
+    setupStreamText();
+
+    await POST(
+      makeRequest({ messages: [userMessage("Explain osmosis")], mode: "vision" }),
+    );
+
+    const [[callArgs]] = streamTextMock.mock.calls;
+    expect(callArgs.model).toBe("mock-vision-model");
+  });
+
+  test("fast mode with an attached image is rejected with a clear 400, never reaching streamText", async () => {
+    setupSupabaseMock();
+
+    const response = await POST(
+      makeRequest({
+        messages: [userMessageWithImage("What is this?")],
+        mode: "fast",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Fast mode doesn't support images. Switch to Auto or Vision mode to send an image.",
+    });
+    expect(streamTextMock).not.toHaveBeenCalled();
+  });
+
+  test("an unrecognized mode value falls back to auto rather than rejecting the request", async () => {
+    setupSupabaseMock();
+    setupStreamText();
+
+    await POST(
+      makeRequest({ messages: [userMessage("Explain osmosis")], mode: "turbo" }),
+    );
+
+    const [[callArgs]] = streamTextMock.mock.calls;
+    expect(callArgs.model).toBe("mock-text-model");
+  });
+
+  test("more than one image in a message is rejected with 400", async () => {
+    setupSupabaseMock();
+
+    const response = await POST(
+      makeRequest({
+        messages: [userMessageWithImage("Compare these", { extraImages: 1 })],
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Only one image is allowed per message.",
+    });
+    expect(streamTextMock).not.toHaveBeenCalled();
+  });
+
+  test("a disallowed image type is rejected with 400", async () => {
+    setupSupabaseMock();
+
+    const response = await POST(
+      makeRequest({
+        messages: [userMessageWithImage("What is this?", { mediaType: "image/gif" })],
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Images must be JPEG, PNG, or WebP.",
+    });
+    expect(streamTextMock).not.toHaveBeenCalled();
+  });
+
+  test("an oversized image is rejected with 400", async () => {
+    setupSupabaseMock();
+
+    const response = await POST(
+      makeRequest({
+        messages: [
+          userMessageWithImage("What is this?", { byteLength: MAX_IMAGE_BYTES + 1024 }),
+        ],
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Image must be 3MB or smaller.",
+    });
+    expect(streamTextMock).not.toHaveBeenCalled();
+  });
+
+  test("an attached image is stripped before the user message is persisted (no permanent image storage)", async () => {
+    const spies = setupSupabaseMock();
+    setupStreamText();
+
+    await POST(
+      makeRequest({ messages: [userMessageWithImage("What is this?")] }),
+    );
+
+    const userInsert = spies.messagesInsertSpy.mock.calls.find(
+      ([payload]) => payload.role === "user",
+    );
+    expect(userInsert).toBeDefined();
+    const persistedParts = userInsert?.[0].parts as LumoraUIMessage["parts"];
+    expect(persistedParts.some((part) => part.type === "file")).toBe(false);
   });
 });
 

@@ -53,7 +53,10 @@ describe("composer send gating", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
-    expect(sendMessage).toHaveBeenCalledWith({ text: "Explain osmosis" });
+    expect(sendMessage).toHaveBeenCalledWith(
+      { text: "Explain osmosis" },
+      { body: { mode: "auto" } },
+    );
     expect(textarea.value).toBe("");
   });
 
@@ -136,7 +139,10 @@ describe("composer send gating", () => {
     fireEvent.click(sendButton);
 
     expect(sendMessage).toHaveBeenCalledTimes(2);
-    expect(sendMessage).toHaveBeenLastCalledWith({ text: "Second question" });
+    expect(sendMessage).toHaveBeenLastCalledWith(
+      { text: "Second question" },
+      { body: { mode: "auto" } },
+    );
   });
 });
 
@@ -170,7 +176,7 @@ describe("resuming a conversation from History", () => {
 
     expect(sendMessage).toHaveBeenCalledWith(
       { text: "Continue please" },
-      { body: { conversationId: "conv-1" } },
+      { body: { conversationId: "conv-1", mode: "auto" } },
     );
   });
 });
@@ -188,7 +194,10 @@ describe("empty-state example prompts", () => {
     fireEvent.click(firstPrompt);
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
-    expect(sendMessage).toHaveBeenCalledWith({ text: promptText });
+    expect(sendMessage).toHaveBeenCalledWith(
+      { text: promptText },
+      { body: { mode: "auto" } },
+    );
   });
 
   // M3: `handleExampleClick` shares the composer's own `isSubmittingRef`
@@ -247,7 +256,10 @@ describe("empty-state example prompts", () => {
     fireEvent.click(secondPrompt);
 
     expect(sendMessage).toHaveBeenCalledTimes(2);
-    expect(sendMessage).toHaveBeenLastCalledWith({ text: secondPromptText });
+    expect(sendMessage).toHaveBeenLastCalledWith(
+      { text: secondPromptText },
+      { body: { mode: "auto" } },
+    );
   });
 });
 
@@ -382,10 +394,11 @@ describe("error state", () => {
   // learns a conversationId) ever streamed back, so no message here carries
   // `metadata.conversationId` and no `initialConversationId` prop is
   // passed. The client's own behavior for this case must keep calling
-  // `regenerate()` with no body — it's the server's job (not this
-  // component's) to treat that as an initial submission rather than a
-  // retry of an established conversation.
-  test("Retry with no known conversationId calls regenerate with no body", () => {
+  // `regenerate()` with no `conversationId` — it's the server's job (not
+  // this component's) to treat that as an initial submission rather than a
+  // retry of an established conversation. `mode` still goes along, same as
+  // every other send path.
+  test("Retry with no known conversationId calls regenerate with no conversationId", () => {
     const regenerate = vi.fn(() => Promise.resolve());
     mockUseChat.mockReturnValue(
       makeUseChatReturn({
@@ -400,7 +413,7 @@ describe("error state", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(regenerate).toHaveBeenCalledTimes(1);
-    expect(regenerate).toHaveBeenCalledWith();
+    expect(regenerate).toHaveBeenCalledWith({ body: { mode: "auto" } });
   });
 });
 

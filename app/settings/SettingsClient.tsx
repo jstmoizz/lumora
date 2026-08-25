@@ -19,7 +19,6 @@ import {
   UserIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { CHAT_MODEL_ID } from "@/lib/ai/model";
 import {
   updateUserSetting,
   type UpdatableSettingField,
@@ -404,10 +403,7 @@ function GenerateAccentRow() {
   );
 }
 
-// A read-only "label: value" info row for the AI & Model section. The
-// Model row's value is `CHAT_MODEL_ID` itself (see lib/ai/model.ts) rather
-// than a hand-written display name, so it cannot drift out of sync with
-// the model actually configured for the chat route.
+// A read-only "label: value" info row for the AI & Model section.
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-4 py-2">
@@ -592,7 +588,7 @@ export default function SettingsClient({
           >
             <div className="flex flex-col divide-y divide-border">
               <InfoRow label="Provider" value="Groq" />
-              <InfoRow label="Model" value={CHAT_MODEL_ID} />
+              <InfoRow label="Model" value="Auto-routed (fast + vision)" />
             </div>
           </SettingsSection>
 

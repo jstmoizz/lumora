@@ -7,20 +7,44 @@
  */
 
 import { groq } from "@ai-sdk/groq";
-import { CHAT_MODEL_ID } from "./model";
+import type { ChatMode } from "./model";
 
-export { CHAT_MODEL_ID };
+// Raw provider model IDs live only here, in this server-only module — never
+// exported as strings, so they can't end up client-visible (e.g. via
+// Settings, which used to display the old single CHAT_MODEL_ID directly).
+//
+// Both IDs were verified live against this account's actual Groq API key
+// before being wired in here (plain text + tool-calling for the text model;
+// image understanding + tool-calling from an image for the vision model —
+// Groq's own /models listing doesn't label qwen/qwen3.6-27b as
+// vision-capable, but it demonstrably is: it correctly described a real
+// test photo and built a createQuiz call from it).
+const TEXT_MODEL_ID = "openai/gpt-oss-20b";
+const VISION_MODEL_ID = "qwen/qwen3.6-27b";
 
 /**
- * The Groq model Lumora's chat feature uses (see `lib/ai/model.ts` for the
- * identifier and why it lives in its own module). Some models emit a
- * separate reasoning stream alongside chat text; ChatInterface.tsx doesn't
- * render it, so it's silently skipped on the client.
+ * The two Groq models Lumora's chat feature routes between. Some models
+ * emit a separate reasoning stream alongside chat text; ChatInterface.tsx
+ * doesn't render it, so it's silently skipped on the client.
  *
  * The `groq()` provider reads `GROQ_API_KEY` automatically — never read,
  * stored, or hardcoded here. This module must only be imported server-side.
  */
-export const chatModel = groq(CHAT_MODEL_ID);
+export const textModel = groq(TEXT_MODEL_ID);
+export const visionModel = groq(VISION_MODEL_ID);
+
+/**
+ * Picks which model a turn uses. `mode` is the user's explicit choice
+ * (Auto/Fast/Vision); `hasImage` is whether the message actually being sent
+ * this turn carries an image. Fast never routes to the vision model — a
+ * fast+image request is rejected earlier in the route (see
+ * app/api/chat/route.ts) and never reaches this function with hasImage set.
+ */
+export function resolveModel(mode: ChatMode, hasImage: boolean) {
+  if (mode === "vision") return visionModel;
+  if (mode === "fast") return textModel;
+  return hasImage ? visionModel : textModel; // auto
+}
 
 /**
  * System prompt establishing Lumora's assistant persona.

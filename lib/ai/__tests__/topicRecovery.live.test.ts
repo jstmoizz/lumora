@@ -16,14 +16,14 @@
  */
 import { describe, test, expect } from "vitest";
 import { generateText, stepCountIs, type ModelMessage } from "ai";
-import { chatModel, GENERATION_CONFIG, SYSTEM_PROMPT } from "../config";
+import { textModel, GENERATION_CONFIG, SYSTEM_PROMPT } from "../config";
 import { lumoraTools } from "../tools";
 
 const RUN_LIVE = process.env.RUN_LIVE_AI_TESTS === "1";
 
 async function ask(messages: ModelMessage[]) {
   return generateText({
-    model: chatModel,
+    model: textModel,
     system: SYSTEM_PROMPT,
     messages,
     tools: lumoraTools,

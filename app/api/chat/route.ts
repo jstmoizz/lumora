@@ -4,7 +4,15 @@ import {
   stepCountIs,
   streamText,
 } from "ai";
-import { chatModel, GENERATION_CONFIG, SYSTEM_PROMPT } from "@/lib/ai/config";
+import { GENERATION_CONFIG, SYSTEM_PROMPT, resolveModel, visionModel } from "@/lib/ai/config";
+import {
+  CHAT_MODES,
+  DEFAULT_CHAT_MODE,
+  MAX_IMAGES_PER_MESSAGE,
+  MAX_IMAGE_BYTES,
+  ALLOWED_IMAGE_MEDIA_TYPES,
+  type ChatMode,
+} from "@/lib/ai/model";
 import { smoothTextStream } from "@/lib/ai/smoothTextStream";
 import { lumoraTools, type LumoraUIMessage } from "@/lib/ai/tools";
 import { requireUser } from "@/lib/supabase/authorization";
@@ -52,10 +60,65 @@ function hasValidMessageShape(message: unknown): message is LumoraUIMessage {
   );
 }
 
+function parseMode(value: unknown): ChatMode {
+  return typeof value === "string" && value in CHAT_MODES ? (value as ChatMode) : DEFAULT_CHAT_MODE;
+}
+
+type FilePart = Extract<LumoraUIMessage["parts"][number], { type: "file" }>;
+
+function isFilePart(part: LumoraUIMessage["parts"][number]): part is FilePart {
+  return part.type === "file";
+}
+
+// Only ever strips attachment parts — text/tool/reasoning parts pass through
+// untouched. Used both to keep image bytes out of Supabase ("no permanent
+// image storage") and to keep image content out of model calls that aren't
+// routed to the vision model.
+function withoutImageParts(parts: LumoraUIMessage["parts"]): LumoraUIMessage["parts"] {
+  return parts.filter((part) => !isFilePart(part));
+}
+
+const ALLOWED_IMAGE_SUBTYPES = ALLOWED_IMAGE_MEDIA_TYPES.map((type) => type.split("/")[1]).join("|");
+const IMAGE_DATA_URL_PATTERN = new RegExp(
+  `^data:image/(?:${ALLOWED_IMAGE_SUBTYPES});base64,([A-Za-z0-9+/]+=*)$`,
+);
+
+// Re-derives byte size from the actual transmitted base64 payload rather
+// than trusting anything the client claims about the file — this is the
+// server-side backstop behind the composer's own client-side check.
+function estimateBase64Bytes(base64: string): number {
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.floor((base64.length * 3) / 4) - padding;
+}
+
+// Validates the newest message's image attachment(s), if any, against the
+// app's attachment policy (lib/ai/model.ts). A non-data-URL `url` (e.g. a
+// remote URL smuggled in as a "file" part) is rejected by the same pattern
+// that checks the allowed media types, since it can't match either way.
+function validateImageParts(
+  parts: LumoraUIMessage["parts"],
+): { ok: true; hasImage: boolean } | { ok: false; error: string } {
+  const fileParts = parts.filter(isFilePart);
+  if (fileParts.length === 0) return { ok: true, hasImage: false };
+  if (fileParts.length > MAX_IMAGES_PER_MESSAGE) {
+    return { ok: false, error: "Only one image is allowed per message." };
+  }
+
+  const match = IMAGE_DATA_URL_PATTERN.exec(fileParts[0].url);
+  if (!match) {
+    return { ok: false, error: "Images must be JPEG, PNG, or WebP." };
+  }
+  if (estimateBase64Bytes(match[1]) > MAX_IMAGE_BYTES) {
+    return { ok: false, error: "Image must be 3MB or smaller." };
+  }
+  return { ok: true, hasImage: true };
+}
+
 interface ChatRequestBody {
   messages: LumoraUIMessage[];
   conversationId?: string;
   trigger?: string;
+  mode?: string;
 }
 
 export async function POST(req: Request) {
@@ -91,10 +154,11 @@ export async function POST(req: Request) {
   let messages: LumoraUIMessage[];
   let requestedConversationId: string | null;
   let trigger: string | null;
+  let mode: ChatMode;
 
   try {
     const body: unknown = await req.json();
-    const { messages: bodyMessages, conversationId, trigger: bodyTrigger } =
+    const { messages: bodyMessages, conversationId, trigger: bodyTrigger, mode: bodyMode } =
       (body ?? {}) as Partial<ChatRequestBody>;
     if (!Array.isArray(bodyMessages)) {
       throw new Error("`messages` must be an array");
@@ -103,6 +167,7 @@ export async function POST(req: Request) {
     requestedConversationId =
       typeof conversationId === "string" && conversationId ? conversationId : null;
     trigger = typeof bodyTrigger === "string" ? bodyTrigger : null;
+    mode = parseMode(bodyMode);
   } catch {
     return Response.json(
       { error: "Request body must be JSON with a `messages` array." },
@@ -112,6 +177,25 @@ export async function POST(req: Request) {
 
   if (!messages.every(hasValidMessageShape)) {
     return Response.json({ error: "Invalid message format." }, { status: 400 });
+  }
+
+  // The newest message is the one this turn is about — the only message
+  // that can ever legitimately carry a fresh image attachment. Computed
+  // once, up front, so it's available both for this validation and for the
+  // persistence step further down.
+  const newUserMessage = messages[messages.length - 1];
+
+  const imageValidation = validateImageParts(newUserMessage?.parts ?? []);
+  if (!imageValidation.ok) {
+    return Response.json({ error: imageValidation.error }, { status: 400 });
+  }
+  if (mode === "fast" && imageValidation.hasImage) {
+    return Response.json(
+      {
+        error: "Fast mode doesn't support images. Switch to Auto or Vision mode to send an image.",
+      },
+      { status: 400 },
+    );
   }
 
   const supabase = await createClient();
@@ -161,7 +245,6 @@ export async function POST(req: Request) {
   // very first message is different: if the original request failed before
   // the client ever learned a conversationId, nothing was persisted yet, so
   // it must still be treated as an initial submission or the message is lost.
-  const newUserMessage = messages[messages.length - 1];
   const isRetryOfEstablishedConversation =
     trigger === "regenerate-message" && requestedConversationId !== null;
   if (!isRetryOfEstablishedConversation && newUserMessage?.role === "user") {
@@ -169,7 +252,11 @@ export async function POST(req: Request) {
       conversation_id: conversationId,
       role: "user",
       content: extractText(newUserMessage),
-      parts: newUserMessage.parts,
+      // No permanent image storage: strip any attached image before it
+      // ever reaches Supabase. A resumed/reloaded conversation will show
+      // this turn's text but not the image — the image only ever lives in
+      // the browser's in-memory chat state and this one model call.
+      parts: withoutImageParts(newUserMessage.parts),
     });
     if (error) {
       console.error("[api/chat] failed to persist user message:", error.message);
@@ -177,15 +264,26 @@ export async function POST(req: Request) {
     }
   }
 
+  const model = resolveModel(mode, imageValidation.hasImage);
+
+  // Only the turn actually routed to the vision model may send image
+  // content to the provider — otherwise an image attached earlier in this
+  // same conversation would still be sitting in history and get sent to a
+  // model that can't accept it.
+  const messagesForModel =
+    model === visionModel
+      ? messages
+      : messages.map((message) => ({ ...message, parts: withoutImageParts(message.parts) }));
+
   let modelMessages;
   try {
-    modelMessages = await convertToModelMessages(messages);
+    modelMessages = await convertToModelMessages(messagesForModel);
   } catch {
     return Response.json({ error: "Invalid message format." }, { status: 400 });
   }
 
   const result = streamText({
-    model: chatModel,
+    model,
     instructions: SYSTEM_PROMPT,
     messages: modelMessages,
     tools: lumoraTools,

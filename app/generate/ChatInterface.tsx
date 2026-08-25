@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ChangeEvent,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
@@ -12,22 +13,62 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, isTextUIPart } from "ai";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
+import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  CheckIcon,
+  ChevronDownIcon,
   CircleAlertIcon,
+  PaperclipIcon,
   RotateCcwIcon,
+  XIcon,
 } from "lucide-react";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  ALLOWED_IMAGE_MEDIA_TYPES,
+  CHAT_MODES,
+  DEFAULT_CHAT_MODE,
+  MAX_IMAGE_BYTES,
+  type ChatMode,
+} from "@/lib/ai/model";
 import type {
   CreateFlashcardsOutput,
   CreateQuizOutput,
   LumoraUIMessage,
 } from "@/lib/ai/tools";
 import { AddKnowledgeTopicToolPart, FlashcardsToolPart, QuizToolPart } from "./PracticeToolPart";
+
+// A single attached image, held only in this component's state — never
+// uploaded anywhere until the user sends the message, and never persisted
+// server-side (see app/api/chat/route.ts's "no permanent image storage").
+interface ImageAttachment {
+  mediaType: string;
+  filename: string;
+  dataUrl: string;
+}
+
+function validateImageFile(file: File): { ok: true } | { ok: false; message: string } {
+  if (!ALLOWED_IMAGE_MEDIA_TYPES.includes(file.type as (typeof ALLOWED_IMAGE_MEDIA_TYPES)[number])) {
+    return { ok: false, message: "Images must be JPEG, PNG, or WebP." };
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    return { ok: false, message: "Image must be 3MB or smaller." };
+  }
+  return { ok: true };
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read file"));
+    reader.readAsDataURL(file);
+  });
+}
 
 // How close to either edge (in pixels) counts as "at that edge" — for
 // re-engaging bottom auto-scroll, and for deciding whether "Go to top"/
@@ -163,6 +204,72 @@ function ChatErrorCard({
   );
 }
 
+// Mode picker for the composer — mirrors the Radix DropdownMenu pattern
+// already used for the Generate accent picker in SettingsClient.tsx. The
+// "Fast" item is disabled while an image is attached (fast mode doesn't
+// support images), so the invalid combination can't be selected through
+// this control.
+function ModeSelector({
+  mode,
+  onModeChange,
+  fastDisabled,
+  disabled,
+}: {
+  mode: ChatMode;
+  onModeChange: (mode: ChatMode) => void;
+  fastDisabled: boolean;
+  disabled: boolean;
+}) {
+  function handleSelect(next: string) {
+    if (next === mode) return;
+    if (next === "fast" && fastDisabled) return;
+    onModeChange(next as ChatMode);
+  }
+
+  return (
+    <DropdownMenuPrimitive.Root>
+      <DropdownMenuPrimitive.Trigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={disabled}
+          aria-label={`Mode: ${CHAT_MODES[mode].label}. Change mode.`}
+          className="h-11 shrink-0 gap-1 rounded-xl px-3 text-xs font-semibold"
+        >
+          {CHAT_MODES[mode].label}
+          <ChevronDownIcon aria-hidden="true" className="size-3.5 text-muted-foreground" />
+        </Button>
+      </DropdownMenuPrimitive.Trigger>
+      <DropdownMenuPrimitive.Content
+        align="start"
+        sideOffset={6}
+        className="z-50 min-w-56 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none"
+      >
+        <DropdownMenuPrimitive.RadioGroup value={mode} onValueChange={handleSelect}>
+          {(Object.keys(CHAT_MODES) as ChatMode[]).map((option) => (
+            <DropdownMenuPrimitive.RadioItem
+              key={option}
+              value={option}
+              disabled={option === "fast" && fastDisabled}
+              className="flex cursor-pointer flex-col gap-0.5 rounded-md px-2 py-1.5 text-sm text-foreground outline-none data-[highlighted]:bg-accent data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50"
+            >
+              <span className="flex items-center gap-1.5">
+                <span className="flex-1 font-medium">{CHAT_MODES[option].label}</span>
+                <DropdownMenuPrimitive.ItemIndicator>
+                  <CheckIcon aria-hidden="true" className="size-3.5" />
+                </DropdownMenuPrimitive.ItemIndicator>
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {CHAT_MODES[option].description}
+              </span>
+            </DropdownMenuPrimitive.RadioItem>
+          ))}
+        </DropdownMenuPrimitive.RadioGroup>
+      </DropdownMenuPrimitive.Content>
+    </DropdownMenuPrimitive.Root>
+  );
+}
+
 export default function ChatInterface({
   initialConversationId,
   initialMessages,
@@ -204,6 +311,10 @@ export default function ChatInterface({
   const [input, setInput] = useState(() =>
     initialTopic ? `Teach me about ${initialTopic}` : "",
   );
+  const [mode, setMode] = useState<ChatMode>(DEFAULT_CHAT_MODE);
+  const [imageAttachment, setImageAttachment] = useState<ImageAttachment | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const { messages, sendMessage, regenerate, status, stop, error } =
     useChat<LumoraUIMessage>({
       messages: initialMessages,
@@ -223,11 +334,29 @@ export default function ChatInterface({
 
   // Only passes a second argument once there's a conversation to continue,
   // keeping the first request in a session unchanged. The single choke
-  // point every send path routes through.
+  // point every send path routes through. `mode` always accompanies the
+  // request (the server defaults to "auto" if it's ever missing); an
+  // attached image, if any, goes along as a `files` part per the AI SDK's
+  // own `sendMessage({ text, files })` shape.
   function sendChatMessage(message: { text: string }) {
-    return conversationId
-      ? sendMessage(message, { body: { conversationId } })
-      : sendMessage(message);
+    const body = conversationId ? { conversationId, mode } : { mode };
+    if (!imageAttachment) {
+      return sendMessage(message, { body });
+    }
+    return sendMessage(
+      {
+        ...message,
+        files: [
+          {
+            type: "file" as const,
+            mediaType: imageAttachment.mediaType,
+            filename: imageAttachment.filename,
+            url: imageAttachment.dataUrl,
+          },
+        ],
+      },
+      { body },
+    );
   }
 
   // Reports `conversationId` up the moment it's known — immediately for a
@@ -315,7 +444,8 @@ export default function ChatInterface({
   );
 
   const isGenerating = status === "submitted" || status === "streaming";
-  const canSend = input.trim().length > 0 && status === "ready";
+  const canSend =
+    (input.trim().length > 0 || imageAttachment !== null) && status === "ready";
   const isEmpty = messages.length === 0;
   const hasError = status === "error";
 
@@ -591,6 +721,8 @@ export default function ChatInterface({
     isSubmittingRef.current = true;
     const text = input;
     setInput("");
+    setImageAttachment(null);
+    setImageError(null);
     try {
       await sendChatMessage({ text });
     } finally {
@@ -603,6 +735,35 @@ export default function ChatInterface({
       event.preventDefault();
       handleSubmit();
     }
+  }
+
+  // A new selection always replaces any existing attachment (the composer
+  // only ever allows one image at a time) — the input is reset immediately
+  // after reading so selecting the exact same file again still fires
+  // `onChange`.
+  async function handleImageFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    const validation = validateImageFile(file);
+    if (!validation.ok) {
+      setImageError(validation.message);
+      return;
+    }
+
+    setImageError(null);
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setImageAttachment({ mediaType: file.type, filename: file.name, dataUrl });
+    } catch {
+      setImageError("Couldn't read that image. Try again.");
+    }
+  }
+
+  function handleRemoveImage() {
+    setImageAttachment(null);
+    setImageError(null);
   }
 
   // Same race as `handleSubmit` (see `isSubmittingRef`'s own comment above)
@@ -633,8 +794,8 @@ export default function ChatInterface({
     setIsRetrying(true);
     try {
       await (conversationId
-        ? regenerate({ body: { conversationId } })
-        : regenerate());
+        ? regenerate({ body: { conversationId, mode } })
+        : regenerate({ body: { mode } }));
     } finally {
       isRetryingRef.current = false;
       setIsRetrying(false);
@@ -656,39 +817,92 @@ export default function ChatInterface({
     hasError && (!lastMessage || lastMessage.role === "user");
 
   const composer = (
-    <form
-      onSubmit={handleSubmit}
-      className="flex w-full items-end gap-2 rounded-xl border border-border bg-card p-2 shadow-sm transition-[border-color,box-shadow] duration-200 ease-out focus-within:border-[var(--generate-accent)] focus-within:shadow-md focus-within:ring-2 focus-within:ring-[var(--generate-accent-ring)]"
-    >
-      <textarea
-        value={input}
-        onChange={(event) => setInput(event.target.value)}
-        onKeyDown={handleKeyDown}
-        disabled={isGenerating}
-        placeholder="Ask anything..."
-        rows={1}
-        aria-label="Message"
-        className="max-h-40 flex-1 resize-none bg-transparent px-2 py-2.5 text-base leading-6 text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
-      />
-      {isGenerating ? (
+    <div className="flex w-full flex-col gap-2">
+      {imageAttachment && (
+        <div className="flex items-center gap-2 rounded-xl border border-border bg-card p-2 shadow-sm">
+          {/* eslint-disable-next-line @next/next/no-img-element -- a data URL preview of a not-yet-sent, never-uploaded attachment; next/image has no use here. */}
+          <img
+            src={imageAttachment.dataUrl}
+            alt=""
+            className="size-12 shrink-0 rounded-lg object-cover"
+          />
+          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+            {imageAttachment.filename}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Remove image"
+            onClick={handleRemoveImage}
+            className="shrink-0 rounded-lg"
+          >
+            <XIcon aria-hidden="true" className="size-3.5" />
+          </Button>
+        </div>
+      )}
+      {imageError && (
+        <p role="alert" className="px-1 text-xs text-destructive">
+          {imageError}
+        </p>
+      )}
+      <form
+        onSubmit={handleSubmit}
+        className="flex w-full items-end gap-2 rounded-xl border border-border bg-card p-2 shadow-sm transition-[border-color,box-shadow] duration-200 ease-out focus-within:border-[var(--generate-accent)] focus-within:shadow-md focus-within:ring-2 focus-within:ring-[var(--generate-accent-ring)]"
+      >
+        <ModeSelector
+          mode={mode}
+          onModeChange={setMode}
+          fastDisabled={imageAttachment !== null}
+          disabled={isGenerating}
+        />
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept={ALLOWED_IMAGE_MEDIA_TYPES.join(",")}
+          onChange={handleImageFileChange}
+          className="hidden"
+        />
         <Button
           type="button"
-          variant="outline"
-          onClick={() => stop()}
-          className="h-11 shrink-0 rounded-xl px-4 text-sm font-semibold transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]"
+          variant="ghost"
+          disabled={isGenerating || mode === "fast"}
+          aria-label="Attach image"
+          onClick={() => imageInputRef.current?.click()}
+          className="h-11 w-11 shrink-0 rounded-xl"
         >
-          Stop
+          <PaperclipIcon aria-hidden="true" className="size-4" />
         </Button>
-      ) : (
-        <Button
-          type="submit"
-          disabled={!canSend}
-          className="h-11 shrink-0 rounded-xl bg-[var(--generate-accent-solid)] px-5 text-sm font-semibold text-[var(--generate-accent-foreground)] transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03] hover:bg-[var(--generate-accent-solid)] hover:opacity-90"
-        >
-          Send
-        </Button>
-      )}
-    </form>
+        <textarea
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={isGenerating}
+          placeholder="Ask anything..."
+          rows={1}
+          aria-label="Message"
+          className="max-h-40 flex-1 resize-none bg-transparent px-2 py-2.5 text-base leading-6 text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
+        />
+        {isGenerating ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => stop()}
+            className="h-11 shrink-0 rounded-xl px-4 text-sm font-semibold transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]"
+          >
+            Stop
+          </Button>
+        ) : (
+          <Button
+            type="submit"
+            disabled={!canSend}
+            className="h-11 shrink-0 rounded-xl bg-[var(--generate-accent-solid)] px-5 text-sm font-semibold text-[var(--generate-accent-foreground)] transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03] hover:bg-[var(--generate-accent-solid)] hover:opacity-90"
+          >
+            Send
+          </Button>
+        )}
+      </form>
+    </div>
   );
 
   return (
