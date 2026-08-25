@@ -2,10 +2,9 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
 import {
   ArrowRightIcon,
   BrainIcon,
@@ -67,10 +66,6 @@ const WarpText = dynamic(() => import("./components/home/WarpText"), {
   ssr: false,
   loading: () => <HeroHeadlineFallback />,
 });
-
-if (typeof window !== "undefined") {
-  gsap.registerPlugin(ScrollTrigger);
-}
 
 function prefersReducedMotion() {
   if (typeof window === "undefined") return true;
@@ -179,6 +174,23 @@ export default function Home() {
     getServerCarouselWidth,
   );
 
+  // ScrollTrigger is only needed for the feature-card animation below, which
+  // fires well after first paint — loaded in the background from mount so
+  // it's ready by the time a user scrolls that far, without holding up the
+  // hero (which needs plain `gsap` synchronously and stays a static import).
+  const [scrollTriggerReady, setScrollTriggerReady] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    import("gsap/ScrollTrigger").then(({ ScrollTrigger }) => {
+      if (cancelled) return;
+      gsap.registerPlugin(ScrollTrigger);
+      setScrollTriggerReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // One-time cascading entrance for the hero (eyebrow -> heading ->
   // description -> CTA), same pattern as the Generate page's empty state.
   useGSAP(
@@ -205,9 +217,11 @@ export default function Home() {
   );
 
   // Feature cards stagger in the first time the section crosses into view.
+  // Waits on scrollTriggerReady (see above) — if the user scrolls here
+  // before it resolves, the cards just render without the stagger.
   useGSAP(
     () => {
-      if (prefersReducedMotion() || !featuresRef.current) return;
+      if (prefersReducedMotion() || !featuresRef.current || !scrollTriggerReady) return;
       const cards = Array.from(featuresRef.current.children);
 
       gsap.from(cards, {
@@ -224,7 +238,7 @@ export default function Home() {
         },
       });
     },
-    { scope: featuresRef, dependencies: [] },
+    { scope: featuresRef, dependencies: [scrollTriggerReady] },
   );
 
   return (
