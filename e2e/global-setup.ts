@@ -46,6 +46,18 @@ export const E2E_WORKSPACE_TEST_EMAIL =
 export const E2E_WORKSPACE_TEST_PASSWORD =
   "Lumora-E2E-Workspace-Test-Password-1!";
 
+// A fifth account, used only by auth.spec.ts's "log out" test. Supabase's
+// `signOut()` defaults to scope "global" — every session for that user,
+// everywhere — and that test calls it deliberately, to prove logout works.
+// Running it against the shared default account above (the one nearly
+// every other spec's `storageState` is built from) would revoke those
+// specs' sessions too, regardless of Playwright worker/ordering, since the
+// revocation is real and server-side. Same isolation reasoning as the three
+// accounts above, applied to the one spec that's inherently destructive to
+// whatever session it's signed in with.
+export const E2E_LOGOUT_TEST_EMAIL = "lumora-e2e-logout-test@example.com";
+export const E2E_LOGOUT_TEST_PASSWORD = "Lumora-E2E-Logout-Test-Password-1!";
+
 export const AUTH_STATE_PATH = resolve(__dirname, ".auth", "user.json");
 
 // Playwright's own process (unlike the `webServer` child process, which runs
@@ -116,6 +128,7 @@ export default async function globalSetup(config: FullConfig) {
   await ensureUserExists(E2E_PERSISTENCE_TEST_EMAIL, E2E_PERSISTENCE_TEST_PASSWORD);
   await ensureUserExists(E2E_HISTORY_TEST_EMAIL, E2E_HISTORY_TEST_PASSWORD);
   await ensureUserExists(E2E_WORKSPACE_TEST_EMAIL, E2E_WORKSPACE_TEST_PASSWORD);
+  await ensureUserExists(E2E_LOGOUT_TEST_EMAIL, E2E_LOGOUT_TEST_PASSWORD);
 
   const baseURL =
     config.projects[0]?.use?.baseURL ?? "http://localhost:3100";

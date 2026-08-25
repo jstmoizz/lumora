@@ -1,5 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { E2E_TEST_EMAIL, E2E_TEST_PASSWORD } from "./global-setup";
+import {
+  E2E_TEST_EMAIL,
+  E2E_TEST_PASSWORD,
+  E2E_LOGOUT_TEST_EMAIL,
+  E2E_LOGOUT_TEST_PASSWORD,
+} from "./global-setup";
 
 test.describe("signed out", () => {
   test.use({ storageState: { cookies: [], origins: [] } });
@@ -58,15 +63,34 @@ test.describe("signed in", () => {
     await page.goto("/login");
     await expect(page).toHaveURL(/\/generate$/, { timeout: 10_000 });
   });
+});
+
+// A dedicated, disposable account (see global-setup.ts's own comment on
+// E2E_LOGOUT_TEST_EMAIL) — this test calls Supabase's signOut(), which
+// defaults to GLOBAL scope (every session for that user, everywhere).
+// Running it against the shared default account (used by nearly every
+// other spec's storageState) would revoke those sessions too, regardless
+// of Playwright worker/ordering, since the revocation is real and
+// server-side. Same isolation pattern as generate-persistence.spec.ts,
+// history.spec.ts, and generate-workspace.spec.ts: start signed out here,
+// log in fresh within the test, on an account nothing else touches.
+test.describe("log out", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
 
   test("the nav shows the signed-in email and a working log out control", async ({
     page,
   }) => {
+    await page.goto("/login");
+    await page.getByLabel("Email").fill(E2E_LOGOUT_TEST_EMAIL);
+    await page.getByLabel("Password").fill(E2E_LOGOUT_TEST_PASSWORD);
+    await page.getByRole("button", { name: "Log in" }).click();
+    await expect(page).toHaveURL(/\/generate$/, { timeout: 15_000 });
+
     await page.goto("/settings");
     // Scoped to the header — Settings' own new Account section also shows
     // the email, which would otherwise make this locator ambiguous.
     await expect(
-      page.locator("header").getByText(E2E_TEST_EMAIL, { exact: false }),
+      page.locator("header").getByText(E2E_LOGOUT_TEST_EMAIL, { exact: false }),
     ).toBeVisible();
 
     await page.getByRole("button", { name: "Log out" }).click();
