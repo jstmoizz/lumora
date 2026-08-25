@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { useReducedMotion } from "@/app/components/useReducedMotion";
 import "./ProfileCard.css";
 
 const DEFAULT_INNER_GRADIENT = "linear-gradient(145deg,#60496e8c 0%,#71C4FF44 100%)";
@@ -82,8 +83,13 @@ function ProfileCardComponent({
   const enterTimerRef = useRef<number | null>(null);
   const leaveRafRef = useRef<number | null>(null);
 
+  // Reduced-motion users get the static card — no tilt, glare, or entrance
+  // animation — same "disable, don't unmount" approach as GlobalDock.
+  const reducedMotion = useReducedMotion();
+  const tiltActive = enableTilt && !reducedMotion;
+
   const tiltEngine = useMemo<TiltEngine | null>(() => {
-    if (!enableTilt) return null;
+    if (!tiltActive) return null;
 
     let rafId: number | null = null;
     let running = false;
@@ -143,7 +149,7 @@ function ProfileCardComponent({
 
       const stillFar = Math.abs(targetX - currentX) > 0.05 || Math.abs(targetY - currentY) > 0.05;
 
-      if (stillFar || document.hasFocus()) {
+      if (stillFar) {
         rafId = requestAnimationFrame(step);
       } else {
         running = false;
@@ -192,7 +198,7 @@ function ProfileCardComponent({
         lastTs = 0;
       },
     };
-  }, [enableTilt]);
+  }, [tiltActive]);
 
   const getOffsets = (evt: PointerEvent, el: HTMLElement) => {
     const rect = el.getBoundingClientRect();
@@ -287,7 +293,7 @@ function ProfileCardComponent({
   }, [avatarUrl, hideBrokenAvatar]);
 
   useEffect(() => {
-    if (!enableTilt || !tiltEngine) return;
+    if (!tiltActive || !tiltEngine) return;
 
     const shell = shellRef.current;
     if (!shell) return;
@@ -334,7 +340,7 @@ function ProfileCardComponent({
       shell.classList.remove("entering");
     };
   }, [
-    enableTilt,
+    tiltActive,
     enableMobileTilt,
     tiltEngine,
     handlePointerMove,
