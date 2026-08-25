@@ -1,0 +1,42 @@
+/*
+ * Container-query context sized to the fallback's own box (the same box
+ * WarpText's canvas measures against once it mounts) so the text span
+ * below can size itself relative to it via `cqw` units — the only way to
+ * reproduce WarpText's shrink-to-fit-one-line behavior without running its
+ * JS canvas measurement pass, which can't run before this fallback's very
+ * first paint anyway (that's the whole reason this fallback exists).
+ */
+.hero-headline-fallback {
+  container-type: inline-size;
+}
+
+.hero-headline-fallback-text {
+  white-space: nowrap;
+
+  /* Fallback for browsers without container query length units — same
+     behavior this component had before this fix. Overridden below on
+     browsers that support cqw (all evergreen browsers well before now). */
+  font-size: clamp(2.75rem, 7vw, 4.75rem);
+  /*
+   * WarpText's own rasterizer (buildTextCanvas in WarpText.tsx) always
+   * shrinks "Study Smarter with Lumora." to fit within 86% of its
+   * container's width on a single line — verified that shrink path is
+   * the active one at every realistic viewport (it never falls back to
+   * the unshrunk fontSize prop, even at 4K widths, since the container
+   * itself caps at max-w-3xl). Since that fit target is a fixed fraction
+   * of container width, the resulting font-size is just a fixed multiple
+   * of container width. The 6.33 multiplier is (86 / 12.905) * 0.95:
+   * 12.905 is this exact string's measured width per px of font-size in
+   * the real Geist 700 + Pacifico 400 fonts (canvas-measured, mirroring
+   * WarpText's own measureLine/resolveRuns), and the *0.95 is a small
+   * safety margin so minor cross-browser font-metric differences can't
+   * push this back into a two-line wrap.
+   */
+  font-size: 6.33cqw;
+
+  color: #1e1b4b; /* light mode — matches WarpText's own default color prop */
+}
+
+.dark .hero-headline-fallback-text {
+  color: #fafafa; /* dark mode — matches WarpText's own default color prop */
+}

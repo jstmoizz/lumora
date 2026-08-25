@@ -22,34 +22,48 @@ import Carousel, { type CarouselItem } from "./components/home/Carousel";
 import HeroScrollShell from "./components/home/HeroScrollShell";
 import HeroShaderBackground from "./components/home/HeroShaderBackground";
 import type { WarpTextRun } from "./components/home/WarpText";
+import "./components/home/HeroHeadlineFallback.css";
 
 // Mirrors HERO_HEADLINE_RUNS below as real DOM text — real content inside
 // the <h1>, not canvas-rasterized or hidden behind a role="img" trick.
-// Typography matches the real WarpText's props so swapping to the animated
-// version causes no layout shift. `--foreground`, not WarpText's own
-// useIsDarkTheme()-resolved color, since this renders before hydration can
-// run any hook — the CSS variable already resolves correctly via ThemeScript.
+// Sizing/color are handled by HeroHeadlineFallback.css, not inline styles
+// here: WarpText always shrinks this exact headline to fit one line at
+// ~86% of its container's width (verified — the shrink path is active at
+// every realistic viewport), so matching that needs a container-query-
+// relative font-size, which plain inline styles can't express. Colors are
+// pinned to WarpText's own literal defaults (`#1e1b4b`/`#fafafa`) rather
+// than `var(--foreground)`, which is a different color from WarpText's
+// default in light mode. Still no hooks here deliberately: this renders
+// before hydration can run any hook, and CSS custom properties/classes
+// (driven by ThemeScript's synchronous `.dark`/`.light` class, not a
+// useSyncExternalStore server-snapshot guess) are what resolve correctly
+// on the very first paint without a hydration-time flash.
 function HeroHeadlineFallback() {
   return (
     <span
+      className="hero-headline-fallback"
       style={{
         display: "flex",
         minHeight: "clamp(140px, 16vw, 220px)",
         alignItems: "center",
         justifyContent: "center",
         textAlign: "center",
-        fontSize: "clamp(2.75rem, 7vw, 4.75rem)",
-        fontWeight: 700,
-        letterSpacing: "-0.02em",
-        lineHeight: 1.05,
-        color: "var(--foreground)",
       }}
     >
-      Study Smarter with{" "}
-      <span style={{ fontFamily: "var(--font-wordmark)", fontWeight: 400 }}>
-        Lumora
+      <span
+        className="hero-headline-fallback-text"
+        style={{
+          fontWeight: 700,
+          letterSpacing: "-0.02em",
+          lineHeight: 1.05,
+        }}
+      >
+        Study Smarter with{" "}
+        <span style={{ fontFamily: "var(--font-wordmark)", fontWeight: 400 }}>
+          Lumora
+        </span>
+        .
       </span>
-      .
     </span>
   );
 }
