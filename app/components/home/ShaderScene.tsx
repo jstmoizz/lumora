@@ -50,6 +50,15 @@ interface Engine {
   material: ShaderMaterial;
 }
 
+// A plain module-level function, not a closure — same pattern already used
+// elsewhere in this codebase (see explore/components/OptionWheel.tsx's
+// `runFrame`) to sidestep `react-hooks/immutability` flagging a mutation of
+// a ref-held imperative object (the shader material's own uniform, not
+// React-managed render state) from inside a component-scoped effect.
+function setIsLightUniform(material: ShaderMaterial, isDark: boolean): void {
+  material.uniforms.u_isLight.value = isDark ? 0 : 1;
+}
+
 export default function ShaderScene() {
   const isDark = useIsDarkTheme();
   const tabVisible = useTabVisible();
@@ -275,7 +284,7 @@ export default function ShaderScene() {
   // waiting for it to matter next frame.
   useEffect(() => {
     const material = engineRef.current?.material;
-    if (material) material.uniforms.u_isLight.value = isDark ? 0 : 1;
+    if (material) setIsLightUniform(material, isDark);
   }, [isDark]);
 
   return (
