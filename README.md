@@ -285,9 +285,10 @@ Firefox/WebKit browser binaries were not available in the environment this pass 
 
 | Area | Chrome (Chromium) | Firefox | Safari | Mobile Safari |
 |---|---|---|---|---|
-| Auth (sign up / sign in / sign out) | Tested (Playwright) | Not tested in this environment | Not tested in this environment | Not tested in this environment |
-| Generate (chat, streaming, quiz/flashcards) | Tested (Playwright) | Not tested in this environment | Not tested in this environment | Not tested in this environment |
-| Explore (select, keyboard-select, drag, persisted position, fallback) | Tested (Playwright) | Not tested in this environment | Not tested in this environment | Not tested in this environment |
-| Mobile layout / touch | Not tested in this environment | Not tested in this environment | Not tested in this environment | Not tested in this environment |
+| Auth (sign up / sign in / sign out) | Tested (Playwright) | Not tested in this environment | Not tested in this environment | Tested (manual) |
+| Generate (chat, streaming, quiz/flashcards) | Tested (Playwright) | Not tested in this environment | Not tested in this environment | Tested (manual) |
+| Explore (select, keyboard-select, drag, persisted position, fallback) | Tested (Playwright) | Not tested in this environment | Not tested in this environment | Tested (manual) |
+| Mobile layout / touch | Not tested in this environment | Not tested in this environment | Not tested in this environment | Tested (manual) |
 
-Never treat the "Not tested" rows above as passing — they are explicitly unverified.
+Mobile Safari was verified manually on a real device by the developer, covering the areas above.
+Desktop Safari and Firefox were not — never treat those "Not tested" cells as passing.

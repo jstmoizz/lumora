@@ -147,10 +147,19 @@ test("keyboard: a topic can be reached and selected without a mouse", async ({
   // "Enter to activate" step. Which label starts at index 0 isn't
   // guaranteed, so force one real transition, walk back to 0, then sweep
   // forward checking after each press whether Mathematics' panel opened.
+  // The check itself briefly waits (rather than a one-shot isVisible()) —
+  // a plain isVisible() can read `false` a moment before React actually
+  // renders the panel, which would otherwise send an extra ArrowDown past
+  // Mathematics for good, well before the final assertion's own retry
+  // window ever gets a chance to see it appear.
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowUp");
   for (let i = 0; i < OWNED_TOP_LEVEL_LABELS.length - 1; i++) {
-    if (await mathPanel.isVisible()) break;
+    const isMathVisible = await mathPanel
+      .waitFor({ state: "visible", timeout: 500 })
+      .then(() => true)
+      .catch(() => false);
+    if (isMathVisible) break;
     await page.keyboard.press("ArrowDown");
   }
 
