@@ -149,28 +149,29 @@ test("keyboard: a topic can be reached and selected without a mouse", async ({
   // Keyboard handling lives on the listbox root — ArrowUp/ArrowDown move
   // the selected index and fire selection immediately, no separate
   // "Enter to activate" step. Which label starts at index 0 isn't
-  // guaranteed, so force one real transition, walk back to 0, then sweep
-  // forward checking after each press whether Mathematics' panel opened.
-  // The check itself briefly waits (rather than a one-shot isVisible()) —
-  // a plain isVisible() can read `false` a moment before React actually
-  // renders the panel, which would otherwise send an extra ArrowDown past
-  // Mathematics for good, well before the final assertion's own retry
-  // window ever gets a chance to see it appear.
+  // guaranteed, so force one real transition (0 -> 1 -> 0) to make sure a
+  // real selection fires even if Mathematics turns out to already be at
+  // index 0 — OptionWheel's mount-time layout effect doesn't fire onChange
+  // for the index it's already at.
   //
-  // The sweep bound is the *actual* rendered option count, not
-  // OWNED_TOP_LEVEL_LABELS.length — beforeEach wipes and reseeds this
-  // account's whole graph so it should always match, but bounding on the
-  // real DOM rather than an assumption about DB state is what actually
-  // guarantees every position gets checked, however many options exist.
-  const optionCount = await topics.getByRole("option").count();
+  // Rather than sweeping forward and polling for the panel after each
+  // press (which raced the panel's render on a loaded CI runner — the
+  // previous version of this test), read the rendered option labels
+  // directly and press ArrowDown exactly as many times as Mathematics'
+  // real index. That's deterministic regardless of how many topics exist
+  // or what order the DB returns them in, with no timing dependency until
+  // the one, final, properly-retrying assertion.
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowUp");
-  for (let i = 0; i < optionCount - 1; i++) {
-    const isMathVisible = await mathPanel
-      .waitFor({ state: "visible", timeout: 500 })
-      .then(() => true)
-      .catch(() => false);
-    if (isMathVisible) break;
+
+  const labels = await topics.getByRole("option").allTextContents();
+  const mathIndex = labels.indexOf(MATHEMATICS_LABEL);
+  if (mathIndex === -1) {
+    throw new Error(
+      `"${MATHEMATICS_LABEL}" not found among rendered topics: ${labels.join(", ")}`,
+    );
+  }
+  for (let i = 0; i < mathIndex; i++) {
     await page.keyboard.press("ArrowDown");
   }
 
