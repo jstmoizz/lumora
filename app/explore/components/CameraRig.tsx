@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Vector3 } from "three";
+import { shouldStartCameraTransition, type CameraTransitionInputs } from "../cameraTransition";
 
 // `state.controls` is typed generically (`THREE.EventDispatcher | null`) so
 // it can hold any controls implementation; drei's OrbitControls (with
@@ -59,12 +60,22 @@ interface CameraRigProps {
   // is actually there instead of overlapping a wide graph or leaving a
   // sparse one adrift in empty space.
   overviewPosition: [number, number, number];
+  // Purely a re-arm signal for the fly-to below (see the effect that reads
+  // it, and cameraTransition.ts) — its numeric value is never used for
+  // framing. Derived by Scene.tsx from the graph's automatically computed
+  // layout only, deliberately excluding manually dragged positions, so a
+  // node drag alone — however far, and even if it changes the *visual*
+  // layout's own extent — can never restart this animation. Only
+  // `overviewPosition` above (which does track manual drags) is actually
+  // used to compute where the camera flies once a transition is warranted.
+  structuralMaxRadius: number;
 }
 
 export default function CameraRig({
   selectedNodeId,
   focusPositions,
   overviewPosition,
+  structuralMaxRadius,
 }: CameraRigProps) {
   const camera = useThree((state) => state.camera);
   const controls = useThree(
@@ -82,11 +93,17 @@ export default function CameraRig({
   const scratchDir = useRef(new Vector3());
   const scratchRight = useRef(new Vector3());
   const selectedPositionRef = useRef<[number, number, number] | undefined>(undefined);
-  // The last `selectedNodeId` this effect actually reacted to — distinct
-  // from reading `selectedNodeId` directly in the dependency array, since
-  // that alone can't tell "the selection changed" apart from "the same
-  // selected node's own position changed" once both are effect deps.
-  const lastSelectedNodeId = useRef<string | null>(null);
+  // The (selectedNodeId, structuralMaxRadius) pair this effect last actually
+  // reacted to — distinct from reading those values directly in the
+  // dependency array, since that alone can't tell "one of them changed" apart
+  // from "the effect re-ran for some other reason" once more values become
+  // deps. Fed through `shouldStartCameraTransition` (cameraTransition.ts) so
+  // the actual decision has its own direct unit coverage, independent of this
+  // R3F wiring.
+  const lastTransitionInputs = useRef<CameraTransitionInputs>({
+    selectedNodeId,
+    structuralMaxRadius,
+  });
 
   // True only while actively flying the camera to a target; false the rest
   // of the time so OrbitControls' drag/zoom fully owns the camera and
@@ -101,29 +118,33 @@ export default function CameraRig({
     // pre-drag position.
     selectedPositionRef.current = selectedNodeId ? focusPositions[selectedNodeId] : undefined;
 
-    // Only re-arms the fly-to when the *selected node itself* changes —
-    // deliberately not a dependency on `focusPositions`' own value: that
-    // record gets a new reference on every layout change, including every
-    // single node drag (see Scene.tsx), and dragging any node — selected or
-    // not — must never restart the camera's fly-to animation (that's what
-    // reads as "the camera reset"). A drag committing does update
-    // `selectedPositionRef.current` above, just without touching
-    // `isAnimating` — so the camera doesn't chase a dragged, currently-
-    // selected node around, but the *next* real selection change still
-    // flies to its up-to-date position.
-    if (selectedNodeId !== lastSelectedNodeId.current) {
-      lastSelectedNodeId.current = selectedNodeId;
+    // Only re-arms the fly-to when the *selected node* or the graph's
+    // *structural* extent actually changes — deliberately not a dependency
+    // on `focusPositions`' own value: that record gets a new reference on
+    // every layout change, including every single node drag (see
+    // Scene.tsx), and dragging any node — selected or not, however far,
+    // even past the graph's current outermost node — must never restart the
+    // camera's fly-to animation (that's what reads as "the camera reset").
+    // A drag committing does update `selectedPositionRef.current` above,
+    // just without touching `isAnimating` — so the camera doesn't chase a
+    // dragged, currently-selected node around, but the *next* real
+    // selection or structural change still flies to its up-to-date position.
+    const next: CameraTransitionInputs = { selectedNodeId, structuralMaxRadius };
+    if (shouldStartCameraTransition(lastTransitionInputs.current, next)) {
       isAnimating.current = true;
     }
-  }, [selectedNodeId, focusPositions]);
+    lastTransitionInputs.current = next;
+  }, [selectedNodeId, structuralMaxRadius, focusPositions]);
 
-  // Recomputed whenever the graph's extent changes (a topic studied or
-  // deleted), not just on mount — growing the graph should pull the overview
-  // back to fit the new content next time nothing's selected.
+  // Kept in sync with the current *visual* framing (manual drags included)
+  // on every change — but, deliberately, this alone never re-arms the
+  // fly-to (see the effect above for what does). If a transition is already
+  // running, or starts later for an unrelated reason, it should fly to
+  // wherever the graph visually looks like right now, dragged nodes
+  // included — but a drag alone must never be what starts that flight.
   useEffect(() => {
     overviewPositionVec.current.set(...overviewPosition);
     overviewDistance.current = overviewPositionVec.current.length();
-    isAnimating.current = true;
   }, [overviewPosition]);
 
   // The moment the user actually grabs the camera (drag to orbit, wheel to

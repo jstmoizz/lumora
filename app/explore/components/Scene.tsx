@@ -86,17 +86,22 @@ export default function Scene({ nodes, selectedNodeId, onSelect }: SceneProps) {
     [baseLayout, manualPositions],
   );
 
-  // Split into its own memo (a plain number, not `layout` itself) so that
-  // a node drag which doesn't actually change the graph's overall extent —
-  // the common case — leaves `maxRadius` numerically unchanged, and
-  // therefore leaves `overviewPosition` below pointing at the exact same
-  // array *reference* it had before. CameraRig's own effect keys off that
-  // reference (see its own comment), so this is what stops an ordinary drag
-  // from re-arming — and visibly resetting — the camera's fly-to animation.
-  // Recomputed as the graph genuinely grows or shrinks (a topic studied or
-  // deleted elsewhere), not just on mount.
-  const maxRadius = useMemo(() => maxLayoutRadius(layout), [layout]);
-  const overviewPosition = useMemo(() => computeOverviewPosition(maxRadius), [maxRadius]);
+  // Two different radii for two different jobs — see cameraTransition.ts.
+  //
+  // `structuralMaxRadius` comes from `baseLayout` alone, which only changes
+  // when `nodes` itself changes (a topic studied or deleted elsewhere) —
+  // never from a drag, which only ever touches `manualPositions`/`layout`.
+  // CameraRig uses this purely as the signal for "should the camera's
+  // fly-to re-arm," so repositioning an existing node — however far, even
+  // past the graph's current outermost node — can never trigger it.
+  //
+  // `visualMaxRadius` (and the `overviewPosition` framing derived from it)
+  // includes manual overrides, since *when a transition is actually
+  // warranted* (a real selection or structural change), it should still
+  // frame the graph as the user currently sees it, dragged nodes included.
+  const structuralMaxRadius = useMemo(() => maxLayoutRadius(baseLayout), [baseLayout]);
+  const visualMaxRadius = useMemo(() => maxLayoutRadius(layout), [layout]);
+  const overviewPosition = useMemo(() => computeOverviewPosition(visualMaxRadius), [visualMaxRadius]);
 
   // Every node's absolute position, for CameraRig to focus on.
   const focusPositions = useMemo(() => {
@@ -154,6 +159,7 @@ export default function Scene({ nodes, selectedNodeId, onSelect }: SceneProps) {
         selectedNodeId={selectedNodeId}
         focusPositions={focusPositions}
         overviewPosition={overviewPosition}
+        structuralMaxRadius={structuralMaxRadius}
       />
       <OrbitControls
         makeDefault
