@@ -1,12 +1,11 @@
 /**
  * Generate's accent-theme system: a Generate-scoped color layer on top of
- * the global Light/Dark system (theme.ts), mirroring its shape (storage
- * key, validity guard, get/apply helpers) for the same kind of problem —
- * a persisted user preference toggled via a DOM attribute.
+ * the global Light/Dark system (theme.ts), mirroring its shape for the same
+ * kind of problem — a persisted preference toggled via a DOM attribute.
  *
- * Colocated here rather than under app/generate/ because it's read from two
- * routes: GenerateWorkspace.tsx (applies it) and SettingsClient.tsx (lets
- * the user change it) — see generate-accent.css for the color tokens.
+ * Colocated here rather than under app/generate/ since it's read from both
+ * GenerateWorkspace.tsx (applies it) and SettingsClient.tsx (lets the user
+ * change it) — see generate-accent.css for the color tokens.
  */
 
 export type GenerateAccent =

@@ -17,13 +17,9 @@ describe("FlashcardsPanel empty state", () => {
   });
 });
 
-// Regression coverage for a flashcard set resumed from a persisted
-// conversation whose `cards` array is empty — unreachable from live
-// generation (the tool's own Zod schema requires at least one), but
-// persisted data is loaded straight from the database with no
-// re-validation against that schema. ActiveFlashcardSet used to index
-// straight into `set.cards[0]` and crash the whole /generate route; it
-// must now render a fallback instead.
+// Regression coverage: a persisted set can have zero cards (live
+// generation's schema forbids it, but persisted data isn't re-validated) —
+// indexing straight into cards[0] used to crash the whole /generate route.
 describe("FlashcardsPanel — persisted set with zero cards", () => {
   test("renders an accessible fallback instead of crashing, with no card UI", () => {
     render(<FlashcardsPanel flashcardSets={[emptyFlashcardSet()]} />);
@@ -39,16 +35,15 @@ describe("FlashcardsPanel — persisted set with zero cards", () => {
   });
 
   test("the Disclosure still labels it correctly, and a normal set alongside it is unaffected", () => {
-    // The newest set (index 0 — see useAutoCollapseList) starts expanded;
-    // putting the healthy one there means the broken one starts collapsed,
-    // exercising the fallback via the "expand it" path rather than only on
-    // first paint.
+    // Putting the healthy set first (it starts expanded) means the broken
+    // one starts collapsed, exercising the fallback via "expand it" rather
+    // than only on first paint.
     render(
       <FlashcardsPanel flashcardSets={[singleCardFlashcardSet(), emptyFlashcardSet()]} />,
     );
 
-    // The broken set's own header still shows its topic/card count — only
-    // its *content* is replaced by the fallback.
+    // The broken set's header still shows its topic/card count — only its
+    // content is replaced by the fallback.
     expect(screen.getByText("0 cards")).toBeInTheDocument();
 
     const collapsedTrigger = screen.getByRole("button", {
@@ -60,7 +55,6 @@ describe("FlashcardsPanel — persisted set with zero cards", () => {
       "These flashcards couldn't be loaded.",
     );
 
-    // The healthy set (the newest, already expanded) still works normally.
     expect(screen.getByRole("button", { name: "Flip flashcard" })).toBeInTheDocument();
   });
 });
@@ -141,11 +135,9 @@ describe("FlashcardsPanel multiple sets", () => {
       />,
     );
 
-    // Advance the (expanded) newest set to its second card.
     fireEvent.click(screen.getByRole("button", { name: "Next card" }));
     expect(screen.getByText("2 / 3")).toBeInTheDocument();
 
-    // Collapse it.
     const newestTrigger = screen.getByRole("button", {
       name: /Photosynthesis/,
       expanded: true,
@@ -178,7 +170,6 @@ describe("FlashcardsPanel multiple sets", () => {
     const card = collapsedTrigger.closest("div");
     if (!card) throw new Error("expected the disclosure card container");
     expect(within(card).getByText("1 / 1")).toBeInTheDocument();
-    // The other (still expanded) set kept its own position.
     expect(screen.getByText("2 / 3")).toBeInTheDocument();
   });
 });

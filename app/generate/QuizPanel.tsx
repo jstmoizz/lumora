@@ -18,14 +18,10 @@ interface QuizPanelProps {
   quizzes: CreateQuizOutput[];
 }
 
-// The Quizzes half of Practice — the *only* place the interactive quiz
-// (navigation, answers, scoring) renders. The in-chat tool-call UI only
-// shows a non-interactive status (see PracticeToolPart.tsx), so the quiz
-// itself is never duplicated.
-//
-// Every generated quiz gets its own row, each its own Disclosure — only
-// the most recent starts expanded, everything older starts collapsed but
-// stays reachable. See useAutoCollapseList.ts (shared with FlashcardsPanel).
+// The only place the interactive quiz (navigation, answers, scoring)
+// renders — the in-chat tool-call UI only shows a non-interactive status
+// (see PracticeToolPart.tsx). Each quiz gets its own Disclosure row; only
+// the most recent starts expanded (see useAutoCollapseList.ts).
 export default function QuizPanel({ quizzes }: QuizPanelProps) {
   const { isOpen, setOpen } = useAutoCollapseList(quizzes[0]?.quizId);
 
@@ -64,10 +60,8 @@ export default function QuizPanel({ quizzes }: QuizPanelProps) {
 }
 
 // Live generation can't produce a zero-question quiz (the schema requires
-// at least one), but one resumed from a persisted conversation loads
-// straight from the database with no re-validation, so this has to be
-// handled defensively. Same visual language as PracticeToolPart's
-// ActivityErrorCard, scaled for a Disclosure row.
+// at least one), but a persisted quiz loads straight from the database
+// with no re-validation, so this has to be handled defensively.
 function EmptyQuizFallback() {
   return (
     <div
@@ -91,10 +85,8 @@ function EmptyQuizFallback() {
 
 function ActiveQuiz({ quiz }: { quiz: CreateQuizOutput }) {
   const [index, setIndex] = useState(0);
-  // Which option the student picked per question, keyed by question id.
-  // Local-only: no persistence, no backend scoring — answering just
-  // reveals correct/incorrect for that question and locks it in. Same
-  // mechanic as the quiz's original in-chat rendering, just paginated.
+  // Selected option per question, keyed by question id. Local-only — no
+  // persistence, no backend scoring.
   const [selections, setSelections] = useState<Record<string, number>>({});
   const [finished, setFinished] = useState(false);
 

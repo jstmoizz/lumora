@@ -6,18 +6,15 @@ import { useIsDarkTheme } from "../useIsDarkTheme";
 import "./WarpText.css";
 
 // A faithful port of React Bits' WarpText component
-// (https://reactbits.dev/text-animations/warp-text). Shader (an fbm-driven
-// ambient warp plus a pointer-steered lens/ripple, sampled from a
-// canvas-rasterized text texture with an RGB channel split for refraction)
-// reproduced as-is — DPR cap, visibility-gated rAF loop, reduced-motion, and
-// WebGL cleanup all came with it. Two additions on top of upstream:
+// (https://reactbits.dev/text-animations/warp-text), shader and all —
+// DPR cap, visibility-gated rAF loop, reduced-motion, and WebGL cleanup
+// came with it. Two additions on top of upstream:
 //
 // - `color` defaults to a theme-aware value via useIsDarkTheme() instead of
 //   upstream's hardcoded near-white, which would be unreadable in light mode.
 // - `text` also accepts an array of runs (`WarpTextRun[]`), each with its
 //   own optional `fontFamily`/`fontWeight`, so a phrase can mix fonts (Home
-//   uses this for "Lumora" in the brand's wordmark font). A plain string
-//   still behaves exactly as before.
+//   uses this for "Lumora" in the brand's wordmark font).
 export interface WarpTextRun {
   text: string;
   fontFamily?: string;
@@ -184,10 +181,9 @@ void main() {
 
 const getFontValue = (value: string | number): string => (typeof value === "number" ? `${value}px` : value);
 
-// A single rasterized character, tagged with the (already CSS-resolved —
-// see resolveRuns below) font it should draw in. `fontSizePx` is passed in
-// separately at measure/draw time rather than baked in here, since it can
-// still shrink by the fit-to-box factor computed further down.
+// A single rasterized character, tagged with its resolved font (see
+// resolveRuns below). `fontSizePx` isn't baked in here since it can still
+// shrink by the fit-to-box factor computed further down.
 interface ResolvedChar {
   char: string;
   fontFamily: string;
@@ -223,10 +219,9 @@ const drawLine = (
 };
 
 // Resolves every distinct (fontFamily, fontWeight) pair used across the
-// runs via the same hidden-probe technique upstream used for its one font,
-// just once per distinct pair. `fontSize`/`letterSpacing`/`lineHeight` come
-// from the first run's probe only — they're explicit rem/vw props, not
-// font-metric-dependent, so they're the same regardless of font.
+// runs via the same hidden-probe technique upstream used for its one font.
+// `fontSize`/`letterSpacing`/`lineHeight` come from the first run's probe
+// only — they're explicit rem/vw props, so they don't vary by font.
 function resolveRuns(
   container: HTMLElement,
   runs: WarpTextRun[],
@@ -431,10 +426,8 @@ const WarpText = ({
 
     let renderer: Renderer;
     let gl: OGLRenderingContext;
-    // program/geometry/mesh/texture are declared at their first assignment
-    // further down (each is only ever assigned once) — upstream forward-
-    // declared them here too, but this project's stricter `prefer-const`
-    // rule (not part of upstream's own lint config) flags that.
+    // program/geometry/mesh/texture aren't forward-declared here (unlike
+    // upstream) — this project's stricter `prefer-const` lint rule flags that.
     let resizeObserver: ResizeObserver | null = null;
     let intersectionObserver: IntersectionObserver | null = null;
     let raf = 0;

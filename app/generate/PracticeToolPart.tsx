@@ -30,9 +30,8 @@ function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-// One-time entrance for whichever state renders — shared by QuizToolPart
-// and FlashcardsToolPart below, since both are the same "tool call status
-// in the conversation" concept for two different Practice activities.
+// One-time entrance animation, shared by QuizToolPart and FlashcardsToolPart
+// below — both are the same "tool call status" concept for two activities.
 function ToolPartWrapper({ children }: { children: ReactNode }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -127,10 +126,9 @@ function ActivityErrorCard({
   );
 }
 
-// Deliberately non-interactive, not a copy of the activity's own content —
-// QuizPanel.tsx/FlashcardsPanel.tsx are the only place either is actually
-// interactive. This exists only so the conversation has a compact record
-// that something was generated, never the full payload as chat text.
+// Deliberately non-interactive — QuizPanel.tsx/FlashcardsPanel.tsx are the
+// only place the activity itself is interactive. This is just a record
+// that something was generated, not the content.
 function ActivityReadyNotice({
   title,
   detail,
@@ -151,12 +149,10 @@ function ActivityReadyNotice({
   );
 }
 
-// Renders the `createQuiz` tool call's part across all four lifecycle
-// states it can be in. Keyed by `part.toolCallId` at the call site (see
-// ChatInterface.tsx), so this stays mounted (not remounted) as the same
-// call progresses input-streaming -> input-available ->
-// output-available/output-error — that's what makes the one-time entrance
-// animation fire only once.
+// Keyed by `part.toolCallId` at the call site (ChatInterface.tsx), so this
+// stays mounted across input-streaming -> input-available ->
+// output-available/output-error — that's what makes the entrance animation
+// fire only once per call.
 export function QuizToolPart({ part }: { part: CreateQuizUIPart }) {
   return (
     <ToolPartWrapper>
@@ -198,8 +194,7 @@ export function QuizToolPart({ part }: { part: CreateQuizUIPart }) {
   );
 }
 
-// The `createFlashcards` counterpart to QuizToolPart above — same four
-// states, same "notice only, never the content itself" rule; see
+// The createFlashcards counterpart to QuizToolPart above; see
 // FlashcardsPanel.tsx for where the actual cards render.
 export function FlashcardsToolPart({ part }: { part: CreateFlashcardsUIPart }) {
   return (

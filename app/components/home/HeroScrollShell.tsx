@@ -19,23 +19,21 @@ interface HeroScrollShellProps {
 // user scrolls past it, smoothly settles into a smaller, contained, rounded
 // card (~68svh) rather than just scrolling away like an ordinary section.
 //
-// Technique: `spacerRef` reserves extra scroll distance (100svh of initial
-// viewing room + SHRINK_TRAVEL of "settle" room). The visible box is
-// `position: sticky; top: 0` inside that spacer, pinned to the viewport for
-// that scroll distance while its height/margin/radius animate, then normal
-// flow resumes where the Feature cards section begins.
+// `spacerRef` reserves extra scroll distance (100svh + SHRINK_TRAVEL). The
+// visible box is `position: sticky; top: 0` inside that spacer, pinned to
+// the viewport while its height/margin/radius animate, then normal flow
+// resumes at the Feature cards section.
 //
-// `useScroll`'s `scrollYProgress` is a MotionValue, not React state, so this
-// runs without re-rendering on every scroll tick.
+// `scrollYProgress` is a MotionValue, not React state, so this runs without
+// re-rendering on every scroll tick.
 export default function HeroScrollShell({ children }: HeroScrollShellProps) {
   const reducedMotion = useReducedMotion();
   const spacerRef = useRef<HTMLDivElement>(null);
 
-  // Rules of Hooks means this runs even on the reduced-motion early return
-  // below, which never renders the spacer div `spacerRef` points at — an
-  // unconditional `target: spacerRef` would leave the ref permanently
-  // un-hydrated, which motion/react treats as an error. Only wire up the
-  // target when the branch that renders it will actually run.
+  // This hook runs even on the reduced-motion early return below, which
+  // never renders the spacer div — an unconditional `target: spacerRef`
+  // would leave the ref permanently un-hydrated, which motion/react treats
+  // as an error.
   const { scrollYProgress } = useScroll(
     reducedMotion ? undefined : { target: spacerRef, offset: ["start start", "end start"] },
   );
@@ -43,13 +41,12 @@ export default function HeroScrollShell({ children }: HeroScrollShellProps) {
   const height = useTransform(scrollYProgress, [0, 1], ["100svh", SETTLED_HEIGHT]);
   const marginInline = useTransform(scrollYProgress, [0, 1], ["0px", SETTLED_MARGIN_INLINE]);
   const borderRadius = useTransform(scrollYProgress, [0, 1], [0, SETTLED_RADIUS]);
-  // Subtle, per the brief — not a dramatic zoom, just enough to read as
-  // the content "settling" along with its container.
+  // Subtle — not a dramatic zoom, just enough to read as the content
+  // settling along with its container.
   const scale = useTransform(scrollYProgress, [0, 1], [1, 0.97]);
 
-  // Reduced motion: skip the scroll-linked journey and render the settled,
-  // contained state directly — no "static fullscreen" middle ground for a
-  // continuously scroll-tied effect like this.
+  // No "static fullscreen" middle ground for a continuously scroll-tied
+  // effect — reduced motion renders the settled, contained state directly.
   if (reducedMotion) {
     return (
       <div

@@ -17,11 +17,9 @@ interface FlashcardsPanelProps {
   flashcardSets: CreateFlashcardsOutput[];
 }
 
-// The Flashcards half of Practice (see PracticePanel.tsx) — mirrors
-// QuizPanel.tsx's structure exactly (empty state, one Disclosure per
-// generated set, useAutoCollapseList for the same "newest opens, only the
-// previously-auto-opened one collapses" behavior) since it's solving the
-// identical problem for a second activity type, not a different one.
+// Mirrors QuizPanel.tsx's structure exactly (empty state, one Disclosure
+// per set, same useAutoCollapseList behavior) — same problem, different
+// activity type.
 export default function FlashcardsPanel({ flashcardSets }: FlashcardsPanelProps) {
   const { isOpen, setOpen } = useAutoCollapseList(
     flashcardSets[0]?.flashcardSetId,
@@ -63,13 +61,10 @@ export default function FlashcardsPanel({ flashcardSets }: FlashcardsPanelProps)
   );
 }
 
-// Live generation can't produce a set with zero cards —
-// createFlashcardsInputSchema requires at least one — but a set resumed
-// from a persisted conversation is loaded straight from the database with
-// no re-validation against that schema, so this shape has to be handled
-// defensively rather than assumed impossible. Mirrors QuizPanel's own
-// EmptyQuizFallback (same visual language as PracticeToolPart's
-// ActivityErrorCard), for the equivalent zero-item case here.
+// Live generation can't produce a set with zero cards (the schema requires
+// at least one), but a persisted set loads straight from the database with
+// no re-validation, so this has to be handled defensively. Mirrors
+// QuizPanel's EmptyQuizFallback.
 function EmptyFlashcardsFallback() {
   return (
     <div
@@ -92,18 +87,16 @@ function EmptyFlashcardsFallback() {
 }
 
 function ActiveFlashcardSet({ set }: { set: CreateFlashcardsOutput }) {
-  // Position + flip side, kept here (not in Flashcard itself) so they
-  // survive this set's own Disclosure being collapsed and reopened —
-  // Disclosure keeps its content mounted (hidden, not removed) specifically
-  // so state like this isn't lost the moment a card closes.
+  // Kept here, not in Flashcard itself, so it survives the set's own
+  // Disclosure being collapsed and reopened — Disclosure keeps its content
+  // mounted rather than unmounting it.
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
 
   const total = set.cards.length;
 
-  // Guards every access below `set.cards[index]` at once — with zero cards
-  // there is no valid index at all (0 is already out of bounds), so
-  // nothing past this point may run.
+  // Guards every access to set.cards[index] below — with zero cards, 0 is
+  // already out of bounds.
   if (total === 0) {
     return <EmptyFlashcardsFallback />;
   }
@@ -124,10 +117,8 @@ function ActiveFlashcardSet({ set }: { set: CreateFlashcardsOutput }) {
     setFlipped(false);
   }
 
-  // Arrow-key navigation alongside the card's own Enter/Space-to-flip —
-  // bubbles up from whichever control inside currently has focus (the
-  // card itself, or either nav button), so it works regardless of exactly
-  // where focus landed.
+  // Bubbles up from whichever control has focus (the card or either nav
+  // button), alongside the card's own Enter/Space-to-flip.
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "ArrowRight") {
       event.preventDefault();

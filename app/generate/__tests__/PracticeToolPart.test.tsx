@@ -35,10 +35,8 @@ describe("QuizToolPart lifecycle states", () => {
     expect(screen.getByText(/1 question/)).toBeInTheDocument();
     expect(screen.getByText(/Open Resources to take it/)).toBeInTheDocument();
 
-    // ...but never the question/options themselves — those render
-    // exclusively in Resources' Quizzes tab (see QuizPanel.test.tsx). This
-    // is the architecture requirement this component exists for: the quiz
-    // content has exactly one rendering location, and it isn't the chat.
+    // The quiz content itself renders exclusively in Resources' Quizzes tab
+    // (see QuizPanel.test.tsx), never in the chat.
     expect(
       screen.queryByText("What pigment captures light in photosynthesis?", {
         exact: false,

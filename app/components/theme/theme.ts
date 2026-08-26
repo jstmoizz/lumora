@@ -1,17 +1,13 @@
 /**
- * Shared theme logic for Light/Dark/System support. Hand-rolled rather
- * than a library (next-themes etc.) — the mechanism is small (one
- * localStorage key, one class, one media query listener) and this keeps
- * it dependency-free.
+ * Shared theme logic for Light/Dark/System support. Hand-rolled instead of
+ * a library since the mechanism is small (one localStorage key, one class,
+ * one media query listener).
  *
- * Source of truth split:
- * - localStorage (`THEME_STORAGE_KEY`) drives instant, no-reload
- *   application — read synchronously by ThemeScript before first paint,
- *   so returning visitors never see a flash of the wrong theme.
- * - `user_settings.theme` (Supabase) is the durable, cross-device record —
- *   written via `updateUserSetting("theme", ...)` alongside every local
- *   change, and reconciled into localStorage once when Settings loads, so
- *   a new device converges after one visit.
+ * localStorage drives instant, no-reload application (read synchronously by
+ * ThemeScript before first paint, so returning visitors never see a flash
+ * of the wrong theme). `user_settings.theme` (Supabase) is the durable,
+ * cross-device record, reconciled into localStorage once when Settings
+ * loads.
  */
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -50,11 +46,9 @@ export function getStoredThemePreference(): ThemePreference {
 }
 
 // Distinguishes "nothing has ever been stored" from "system" as a stored
-// value — getStoredThemePreference() collapses both, which isn't enough to
-// tell a fresh browser apart from one where the user explicitly picked
-// System. AppearanceRow's cross-device reconciliation needs exactly that:
-// only pull the database's value in on a browser with no local choice at
-// all, never as a general "database wins" rule.
+// value — getStoredThemePreference() collapses both. AppearanceRow's
+// cross-device reconciliation needs that distinction: only pull the
+// database's value in on a browser with no local choice at all.
 export function hasStoredThemePreference(): boolean {
   if (typeof window === "undefined") return false;
   try {

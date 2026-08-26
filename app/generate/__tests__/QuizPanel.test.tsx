@@ -14,16 +14,9 @@ describe("QuizPanel empty state", () => {
   });
 });
 
-// A single quiz is rendered as one Disclosure card, expanded by default
-// (index 0 in the list) — these interaction tests exercise its content
-// directly, the same way they did before quizzes were wrapped in a
-// collapsible card.
-// Regression coverage for a quiz resumed from a persisted conversation
-// whose `questions` array is empty — unreachable from live generation (the
-// tool's own Zod schema requires at least one), but persisted data is
-// loaded straight from the database with no re-validation against that
-// schema. ActiveQuiz used to index straight into `quiz.questions[0]` and
-// crash the whole /generate route; it must now render a fallback instead.
+// Regression coverage: a persisted quiz can have zero questions (live
+// generation's schema forbids it, but persisted data isn't re-validated) —
+// indexing straight into questions[0] used to crash the whole /generate route.
 describe("QuizPanel — persisted quiz with zero questions", () => {
   test("renders an accessible fallback instead of crashing, with no question UI", () => {
     render(<QuizPanel quizzes={[emptyQuiz()]} />);
@@ -32,8 +25,6 @@ describe("QuizPanel — persisted quiz with zero questions", () => {
     expect(alert).toHaveTextContent("This quiz couldn't be loaded.");
     expect(alert).toHaveTextContent("Try generating the quiz again.");
 
-    // None of the normal question-taking UI exists — there is no question
-    // to page through, answer, or finish.
     expect(screen.queryByRole("button", { name: /previous question/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /next question/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /finish quiz/i })).not.toBeInTheDocument();
@@ -41,19 +32,15 @@ describe("QuizPanel — persisted quiz with zero questions", () => {
   });
 
   test("the Disclosure still labels it correctly, and a normal quiz alongside it is unaffected", () => {
-    // The newest quiz (index 0 — see useAutoCollapseList) starts expanded;
-    // putting the healthy one there means the broken one starts collapsed,
-    // exercising the fallback via the "expand it" path rather than only on
-    // first paint.
+    // Putting the healthy quiz first (it starts expanded) means the broken
+    // one starts collapsed, exercising the fallback via "expand it" rather
+    // than only on first paint.
     render(<QuizPanel quizzes={[singleQuestionQuiz(), emptyQuiz()]} />);
 
-    // The broken quiz's own header still shows its topic/question count —
-    // only its *content* is replaced by the fallback.
+    // The broken quiz's header still shows its topic/question count — only
+    // its content is replaced by the fallback.
     expect(screen.getByText("0 questions")).toBeInTheDocument();
 
-    // Expand the broken quiz's row (it isn't the newest, so it starts
-    // collapsed) and confirm the fallback renders there without disturbing
-    // the other, healthy quiz.
     const collapsedTrigger = screen.getByRole("button", {
       name: /Photosynthesis/,
       expanded: false,
@@ -61,7 +48,6 @@ describe("QuizPanel — persisted quiz with zero questions", () => {
     fireEvent.click(collapsedTrigger);
     expect(screen.getByRole("alert")).toHaveTextContent("This quiz couldn't be loaded.");
 
-    // The healthy quiz (the newest, already expanded) still works normally.
     expect(screen.getByRole("button", { name: "Chlorophyll" })).toBeInTheDocument();
   });
 });
@@ -168,9 +154,6 @@ describe("QuizPanel completion state", () => {
   });
 });
 
-// The actual behavior this phase's brief asked for: generating another
-// quiz must not destroy/replace previous ones, each gets its own
-// independently collapsible card, and only the newest starts expanded.
 describe("QuizPanel multiple quizzes", () => {
   test("every quiz gets its own row, labeled by topic and question count", () => {
     render(
@@ -193,13 +176,11 @@ describe("QuizPanel multiple quizzes", () => {
       />,
     );
 
-    // The newest quiz's own answer options are already visible and operable...
     expect(screen.getByRole("button", { name: "Chlorophyll" })).toBeVisible();
 
-    // ...but the older quiz stays collapsed. Its content still exists in
-    // the DOM (Disclosure keeps it mounted so its own state survives —
-    // see the "answer selections survive" test below), it's just not
-    // visible until expanded.
+    // The older quiz stays collapsed, but Disclosure keeps its content
+    // mounted (not removed) so its state survives — see the "answer
+    // selections survive" test below.
     const collapsedTrigger = screen.getByRole("button", {
       name: /Photosynthesis/,
       expanded: false,
@@ -234,11 +215,9 @@ describe("QuizPanel multiple quizzes", () => {
       />,
     );
 
-    // Answer the (already-expanded) newest quiz's first question.
     fireEvent.click(screen.getByRole("button", { name: "Chlorophyll" }));
     expect(screen.getByText("Correct!")).toBeInTheDocument();
 
-    // Expand the older, collapsed quiz via its own disclosure trigger.
     const collapsedTrigger = screen.getByRole("button", {
       name: /Photosynthesis/,
       expanded: false,
@@ -246,9 +225,8 @@ describe("QuizPanel multiple quizzes", () => {
     fireEvent.click(collapsedTrigger);
 
     expect(collapsedTrigger).toHaveAttribute("aria-expanded", "true");
-    // Its own (unanswered) question is now visible, scoped to its own
-    // card since both quizzes' first questions share the same options —
-    // and the newer quiz's answered state is untouched.
+    // Scoped to its own card, since both quizzes' first questions share the
+    // same answer options.
     const card = collapsedTrigger.closest("div");
     if (!card) throw new Error("expected the disclosure card container");
     const singleQuizOption = within(card).getByRole("button", {
