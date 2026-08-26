@@ -82,6 +82,11 @@ export default function CameraRig({
   const scratchDir = useRef(new Vector3());
   const scratchRight = useRef(new Vector3());
   const selectedPositionRef = useRef<[number, number, number] | undefined>(undefined);
+  // The last `selectedNodeId` this effect actually reacted to — distinct
+  // from reading `selectedNodeId` directly in the dependency array, since
+  // that alone can't tell "the selection changed" apart from "the same
+  // selected node's own position changed" once both are effect deps.
+  const lastSelectedNodeId = useRef<string | null>(null);
 
   // True only while actively flying the camera to a target; false the rest
   // of the time so OrbitControls' drag/zoom fully owns the camera and
@@ -90,10 +95,26 @@ export default function CameraRig({
   const isAnimating = useRef(false);
 
   useEffect(() => {
-    selectedPositionRef.current = selectedNodeId
-      ? focusPositions[selectedNodeId]
-      : undefined;
-    isAnimating.current = true;
+    // Always kept fresh — including while nothing is animating — so that
+    // *if* a fly-to does start later (a genuine selection change), it flies
+    // to wherever the selected node actually is right now, not a stale
+    // pre-drag position.
+    selectedPositionRef.current = selectedNodeId ? focusPositions[selectedNodeId] : undefined;
+
+    // Only re-arms the fly-to when the *selected node itself* changes —
+    // deliberately not a dependency on `focusPositions`' own value: that
+    // record gets a new reference on every layout change, including every
+    // single node drag (see Scene.tsx), and dragging any node — selected or
+    // not — must never restart the camera's fly-to animation (that's what
+    // reads as "the camera reset"). A drag committing does update
+    // `selectedPositionRef.current` above, just without touching
+    // `isAnimating` — so the camera doesn't chase a dragged, currently-
+    // selected node around, but the *next* real selection change still
+    // flies to its up-to-date position.
+    if (selectedNodeId !== lastSelectedNodeId.current) {
+      lastSelectedNodeId.current = selectedNodeId;
+      isAnimating.current = true;
+    }
   }, [selectedNodeId, focusPositions]);
 
   // Recomputed whenever the graph's extent changes (a topic studied or

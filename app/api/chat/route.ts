@@ -6,7 +6,13 @@ import {
   stepCountIs,
   streamText,
 } from "ai";
-import { GENERATION_CONFIG, SYSTEM_PROMPT, resolveModel, visionModel } from "@/lib/ai/config";
+import {
+  GENERATION_CONFIG,
+  SYSTEM_PROMPT,
+  isE2eMockAiEnabled,
+  resolveModel,
+  visionModel,
+} from "@/lib/ai/config";
 import { classifyAIError } from "@/lib/ai/errors";
 import { extractImageContent, type ImageExtraction } from "@/lib/ai/extraction";
 import {
@@ -163,7 +169,11 @@ export async function POST(req: Request) {
   // Fail fast with an actionable message instead of letting the request
   // reach Anthropic and fail deep inside streamText, where the client only
   // ever sees the AI SDK's generic "An error occurred." stream error.
-  if (!process.env.GROQ_API_KEY) {
+  // Skipped only when the E2E suite has deliberately swapped in a mock
+  // model (see lib/ai/mockModel.ts) — that path never touches Groq, so
+  // there's genuinely nothing to configure. A normal request still requires
+  // a real key exactly as before.
+  if (!process.env.GROQ_API_KEY && !isE2eMockAiEnabled()) {
     console.error(
       "[api/chat] GROQ_API_KEY is not set. Add it to .env.local at the project root.",
     );

@@ -86,12 +86,17 @@ export default function Scene({ nodes, selectedNodeId, onSelect }: SceneProps) {
     [baseLayout, manualPositions],
   );
 
-  // How far back the camera needs to sit to fit the graph's actual extent —
-  // recomputed as the graph grows or shrinks, not just once at mount.
-  const overviewPosition = useMemo(
-    () => computeOverviewPosition(maxLayoutRadius(layout)),
-    [layout],
-  );
+  // Split into its own memo (a plain number, not `layout` itself) so that
+  // a node drag which doesn't actually change the graph's overall extent —
+  // the common case — leaves `maxRadius` numerically unchanged, and
+  // therefore leaves `overviewPosition` below pointing at the exact same
+  // array *reference* it had before. CameraRig's own effect keys off that
+  // reference (see its own comment), so this is what stops an ordinary drag
+  // from re-arming — and visibly resetting — the camera's fly-to animation.
+  // Recomputed as the graph genuinely grows or shrinks (a topic studied or
+  // deleted elsewhere), not just on mount.
+  const maxRadius = useMemo(() => maxLayoutRadius(layout), [layout]);
+  const overviewPosition = useMemo(() => computeOverviewPosition(maxRadius), [maxRadius]);
 
   // Every node's absolute position, for CameraRig to focus on.
   const focusPositions = useMemo(() => {

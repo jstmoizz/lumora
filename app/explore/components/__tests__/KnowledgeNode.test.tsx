@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { Vector3 } from "three";
 import KnowledgeNode from "../KnowledgeNode";
 import type { KnowledgeGraphNode } from "../../data";
 
@@ -56,6 +57,7 @@ function renderNode(onSelect = vi.fn()) {
       isDimmed={false}
       onSelect={onSelect}
       onDragEnd={vi.fn()}
+      livePositions={{ current: new Map<string, Vector3>() }}
     />,
   );
   return onSelect;

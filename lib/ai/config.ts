@@ -7,6 +7,7 @@
  */
 
 import { groq } from "@ai-sdk/groq";
+import { createE2eMockLanguageModel, isE2eMockAiEnabled } from "./mockModel";
 import type { ChatMode } from "./model";
 
 // Raw provider model IDs live only here, in this server-only module — never
@@ -33,17 +34,35 @@ const VISION_MODEL_ID = "qwen/qwen3.6-27b";
 export const textModel = groq(TEXT_MODEL_ID);
 export const visionModel = groq(VISION_MODEL_ID);
 
+// Re-exported so route.ts (and anything else already importing from this
+// module) doesn't need a second import line just to check this flag.
+export { isE2eMockAiEnabled };
+
 /**
- * Picks which model a turn uses. `mode` is the user's explicit choice
- * (Auto/Fast/Vision); `hasImage` is whether the message actually being sent
- * this turn carries an image. Fast never routes to the vision model — a
- * fast+image request is rejected earlier in the route (see
- * app/api/chat/route.ts) and never reaches this function with hasImage set.
+ * The real routing decision — unchanged from before `LUMORA_E2E_MOCK_AI`
+ * existed. `mode` is the user's explicit choice (Auto/Fast/Vision);
+ * `hasImage` is whether the message actually being sent this turn carries
+ * an image. Fast never routes to the vision model — a fast+image request is
+ * rejected earlier in the route (see app/api/chat/route.ts) and never
+ * reaches this function with hasImage set.
  */
-export function resolveModel(mode: ChatMode, hasImage: boolean) {
+function resolveRealModel(mode: ChatMode, hasImage: boolean) {
   if (mode === "vision") return visionModel;
   if (mode === "fast") return textModel;
   return hasImage ? visionModel : textModel; // auto
+}
+
+/**
+ * Picks which model a turn uses. Delegates entirely to `resolveRealModel`
+ * above for *which* model would normally be used — the only thing added
+ * here is a single, deliberate swap for the E2E suite running in CI (see
+ * lib/ai/mockModel.ts's own comment): the routing decision itself, and the
+ * real Groq models it can choose between, are completely untouched.
+ */
+export function resolveModel(mode: ChatMode, hasImage: boolean) {
+  const model = resolveRealModel(mode, hasImage);
+  if (!isE2eMockAiEnabled()) return model;
+  return createE2eMockLanguageModel(model.modelId);
 }
 
 /**

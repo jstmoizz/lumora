@@ -1,3 +1,4 @@
+import { hashToUnit } from "./deterministicHash";
 import type { KnowledgeGraphNode } from "./data";
 
 export interface LayoutEntry {
@@ -38,24 +39,6 @@ const MIN_SEPARATION = 0.85;
 // randomness, just walks the same already-chosen direction further out.
 const COLLISION_STEP = 0.35;
 const MAX_COLLISION_ATTEMPTS = 6;
-
-/** Deterministic, seeded [0,1) value from a string — no runtime randomness
- * involved, so the exact same graph always produces the exact same layout.
- * Matters for hydration (server/client must agree), tests, and not having
- * nodes visibly jump around on every reload. Not cryptographic, only stable
- * and reasonably well-distributed (an FNV-1a-style fold, then an
- * irrational-multiplier scramble so adjacent seeds don't land suspiciously
- * close). */
-function hashToUnit(seed: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < seed.length; i++) {
-    hash ^= seed.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  const normalized = (hash >>> 0) / 4294967296;
-  const scrambled = normalized * 9973.1931;
-  return scrambled - Math.floor(scrambled);
-}
 
 /** Van der Corput low-discrepancy sequence. Unlike an even division
  * (i / total), every prefix of this sequence is already well-spread across
