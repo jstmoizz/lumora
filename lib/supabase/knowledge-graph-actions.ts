@@ -51,6 +51,11 @@ export async function saveKnowledgeNodePosition(
   if (!user) return { ok: false };
 
   const [positionX, positionY, positionZ] = position;
+  if (![positionX, positionY, positionZ].every(Number.isFinite)) {
+    console.error("[knowledge-graph] rejected non-finite node position:", position);
+    return { ok: false };
+  }
+
   const supabase = await createClient();
   const { error } = await supabase.from("knowledge_node_positions").upsert(
     {

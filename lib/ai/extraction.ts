@@ -11,11 +11,14 @@ import { visionModel } from "./config";
 
 // `title` is nullable rather than `.optional()` so the model always reports
 // one or the other explicitly, with no missing-key special-casing downstream.
+// Bounds mirror the application tool schemas in lib/ai/tools.ts (which cap
+// every field a model can fill in) so a pathological wall of text can't
+// balloon this path's output/token usage the way an unbounded schema could.
 export const imageExtractionSchema = z.object({
-  title: z.string().nullable(),
-  summary: z.string(),
-  extractedContent: z.string(),
-  keyConcepts: z.array(z.string()),
+  title: z.string().max(200).nullable(),
+  summary: z.string().max(1000),
+  extractedContent: z.string().max(4000),
+  keyConcepts: z.array(z.string().max(100)).max(20),
 });
 
 export type ImageExtraction = z.infer<typeof imageExtractionSchema>;
@@ -82,6 +85,9 @@ export async function extractImageContent({
     messages: modelMessages,
     tools: { recordExtraction: recordExtractionTool },
     toolChoice: { type: "tool", toolName: "recordExtraction" },
+    // Keeps a runaway response from the vision model bounded, consistent
+    // with GENERATION_CONFIG.maxOutputTokens on the normal chat path.
+    maxOutputTokens: 2048,
   });
 
   const call = toolCalls.find((toolCall) => toolCall.toolName === "recordExtraction");

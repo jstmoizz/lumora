@@ -29,6 +29,12 @@ export const CHAT_MODES: Record<ChatMode, { label: string; description: string }
 
 export const MAX_IMAGES_PER_MESSAGE = 1;
 
+// Server-side resource caps for /api/chat — bound how much a single
+// request can make the route (and the model behind it) do. Generous
+// enough that no normal conversation ever hits them.
+export const MAX_MESSAGES_PER_REQUEST = 100;
+export const MAX_MESSAGE_TEXT_LENGTH = 8000;
+
 // Vercel Functions enforce a hard, unconfigurable 4.5MB request body limit —
 // a base64-encoded image runs ~33% larger than its raw size, so this stays
 // well under that ceiling with room for the rest of the message/history.

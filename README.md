@@ -1,210 +1,293 @@
 # Lumora
 
-## 1. Overview
+Lumora is an AI-powered study companion. You chat with it to learn a topic, and it can turn that
+conversation into a quiz, a set of flashcards, or a tracked entry in your personal **Knowledge
+Space** — an interactive 3D graph that grows as you study and remembers how you like it arranged.
 
-Lumora is a Next.js study assistant application. The currently implemented feature is the **central AI chat/generation interface**: a streaming conversational assistant, available at [`/generate`](app/generate), that lets a user ask questions and receive answers from an LLM in real time.
+## Production
 
-Other product routes in the app (`/about`, `/history`, `/settings`) are placeholder pages for future work and are not part of this implementation. [`/explore`](app/explore) is a second implemented feature — an abstract 3D visualization of how study topics relate to each other; see [§10](#10-lumora-knowledge-space-explore).
+Deployed on [Vercel](https://vercel.com): **https://lumora-z1.vercel.app**
 
-Two auxiliary routes exist outside the main nav ([`NavBar.tsx`](app/components/NavBar.tsx) links only Home/Generate/History/About/Settings):
+No production smoke test was performed as part of this pass — the checks below (TypeScript, lint,
+unit tests, build, Playwright) were run against the local build only.
 
-- [`/health`](app/health/page.tsx) — a server-rendered status page that pings an external API and reports operational/unavailable.
-- [`/playground`](app/playground) — a dev-only area for coursework exercises (hand-built ARIA patterns and a state-driven animated button); see [§6](#6-playground).
+## Features
 
-## 2. Key implemented features
+- **AI chat (`/generate`)** — a streaming conversational assistant built on Groq + the Vercel AI
+  SDK. Multi-turn history, Stop-generation, and Markdown rendering that's safe mid-stream.
+- **Model routing (Auto / Fast / Vision)** — the user picks a mode; `Auto` sends text to a
+  general-purpose model and routes images to a vision model automatically, `Fast` is text-only for
+  quicker replies, and `Vision` forces the vision model. See [`lib/ai/config.ts`](lib/ai/config.ts).
+- **Tool calling** — the model can call `createQuiz`, `createFlashcards`, or `addKnowledgeTopic`
+  server-side tools, which render as real interactive UI (not JSON) in Generate's Resources panel.
+- **Image / vision extraction** — attach an image and Lumora transcribes and summarizes its
+  study-relevant content (text, diagrams, key concepts) via a dedicated vision-model call, shown as
+  a review card with "Create Quiz" / "Create Flashcards" / "Ask about this" follow-up actions.
+- **Interactive 3D Knowledge Space (`/explore`)** — every topic you study becomes a node in a 3D
+  graph, connected to related topics and nested under broader categories automatically. See
+  [§ 3D Knowledge Space](#3d-knowledge-space-explore) below.
+- **Persistent node positions** — drag a node in Explore and its position is saved per-user, so the
+  graph looks the same next time you visit it.
+- **Quizzes & flashcards** — generated from any chat conversation, stored per-user, and browsable
+  from Generate's Resources panel.
+- **Conversation history (`/history`)** — past conversations are listed and can be reopened.
+- **Settings (`/settings`)** — account info, theme (system/light/dark), and a Generate accent color.
+- **Authentication** — email/password sign-up, sign-in, sign-out, and password reset via Supabase
+  Auth; every protected route requires a signed-in user.
+- **Reduced-motion & WebGL fallback** — Explore renders a static 2D map instead of the 3D canvas
+  when `prefers-reduced-motion` is set or WebGL is unavailable, with identical topic selection.
+- **Keyboard-accessible graph** — every Explore topic is also a real, focusable HTML control (a
+  listbox on desktop, button chips on mobile), driving the same selection state as the 3D nodes.
 
-- **Streaming AI responses** — assistant replies render incrementally as tokens arrive, rather than waiting for the full response.
-- **Groq API integration through the Vercel AI SDK** — the chat route uses `streamText` from the `ai` package with the `@ai-sdk/groq` provider.
-- **`useChat`-based conversation state** — client-side conversation state (`@ai-sdk/react`) drives message history, submission, and streaming status.
-- **Thinking indicator** — a "Thinking…" state is shown from the moment a message is submitted until the first token of the assistant's reply arrives, with no visible flicker at the handoff.
-- **Stop generation** — an in-progress response can be cancelled via a Stop button.
-- **Partial response preservation** — text already streamed in before Stop is pressed remains in the conversation rather than being discarded.
-- **Multi-turn conversations** — conversation history persists and is sent back to the model on each new message, so follow-up questions have context.
-- **Tool calling / generative UI** — the assistant can call a server-side `createQuiz` tool to generate an interactive multiple-choice quiz, rendered as a real UI component (not a JSON dump) with a distinct visual state for each stage of the call — see [§5](#5-tool-calling).
-- **Streaming-safe Markdown rendering** — assistant output is rendered with [Streamdown](https://github.com/vercel/streamdown), which handles incomplete/in-progress Markdown safely while tokens are still streaming in.
-- **Auto-scroll while following the latest response** — the message list scrolls to keep the newest content in view as it streams.
-- **Scroll lock when the user scrolls upward** — auto-scroll disengages as soon as the user manually scrolls away from the bottom, so it doesn't fight manual scrolling.
-- **Jump-to-latest button** — appears once the user has scrolled away from the bottom, and returns to the latest message without stealing focus from the input.
-- **Responsive/mobile-friendly layout** — the chat UI and page shell use responsive Tailwind classes and remain usable at phone width.
-- **Server-side API key handling** — the Groq API key is read only on the server and is never sent to or accessible from the client.
-- **Route-level error boundary** — [`app/generate/error.tsx`](app/generate/error.tsx) catches rendering errors under `/generate` (e.g. from `ChatInterface`, GSAP, or Streamdown) and shows a recoverable "Try again" card instead of crashing the whole app; the root layout's nav keeps rendering above it.
+`/settings` and `/history` are fully implemented, not placeholders. `/health` is a self-check page
+that reports whether the app rendered and whether `GROQ_API_KEY` is configured — it does not
+contact any external service.
 
-## 3. Tech stack
+## Tech stack
 
 - [Next.js 16](https://nextjs.org) (App Router, Turbopack)
-- [React 19](https://react.dev)
-- [TypeScript](https://www.typescriptlang.org)
+- [React 19](https://react.dev) + [TypeScript](https://www.typescriptlang.org)
 - [Tailwind CSS 4](https://tailwindcss.com)
-- [Vercel AI SDK](https://ai-sdk.dev) (`ai`, `@ai-sdk/react`)
-- [Groq](https://groq.com) (`@ai-sdk/groq`) — the model provider used for chat generation
-- [Zod](https://zod.dev) — schema validation for the `createQuiz` tool's input
+- [Supabase](https://supabase.com) (`@supabase/ssr`, `@supabase/supabase-js`) — authentication,
+  Postgres database, and Row Level Security
+- [Groq](https://groq.com) (`@ai-sdk/groq`) — the model provider
+- [Vercel AI SDK](https://ai-sdk.dev) (`ai`, `@ai-sdk/react`) — streaming, tool calling, `useChat`
+- [Zod](https://zod.dev) — schema validation for tool inputs and AI structured output
+- [three.js](https://threejs.org) / [React Three Fiber](https://r3f.docs.pmnd.rs) /
+  [drei](https://github.com/pmndrs/drei) — the `/explore` 3D Knowledge Space
 - [Streamdown](https://github.com/vercel/streamdown) — streaming-safe Markdown rendering
-- [Radix UI](https://www.radix-ui.com) / [shadcn](https://ui.shadcn.com) — `components/ui/` (`Button`, and the generated `Dialog`/`Tabs` wrappers used for comparison in [§6](#6-playground))
-- [GSAP](https://gsap.com) (`gsap`, `@gsap/react`) — entrance/transition animations across pages (Home, About, History, Settings, the `/generate` error card, `AnimatedSendButton`), skipped when `prefers-reduced-motion` is set
-- [lucide-react](https://lucide.dev) — icon set used throughout the UI
-- [three.js](https://threejs.org) / [React Three Fiber](https://r3f.docs.pmnd.rs) (`three`, `@react-three/fiber`) / [drei](https://github.com/pmndrs/drei) (`@react-three/drei`) — the `/explore` 3D knowledge space (see [§10](#10-lumora-knowledge-space-explore)); not used anywhere else in the app
+- [Radix UI](https://www.radix-ui.com) / [shadcn](https://ui.shadcn.com) — accessible UI primitives
+- [GSAP](https://gsap.com) — entrance/transition animations, skipped under reduced motion
+- [Vitest](https://vitest.dev) + [Testing Library](https://testing-library.com) — unit/component tests
+- [Playwright](https://playwright.dev) — end-to-end tests
+- [Vercel](https://vercel.com) — hosting/deployment
 
-## 4. Architecture
+## Local setup
+
+1. **Clone and install**
+
+   ```bash
+   git clone https://github.com/jstmoizz/lumora.git
+   cd lumora
+   npm install
+   ```
+
+2. **Create a Supabase project** at [supabase.com](https://supabase.com) (free tier is fine).
+
+3. **Run the database schema** — open the Supabase SQL Editor for your new project and paste in
+   the entire contents of [`supabase/schema.sql`](supabase/schema.sql), then run it once. This
+   creates every table, enum, trigger, and RLS policy Lumora needs (`users`, `conversations`,
+   `messages`, `user_settings`, `knowledge_nodes`, `knowledge_node_positions`).
+
+4. **Configure environment variables** — copy `.env.example` to `.env.local` and fill in the
+   values described in the [Environment variables](#environment-variables) table below. The
+   Supabase URL/anon key come from Project Settings → API in the Supabase dashboard; the Groq key
+   comes from [console.groq.com](https://console.groq.com).
+
+5. **Start the dev server**
+
+   ```bash
+   npm run dev
+   ```
+
+   The app runs at **http://localhost:3000**. Sign up for an account at `/signup` to reach
+   `/generate` and `/explore`.
+
+## Environment variables
+
+| Variable | Required | Visibility | Purpose |
+|---|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Yes | Public (browser-safe) | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Public (browser-safe) | Supabase anonymous key — safe to expose; RLS is the actual access control |
+| `SUPABASE_SERVICE_ROLE_KEY` | Yes | **Server-only secret** | Bypasses RLS entirely; used only by `lib/supabase/admin.ts` |
+| `GROQ_API_KEY` | Yes | **Server-only secret** | Groq API access for chat/vision generation |
+| `ADMIN_EMAIL` | Optional | **Server-only secret** | Email of the account granted the `admin` role |
+
+`NEXT_PUBLIC_`-prefixed variables are bundled into client-side JavaScript by Next.js — that's
+expected for the Supabase URL/anon key, since Supabase's Row Level Security is the real access
+boundary, not secrecy of those two values. **`SUPABASE_SERVICE_ROLE_KEY` must never be prefixed
+with `NEXT_PUBLIC_` or imported from a client component** — doing so would ship full
+database-bypass access to every visitor's browser.
+
+## Database
+
+Supabase provides both authentication and persistence. `auth.users` (managed by Supabase Auth) is
+the identity table; `public.users` is a profile row kept in sync by a trigger. Every other table
+(`conversations`, `messages`, `user_settings`, `knowledge_nodes`, `knowledge_node_positions`) has
+Row Level Security enabled with `user_id`-scoped policies, so one user's data is unreachable by
+another at the database level — not just hidden by application logic.
+
+`knowledge_node_positions` is a separate table from `knowledge_nodes` rather than extra columns on
+it, because a position only exists once a user has actually dragged a node — most nodes use the
+automatic layout and never get a row here at all. Keeping it separate also means writing a dragged
+position never touches (or risks corrupting) the node's own study data.
+
+`supabase/schema.sql` is the single source of truth for the schema — run it once against a fresh
+project to set everything up (see [Local setup](#local-setup)).
+
+## Architecture
 
 ```
-ChatInterface → /api/chat → AI SDK → Groq
-                                   ↓
-                            streamed response
-                                   ↓
-                            Streamdown → UI
+Browser
+  ↓
+Next.js App Router (React Server + Client Components)
+  ↓
+API routes / Server Actions
+  ↓
+Supabase (auth + Postgres + RLS)   Groq (via Vercel AI SDK)
 ```
 
-- `app/generate/ChatInterface.tsx` is the client component that manages conversation state via `useChat` and renders messages, the thinking indicator, and the Stop/Send controls.
-- It sends the conversation to `app/api/chat/route.ts`, a server route handler.
-- The route handler calls `streamText` (Vercel AI SDK) using the model and settings centralized in `lib/ai/config.ts`, which configures the Groq provider.
-- The response is streamed back to the client as it's generated.
-- On the client, incoming assistant text is rendered through Streamdown, which safely renders Markdown even while it's still incomplete mid-stream.
+### Chat → Knowledge Graph flow
 
-The Groq API key is read from the server environment (`GROQ_API_KEY`) inside `lib/ai/config.ts` and is never passed to or exposed in client-side code.
-
-## 5. Tool calling
-
-Lumora's chat route registers two server-side tools with the AI SDK's `streamText`: `createQuiz` and `createFlashcards`. The model decides when to call each (e.g. when the user asks to be quizzed, or asks for flashcards) and supplies the content itself as the tool call's arguments; `execute` never makes a further model call of its own — it only validates and normalizes that content. `createFlashcards` mirrors `createQuiz`'s shape exactly (same validate-and-assign-ids `execute`, same per-item stable-id scheme) for a second activity type, so both render through the same Resources panel architecture described below rather than duplicated logic.
-
-`SYSTEM_PROMPT` (in [`lib/ai/config.ts`](lib/ai/config.ts)) explicitly instructs the model not to restate a quiz's/flashcard set's content in its own written reply after calling either tool — the activity itself only ever renders in the Resources panel (see below), never as chat text, so the model is told to give a short one-sentence acknowledgment instead.
-
-### `createQuiz`
-
-Defined in [`lib/ai/tools.ts`](lib/ai/tools.ts), registered in [`app/api/chat/route.ts`](app/api/chat/route.ts).
-
-**Input schema (Zod):**
-
-```ts
-z.object({
-  topic: z.string().min(1).max(80),
-  questions: z
-    .array(
-      z.object({
-        question: z.string().min(1).max(300),
-        options: z.array(z.string().min(1).max(120)).length(4),
-        correctIndex: z.number().int().min(0).max(3),
-      }),
-    )
-    .min(1)
-    .max(5),
-});
+```
+User message
+  → authenticated POST /api/chat
+  → model call via streamText (tool calling enabled)
+  → a tool (createQuiz / createFlashcards / addKnowledgeTopic) is called
+  → tool output persisted to the knowledge graph immediately (onStepEnd)
+  → model's short follow-up acknowledgment streams to the client
+  → full assistant message persisted once the turn ends
 ```
 
-**`execute` behavior:** trims the topic and every question/option, assigns a stable id to the quiz and to each question, and validates that no question has duplicate answer options (case-insensitive) and that `correctIndex` points at a real, non-empty option. If any of that fails, it throws a plain `Error` — the AI SDK catches it and surfaces the tool's `output-error` state to the client with a readable message, instead of the request crashing.
+The knowledge-graph write happens as soon as the tool-calling step finishes (`onStepEnd`), not
+after the whole turn completes. The AI SDK's default is a single step, which would end the turn
+immediately after a tool call with no room for the model to comment — `stopWhen: stepCountIs(2)`
+gives it one more step to acknowledge briefly, and the graph write doesn't wait around for that
+second step to also finish.
 
-**Return shape:**
+## 3D Knowledge Space (`/explore`)
 
-```ts
-{
-  quizId: string;
-  topic: string;
-  questions: {
-    id: string;
-    question: string;
-    options: string[];
-    correctIndex: number;
-  }[];
-}
-```
+An interactive 3D visualization (React Three Fiber / Three.js) of the topics you've studied and how
+they relate. Each studied topic becomes a node; quizzes, flashcards, and manually-added topics all
+feed the same graph, nested under broader categories where the model identifies one.
 
-### Client rendering — four lifecycle states, and where the activity actually lives
+- **Selection** — click a node, or use the accessible HTML topic list/chips alongside the canvas;
+  both drive the same selection state, so the graph is fully usable without a mouse.
+- **Camera** — smoothly focuses on the selected node while keeping the central "Lumora" node and
+  surrounding context in view, rather than panning them out of frame.
+- **Dragging & persisted positions** — a node can be manually repositioned; the new position is
+  saved per-user and restored on the next visit.
+- **Reduced-motion / WebGL fallback** — if `prefers-reduced-motion` is set or WebGL isn't
+  available, a static 2D map (HTML + SVG) renders instead, with identical topic selection.
+- **Mobile** — one-finger orbit and pinch-zoom, a responsive (not full-height) canvas panel, and a
+  thinned-out ambient background on coarse-pointer devices.
 
-[`app/generate/PracticeToolPart.tsx`](app/generate/PracticeToolPart.tsx) exports `QuizToolPart`/`FlashcardsToolPart`, which render their tool call's message part differently for each state the AI SDK exposes on it (`ToolUIPart`'s `state` field) — but **never** the activity's own content, by design:
+## AI architecture
 
-| State | What's shown |
-|---|---|
-| `input-streaming` | A generic skeleton card ("Lumora is preparing a quiz…" / "…flashcards…") — the arguments are still streaming in, so no partial JSON is rendered. |
-| `input-available` | A "Building your quiz/flashcards on *{topic}*…" card — the arguments are fully parsed, `execute` hasn't resolved yet. |
-| `output-available` | A compact ready notice only — e.g. "Quiz ready: {topic} · {N} questions · Open Resources to take it". The actual interactive quiz/flashcards render exclusively in Generate's Resources panel ([`app/generate/PracticePanel.tsx`](app/generate/PracticePanel.tsx) — internally still named "Practice"; only the user-facing label changed — tabbed Quizzes/Flashcards, see [`app/generate/QuizPanel.tsx`](app/generate/QuizPanel.tsx) and [`app/generate/FlashcardsPanel.tsx`](app/generate/FlashcardsPanel.tsx)), never duplicated into the chat itself. |
-| `output-error` | A designed error card (icon + the thrown error's message) — not raw JSON, not an unhandled exception. |
+- **Provider**: Groq, accessed through the Vercel AI SDK's `streamText`/`generateText`.
+- **Model routing**: `lib/ai/config.ts` resolves a text or vision model based on the selected mode
+  (Auto / Fast / Vision) and whether the message carries an image; `Fast` never routes to vision.
+- **Tool calling**: three server-side tools (`createQuiz`, `createFlashcards`,
+  `addKnowledgeTopic`), each with a Zod input schema that validates and bounds the model's output
+  before it's ever persisted or rendered (see [`lib/ai/tools.ts`](lib/ai/tools.ts)).
+- **Vision extraction**: a separate, tool-free `generateText` call
+  ([`lib/ai/extraction.ts`](lib/ai/extraction.ts)) forces a single internal "record what you saw"
+  tool call to get structured output back from the vision model, since `generateObject`'s
+  `response_format` mode fails for this model with image input on Groq.
+- **Error classification**: raw provider errors (rate limits, 5xx, etc.) are never sent to the
+  client — [`lib/ai/errors.ts`](lib/ai/errors.ts) reduces them to one of three safe codes
+  (`RATE_LIMITED`, `PROVIDER_UNAVAILABLE`, `GENERATION_FAILED`) before they cross the wire.
+- **Resource limits**: capped message-array length and per-message text length, a capped image
+  size/type, bounded output-token limits on every AI call, and bounded field lengths on every tool
+  and the vision-extraction schema — see [Security / production hygiene](#security--production-hygiene).
 
-The chat route also sets `stopWhen: stepCountIs(2)`, so the model gets a turn to comment after calling a tool instead of the AI SDK's single-step default ending the turn immediately after the tool call — `SYSTEM_PROMPT` keeps that comment short rather than a restatement (see above).
+## Security / production hygiene
 
-Every quiz/flashcard set generated in a session gets its own collapsible card in Resources (via the shared [`app/generate/Disclosure.tsx`](app/generate/Disclosure.tsx) and [`app/generate/useAutoCollapseList.ts`](app/generate/useAutoCollapseList.ts)) rather than replacing the last one — the newest opens automatically, the previously-auto-opened one collapses, and anything the user opened by hand is left alone. Disclosure keeps collapsed content mounted (hidden via the `hidden` attribute, not unmounted) specifically so a quiz's in-progress answers or a flashcard set's current card/flip side survive being collapsed and reopened; Resources' own Quizzes/Flashcards tabs use the same mount-and-hide approach (Radix `Tabs` with `forceMount`) so switching tabs preserves state too.
+- **Authentication**: Supabase Auth; `requireUser()` resolves identity from the server-side session
+  only — never from anything the client sends — and rejects unauthenticated requests with 401.
+- **Row Level Security**: every user-owned table is RLS-scoped by `user_id`, enforced by Postgres.
+- **Server-only secrets**: `SUPABASE_SERVICE_ROLE_KEY` and `GROQ_API_KEY` are read only in
+  server-side modules, never imported by client components.
+- **Input caps on `/api/chat`**: the request is rejected with `400` before any DB or AI work if the
+  `messages` array exceeds 100 entries or any single message's text exceeds 8,000 characters
+  (`lib/ai/model.ts`). Image attachments are separately capped at one per message, 3 MB, and
+  JPEG/PNG/WebP only.
+- **Per-user rate limiting**: `/api/chat` allows 20 requests per user per rolling 60-second window
+  (`lib/api/rate-limit.ts`), checked after authentication so unauthenticated traffic is still
+  stopped by the 401 boundary first. Exceeding it returns `429` with a `Retry-After` header. The
+  limiter is an in-memory `Map` keyed by user id, with stale entries swept out periodically so it
+  can't grow unbounded.
 
-### Generate workspace — Recent Chats and conversation persistence
+  **This limiter is intentionally lightweight and process-local; it protects the single capstone
+  deployment from trivial abuse but is not intended to replace distributed rate limiting at larger
+  scale.** A multi-instance deployment would need a shared store (e.g. Redis/Upstash) for the limit
+  to hold across instances — out of scope for this project.
+- **Streaming timeout**: `/api/chat` sets `export const maxDuration = 60`, giving a streamed
+  response with tool calls a realistic ceiling without leaving a function to run indefinitely.
+- **Vision-extraction limits**: the extraction schema bounds `summary`, `extractedContent`, and
+  `keyConcepts` lengths, and the underlying `generateText` call sets `maxOutputTokens`, so a
+  pathological image can't produce an unbounded response.
+- **Knowledge-node position validation**: `saveKnowledgeNodePosition` rejects `NaN`/`Infinity`/
+  non-numeric coordinates with `Number.isFinite()` before writing to the database.
+- **Safe AI error handling**: see [AI architecture](#ai-architecture) above — provider/model
+  details never reach the client.
 
-Generate is a three-column layout: Recent Chats (left) | chat (center) | Resources (right) on desktop, both side panels collapsing into drawers on mobile — see [`app/generate/GenerateWorkspace.tsx`](app/generate/GenerateWorkspace.tsx). Recent Chats is backed by the real `conversations` table (via `app/api/conversations/route.ts` and `app/api/conversations/[id]/route.ts`), not a session-only prompt log — selecting a row or clicking New Chat swaps the active conversation in place by remounting an internal `GenerateSession` (keyed by a bump counter), without a full page navigation.
-
-The active conversation id is synced to the URL (`?conversationId=`) and to `sessionStorage` (not `localStorage`) as soon as it's known — `sessionStorage` is naturally per-tab, which is what lets the ongoing conversation survive navigating to another route and back within the same tab (and a plain refresh) while a brand-new tab still starts its own fresh session, per [`app/generate/activeConversationStorage.ts`](app/generate/activeConversationStorage.ts).
-
-## 6. Playground
-
-[`/playground`](app/playground/page.tsx) is a dev-only area (not linked from the main nav, not part of the product) that hosts two coursework exercises. It links out to three sub-pages and embeds a live demo directly on the page itself.
-
-### Hand-built ARIA patterns vs. shadcn/ui
-
-Three interaction patterns from the W3C ARIA Authoring Practices Guide were built by hand, then compared against the equivalent shadcn/ui-generated components:
-
-| Exercise | Handmade | shadcn/Radix equivalent |
-|---|---|---|
-| Disclosure | [`app/playground/disclosure/Disclosure.tsx`](app/playground/disclosure/Disclosure.tsx) | — |
-| Tabs | [`app/playground/tabs/Tabs.tsx`](app/playground/tabs/Tabs.tsx) | [`components/ui/tabs.tsx`](components/ui/tabs.tsx) |
-| Modal | [`app/playground/modal/Modal.tsx`](app/playground/modal/Modal.tsx) | [`components/ui/dialog.tsx`](components/ui/dialog.tsx) |
-
-The handmade components implement their own focus trapping, focus restoration, and keyboard handling (arrow keys/Home/End with roving `tabIndex` for Tabs; Escape + manual Tab-wrapping for Modal) and were confirmed correct by manual keyboard testing. The detailed behavioral diff against Radix's primitives (focusability detection, inert background isolation, portal rendering, RTL/orientation support, outside-click dismissal) is written up in [`NOTES.md`](NOTES.md).
-
-### `AnimatedSendButton` ("Buttons with a Brain")
-
-[`app/components/playground/AnimatedSendButton.tsx`](app/components/playground/AnimatedSendButton.tsx) is a reusable Send button driven by an explicit `idle → loading → success/error` state machine (`useReducer`), demoed live on the Playground page with toggles for a simulated success/error outcome and a disabled state. GSAP only ever reacts to the current state — it never decides it. Motion specifics (hover lift, a 220ms GSAP crossfade between states, a one-shot error shake, `animate-spin` for loading) are documented inline as `MOTION_DECISIONS` on the playground page, and all GSAP movement is skipped under `prefers-reduced-motion` while state/label/icon/color changes still happen immediately. This component is a standalone demo — it is not wired into the real `/generate` chat flow.
-
-## 7. Local setup
+## Testing
 
 ```bash
-npm install
+npx tsc --noEmit      # TypeScript
+npm run lint           # ESLint
+npx vitest run         # Unit / component tests (Vitest + Testing Library)
+npm run build          # Production build
+npx playwright test    # End-to-end tests (Chromium)
 ```
 
-Create a `.env.local` file in the project root and add:
+## Important design decisions
 
-```
-GROQ_API_KEY=your_key_here
-```
+- **Supabase + RLS** over a hand-rolled auth/authorization layer — access control is enforced by
+  Postgres itself, not application code that could have a bug in it.
+- **A separate `knowledge_node_positions` table** rather than columns on `knowledge_nodes` — most
+  nodes never get manually dragged, so most nodes never need a position row at all.
+- **A static/reduced-motion fallback for Explore** — the graph's meaning (topics, relationships,
+  selection) shouldn't depend on WebGL support or a user's motion preference; the fallback keeps
+  identical functionality, just without the 3D canvas.
+- **Tool calling for quizzes/flashcards/knowledge topics** — lets the model produce structured,
+  Zod-validated data that renders as real UI, instead of parsing a written response after the fact.
+- **Knowledge-graph writes at tool-step completion, not turn completion** — the graph should
+  reflect what was just studied immediately, not only once the model's follow-up sentence also
+  finishes generating.
+- **In-memory rate limiting instead of Redis/Upstash** — this is a single-instance capstone
+  deployment; adding an external dependency purely for rate limiting would be infrastructure the
+  project doesn't otherwise need. See the caveat under [Security](#security--production-hygiene).
 
-Then start the dev server:
+## AI-Assisted Development
 
-```bash
-npm run dev
-```
+AI tools were used throughout this project's development, under human review at every step —
+generated code was read, tested, and verified rather than accepted as-is.
 
-The chat interface is available at `/generate`.
+- **Claude Code** was used for implementation, debugging, and refactoring across the codebase —
+  including this production-hygiene pass itself (rate limiting, input caps, the vision-extraction
+  bounds, and this README).
+- **ChatGPT** was used for architecture discussion, debugging sessions, and planning — including
+  working through the Vercel AI SDK's step/tool-calling lifecycle and Groq-specific quirks (e.g.
+  why `generateObject`'s `response_format` mode fails with image input on the vision model, which
+  led to the forced-tool-call workaround in `lib/ai/extraction.ts`).
+- **AI-assisted test generation and review** — unit and E2E tests were drafted with AI assistance
+  and then read, run, and adjusted by hand; new tests added in this pass (rate limiter, input caps)
+  followed the same pattern.
+- **AI-assisted accessibility and performance analysis** — informed Explore's keyboard-accessible
+  HTML controls, reduced-motion fallback, and WebGL fallback.
+- **AI-assisted debugging of Groq tool calling** — including the discovery that Groq sometimes
+  emits `""` for an omitted optional field instead of leaving the key out, handled in
+  `lib/ai/tools.ts`'s `optionalNonBlankString`.
+- **AI-assisted knowledge-graph persistence work** — including moving the graph write from the
+  turn's `onEnd` to the tool step's `onStepEnd`, and the topic/category-nesting resolution logic.
+- **Human verification**: every change in this pass was checked against the actual codebase before
+  being made (not assumed from a spec), validated with `tsc`, `eslint`, the full Vitest suite, a
+  production build, and the Chromium Playwright suite, and cross-checked against the existing test
+  suite to confirm nothing regressed.
 
-## 8. Environment & security notes
+## Cross-browser verification
 
-- `.env.local` must never be committed. It is excluded via `.gitignore` (`.env*`, with `.env.example` explicitly excepted).
-- `.env.example` contains only a placeholder value (`GROQ_API_KEY=your_api_key_here`) and is safe to commit.
-- The API key is only ever read server-side (inside `lib/ai/config.ts`); no client code imports it.
+Automated E2E coverage (Playwright) runs on **Chromium** only — see
+[`playwright.config.ts`](playwright.config.ts); no Firefox/WebKit projects are configured, and
+Firefox/WebKit browser binaries were not available in the environment this pass was done in.
 
-## 9. Verification
+| Area | Chrome (Chromium) | Firefox | Safari | Mobile Safari |
+|---|---|---|---|---|
+| Auth (sign up / sign in / sign out) | Tested (Playwright) | Not tested in this environment | Not tested in this environment | Not tested in this environment |
+| Generate (chat, streaming, quiz/flashcards) | Tested (Playwright) | Not tested in this environment | Not tested in this environment | Not tested in this environment |
+| Explore (select, keyboard-select, drag, persisted position, fallback) | Tested (Playwright) | Not tested in this environment | Not tested in this environment | Not tested in this environment |
+| Mobile layout / touch | Not tested in this environment | Not tested in this environment | Not tested in this environment | Not tested in this environment |
 
-The following checks have been run successfully against the current implementation:
-
-- TypeScript — `npx tsc --noEmit`
-- ESLint — `npx eslint .`
-- Production build — `npx next build`
-- Manual testing of streaming responses, Stop generation, multi-turn conversation, Markdown rendering, and scrolling behavior (auto-scroll, scroll lock, jump-to-latest)
-- Manual testing of the `createQuiz` tool end-to-end (a "quiz me on..." prompt) and confirmation that a normal, non-quiz prompt still streams plain text exactly as before
-- Direct testing of `createQuizTool`'s `execute` with deliberately invalid input (duplicate answer options) to confirm the `output-error` path
-- `/explore`: topic selection (both the accessible topic-button list and the 3D/fallback nodes drive the same state), the topic panel's content and "Back to overview," keyboard-only activation of a topic button, `prefers-reduced-motion` emulation (Playwright's `page.emulateMedia`), manual mobile/touch verification (pinch-zoom, one-finger orbit, tap-to-select at phone width), and manual verification that forcing `canvas.getContext` to return `null` falls back to the static knowledge-space map instead of a blank area — see [§10](#10-lumora-knowledge-space-explore)
-- `/explore` visual passes: manual screenshot comparison across desktop/mobile and light/dark for the overview composition, hover, and all 7 topic selections — specifically checking that the selected node, Lumora, and some surrounding context all stay visible and unobscured by `TopicPanel` (the previous off-axis-node framing bug this caught and fixed), and that reduced motion still renders the untouched `StaticFallback` with none of the color/glow/ambient additions
-
-## 10. Lumora Knowledge Space (`/explore`)
-
-An abstract 3D visualization of how the topics you study relate to each other — a central Lumora element with 7 knowledge nodes (Artificial Intelligence, Algorithms, Data Structures, Databases, Networks, Software Engineering, Mathematics) connected by thin, low-opacity lines. It exists to make "knowledge relationships" feel like a real, explorable space rather than a list, while staying restrained: dark background, muted indigo/violet (plus two cooler accent tones — see below), low-poly procedural geometry (no imported 3D models), no physics, no postprocessing, no particle effects.
-
-**Composition — depth and hierarchy:** node positions in [`data.ts`](app/explore/data.ts) are hand-authored across a wide x/y/z spread (not a flat ring), so orbiting reveals real depth rather than just rotation. Each node also carries a `tier`: 3 "core" topics (AI, Algorithms, Mathematics — each already named foundational in its own summary text) render as the rounder `icosahedronGeometry`, closer in form to Lumora itself; the 4 "secondary" topics render as the sharper `octahedronGeometry`, both at a modestly smaller radius. The distinction is felt (size, shape, a touch more glow/connection opacity — see below) rather than labeled.
-
-**Meaningful interaction — hover → select → focus → context:** hovering a node gives it a subtle scale/emissive response; clicking one sets it as the selected topic. [`CameraRig.tsx`](app/explore/components/CameraRig.tsx) then smoothly focuses the camera over ~700ms, coordinated with drei's `OrbitControls` rather than fighting it: the look-at target blends only partway (55%) from Lumora toward the selected node — so Lumora and the surrounding space stay in view instead of being panned out of frame — and the target additionally leans away from whichever side [`TopicPanel`](app/explore/TopicPanel.tsx) occupies (a right-side card on desktop above the panel's own 640px breakpoint, a bottom sheet below it), using the camera's own live right/up vectors so the panel never ends up covering the node it's describing. Selecting a topic also reveals its local "knowledge neighborhood": the selected node becomes prominent, directly related nodes/connections stay clearly visible, and unrelated ones recede. "Back to overview" clears the selection and returns the camera. Orbit/zoom (`OrbitControls`, panning disabled, clamped distance/polar angle) is supplemental, not the primary interaction.
-
-**Accessible HTML controls:** canvas objects aren't keyboard- or screen-reader-reachable, so [`ExploreClient.tsx`](app/explore/ExploreClient.tsx) renders every topic (studied and unlocked alike) as a real, accessible control — an [`OptionWheel.tsx`](app/explore/components/OptionWheel.tsx) listbox docked beside the graph on wider screens, a row of `<button>` chips below it on narrow ones — driving the exact same `onSelect(id)` handler as the 3D nodes and the static fallback's own nodes. There's one selection state, three ways to reach it. `TopicPanel` moves focus to its heading when it opens and returns focus to the triggering control when "Back to overview" is used.
-
-**Reduced-motion and WebGL fallback:** [`useReducedMotion.ts`](app/explore/useReducedMotion.ts) and [`webgl.ts`](app/explore/webgl.ts) each expose a `useSyncExternalStore`-backed hook (reactive to the OS setting changing mid-session; SSR-safe with no hydration mismatch). If reduced motion is on or WebGL is unavailable, [`StaticFallback.tsx`](app/explore/StaticFallback.tsx) renders instead of the Canvas — a real 2D map of the same nodes/edges (HTML + SVG lines), not an error message, and selecting a topic there still opens `TopicPanel` exactly as in 3D. Everything described below (color, glow, ambient elements, breathing) lives entirely inside the Canvas branch, so reduced-motion/no-WebGL users never load or pay for any of it.
-
-**Visual atmosphere — color, glow, depth:** each node's material comes from a small, restrained palette in [`data.ts`](app/explore/data.ts) (`NODE_ACCENTS` — indigo, violet, blue-indigo, muted blue, muted teal; not a rainbow), converging to a shared brighter violet only while selected, so "selected" reads consistently regardless of a node's own hue. [`Glow.tsx`](app/explore/components/Glow.tsx) adds a restrained "fake glow" — a slightly larger, additive-blended, low-opacity copy of a node's own geometry (`raycast={() => null}`, so it never steals hover/click) — with intensity following the same selected → related → normal → unrelated hierarchy as the nodes themselves; Lumora's own glow is the strongest in the scene, alongside a very slow, barely-perceptible emissive "breathing" pulse. [`AmbientField.tsx`](app/explore/components/AmbientField.tsx) scatters a handful of tiny, non-interactive, unlabeled shards/rings well outside the graph's own radius (12 on desktop, 6 on coarse-pointer devices, drifting on independent slow/irregular phases) purely so the wide dark space doesn't read as empty — they carry no data, aren't clickable, and aren't part of the knowledge graph. A subtle `fog` (matching the canvas's own clear color) reinforces depth by fading the farthest geometry very slightly toward the background. None of this uses postprocessing, bloom, particles, or physics.
-
-**Mobile/touch:** the canvas is a responsive `65–70vh` panel (not `100vh`, to avoid fighting mobile browser toolbars); `OrbitControls` support one-finger rotate and pinch-zoom out of the box with panning disabled; node taps and the HTML topic buttons both work at phone width; device pixel ratio is capped lower (`[1, 1.5]` vs. `[1, 2]`) and the ambient field is thinned (6 vs. 12 elements) on coarse-pointer devices via `matchMedia("(pointer: coarse)")`.
-
-**Performance:** 7 knowledge nodes + 1 central node, low-poly procedural geometry (`icosahedronGeometry`/`octahedronGeometry`), no shadows, no postprocessing, no physics, capped DPR. The glow shells and ambient field add only a handful of small extra meshes — the ambient field shares two geometry instances across every element rather than allocating one per object — see [`Scene.tsx`](app/explore/components/Scene.tsx).
-
-**Lazy loading:** `app/explore/page.tsx` is a Server Component with no `three`/`@react-three/*` imports; [`ExploreClient.tsx`](app/explore/ExploreClient.tsx) loads [`Scene.tsx`](app/explore/components/Scene.tsx) via `next/dynamic` with `ssr: false`, so the 3D bundle (confirmed via the build's per-route client-reference manifest to be excluded from every other route, including `/explore`'s own initial HTML) is only fetched by browsers that actually render the Canvas.
-
-**Known non-issue:** the browser console logs a `THREE.Clock: This module has been deprecated` warning during scene interaction. This comes from `@react-three/fiber`'s own internal clock (`state.clock`, the framework-standard way to read elapsed time in `useFrame`), not from application code — an upstream `three`/`@react-three/fiber` version-pairing issue, not something this feature works around.
+Never treat the "Not tested" rows above as passing — they are explicitly unverified.

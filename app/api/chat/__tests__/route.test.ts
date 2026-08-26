@@ -70,6 +70,7 @@ const {
   createUIMessageStreamMock,
   createUIMessageStreamResponseMock,
   upsertKnowledgeNodeActivityMock,
+  checkChatRateLimitMock,
 } = vi.hoisted(() => {
   const requireUserMock = vi.fn();
   const fromMock = vi.fn();
@@ -79,6 +80,11 @@ const {
   const createUIMessageStreamMock = vi.fn();
   const createUIMessageStreamResponseMock = vi.fn();
   const upsertKnowledgeNodeActivityMock = vi.fn(() => Promise.resolve());
+  // Defaults to always-allow so the rest of this file's tests (which exercise
+  // unrelated behavior) aren't affected by the shared rate-limit window —
+  // its own behavior is covered by lib/api/__tests__/rate-limit.test.ts and
+  // the "rate limiting" describe block below.
+  const checkChatRateLimitMock = vi.fn(() => ({ ok: true, retryAfterSeconds: 0 }));
   return {
     requireUserMock,
     fromMock,
@@ -88,11 +94,15 @@ const {
     createUIMessageStreamMock,
     createUIMessageStreamResponseMock,
     upsertKnowledgeNodeActivityMock,
+    checkChatRateLimitMock,
   };
 });
 
 vi.mock("@/lib/supabase/authorization", () => ({
   requireUser: requireUserMock,
+}));
+vi.mock("@/lib/api/rate-limit", () => ({
+  checkChatRateLimit: checkChatRateLimitMock,
 }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
 vi.mock("@/lib/supabase/knowledge-graph", () => ({
@@ -468,6 +478,62 @@ describe("authentication", () => {
 
     const [[callArgs]] = streamTextMock.mock.calls;
     expect(typeof callArgs.experimental_transform).toBe("function");
+  });
+});
+
+describe("rate limiting", () => {
+  test("a rate-limited user gets 429 with Retry-After, before any AI/DB work happens", async () => {
+    setupSupabaseMock();
+    checkChatRateLimitMock.mockReturnValueOnce({ ok: false, retryAfterSeconds: 42 });
+
+    const response = await POST(makeRequest({ messages: [userMessage("hi")] }));
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("42");
+    expect(streamTextMock).not.toHaveBeenCalled();
+    expect(fromMock).not.toHaveBeenCalled();
+  });
+
+  test("rate limiting is checked per authenticated userId, after auth has already run", async () => {
+    requireUserMock.mockRejectedValue(new Error("Unauthorized: no authenticated user."));
+
+    await POST(makeRequest({ messages: [userMessage("hi")] }));
+
+    expect(checkChatRateLimitMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("input caps", () => {
+  test("a message array over the cap is rejected with 400 before any DB work happens", async () => {
+    setupSupabaseMock();
+    const messages = Array.from({ length: 101 }, (_, i) => userMessage("hi", `user-${i}`));
+
+    const response = await POST(makeRequest({ messages }));
+
+    expect(response.status).toBe(400);
+    expect(streamTextMock).not.toHaveBeenCalled();
+    expect(fromMock).not.toHaveBeenCalled();
+  });
+
+  test("a single message with oversized text content is rejected with 400", async () => {
+    setupSupabaseMock();
+    const response = await POST(
+      makeRequest({ messages: [userMessage("a".repeat(8001))] }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(streamTextMock).not.toHaveBeenCalled();
+  });
+
+  test("a message right at the text-length cap is accepted", async () => {
+    setupSupabaseMock();
+    setupStreamText();
+
+    const response = await POST(
+      makeRequest({ messages: [userMessage("a".repeat(8000))] }),
+    );
+
+    expect(response.status).toBe(200);
   });
 });
 

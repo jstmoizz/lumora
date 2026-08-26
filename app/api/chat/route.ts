@@ -21,9 +21,12 @@ import {
   DEFAULT_CHAT_MODE,
   MAX_IMAGES_PER_MESSAGE,
   MAX_IMAGE_BYTES,
+  MAX_MESSAGES_PER_REQUEST,
+  MAX_MESSAGE_TEXT_LENGTH,
   ALLOWED_IMAGE_MEDIA_TYPES,
   type ChatMode,
 } from "@/lib/ai/model";
+import { checkChatRateLimit } from "@/lib/api/rate-limit";
 import { smoothTextStream } from "@/lib/ai/smoothTextStream";
 import { lumoraTools, type LumoraUIMessage } from "@/lib/ai/tools";
 import { requireUser } from "@/lib/supabase/authorization";
@@ -141,6 +144,19 @@ interface ChatRequestBody {
   mode?: string;
 }
 
+// Vercel's default Fluid Compute timeout is shorter than a slow streamed
+// reply plus tool calls can need — this raises the ceiling for this route
+// specifically, not for the rest of the app's (non-streaming) routes.
+export const maxDuration = 60;
+
+// Total length of a message's own text parts — the thing a client could
+// balloon to inflate token usage, independent of how many parts it's split across.
+function messageTextLength(message: LumoraUIMessage): number {
+  return message.parts
+    .filter(isTextUIPart)
+    .reduce((total, part) => total + part.text.length, 0);
+}
+
 export async function POST(req: Request) {
   // /generate being a protected page isn't enough on its own, since this
   // route can be hit directly. Identity comes only from the already-
@@ -151,6 +167,16 @@ export async function POST(req: Request) {
     userId = user.id;
   } catch {
     return Response.json({ error: "Authentication required." }, { status: 401 });
+  }
+
+  // Runs after auth so unauthenticated callers are still stopped by the
+  // 401 above, never by a 429 that would leak "this user id exists."
+  const rateLimit = checkChatRateLimit(userId);
+  if (!rateLimit.ok) {
+    return Response.json(
+      { error: "You're sending messages too quickly. Please slow down and try again shortly." },
+      { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } },
+    );
   }
 
   // Fail fast with an actionable message instead of failing deep inside
@@ -196,6 +222,19 @@ export async function POST(req: Request) {
 
   if (!messages.every(hasValidMessageShape)) {
     return Response.json({ error: "Invalid message format." }, { status: 400 });
+  }
+
+  if (messages.length > MAX_MESSAGES_PER_REQUEST) {
+    return Response.json(
+      { error: `A conversation can include at most ${MAX_MESSAGES_PER_REQUEST} messages.` },
+      { status: 400 },
+    );
+  }
+  if (messages.some((message) => messageTextLength(message) > MAX_MESSAGE_TEXT_LENGTH)) {
+    return Response.json(
+      { error: `Each message is limited to ${MAX_MESSAGE_TEXT_LENGTH} characters.` },
+      { status: 400 },
+    );
   }
 
   // The only message that can legitimately carry a fresh image attachment.
