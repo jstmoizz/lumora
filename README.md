@@ -1,21 +1,23 @@
 # Lumora
 
-Lumora is an AI-powered study companion. You chat with it to learn a topic, and it can turn that
-conversation into a quiz, a set of flashcards, or a tracked entry in your personal **Knowledge
-Space** — an interactive 3D graph that grows as you study and remembers how you like it arranged.
+Built Lumora as an AI-powered study companion. You chat with it to learn a topic, and it can
+turn that conversation into a quiz, a set of flashcards, or a tracked entry in your personal
+**Knowledge Space** — an interactive 3D graph that grows as you study and remembers how you like
+it arranged.
 
 ## Production
 
-Deployed on [Vercel](https://vercel.com): **https://lumora-z1.vercel.app**
+Deployed this on [Vercel](https://vercel.com): **https://lumora-z1.vercel.app**
 
-No production smoke test was performed as part of this pass — the checks below (TypeScript, lint,
-unit tests, build, Playwright) were run against the local build only.
+Verified the app locally with the checks under [Testing](#testing) (TypeScript, lint, unit tests,
+build, Playwright) before every deploy; a full production smoke test against the live URL above
+hasn't been run yet.
 
 ## Features
 
 - **AI chat (`/generate`)** — a streaming conversational assistant built on Groq + the Vercel AI
-  SDK. Multi-turn history, Stop-generation, and Markdown rendering that's safe mid-stream.
-- **Model routing (Auto / Fast / Vision)** — the user picks a mode; `Auto` sends text to a
+  SDK, with multi-turn history, Stop-generation, and Markdown rendering that's safe mid-stream.
+- **Model routing (Auto / Fast / Vision)** — you pick a mode; `Auto` sends text to a
   general-purpose model and routes images to a vision model automatically, `Fast` is text-only for
   quicker replies, and `Vision` forces the vision model. See [`lib/ai/config.ts`](lib/ai/config.ts).
 - **Tool calling** — the model can call `createQuiz`, `createFlashcards`, or `addKnowledgeTopic`
@@ -40,10 +42,12 @@ unit tests, build, Playwright) were run against the local build only.
   listbox on desktop, button chips on mobile), driving the same selection state as the 3D nodes.
 
 `/settings` and `/history` are fully implemented, not placeholders. `/health` is a self-check page
-that reports whether the app rendered and whether `GROQ_API_KEY` is configured — it does not
+that reports whether the app rendered and whether `GROQ_API_KEY` is configured — it doesn't
 contact any external service.
 
 ## Tech stack
+
+Built with:
 
 - [Next.js 16](https://nextjs.org) (App Router, Turbopack)
 - [React 19](https://react.dev) + [TypeScript](https://www.typescriptlang.org)
@@ -63,6 +67,8 @@ contact any external service.
 - [Vercel](https://vercel.com) — hosting/deployment
 
 ## Local setup
+
+Here's how to get this running on your machine:
 
 1. **Clone and install**
 
@@ -103,18 +109,18 @@ contact any external service.
 | `GROQ_API_KEY` | Yes | **Server-only secret** | Groq API access for chat/vision generation |
 | `ADMIN_EMAIL` | Optional | **Server-only secret** | Email of the account granted the `admin` role |
 
-`NEXT_PUBLIC_`-prefixed variables are bundled into client-side JavaScript by Next.js — that's
-expected for the Supabase URL/anon key, since Supabase's Row Level Security is the real access
-boundary, not secrecy of those two values. **`SUPABASE_SERVICE_ROLE_KEY` must never be prefixed
-with `NEXT_PUBLIC_` or imported from a client component** — doing so would ship full
-database-bypass access to every visitor's browser.
+`NEXT_PUBLIC_`-prefixed variables are bundled into client-side JavaScript by Next.js — that's fine
+for the Supabase URL/anon key, since Supabase's Row Level Security is the real access boundary,
+not secrecy of those two values. **`SUPABASE_SERVICE_ROLE_KEY` is never prefixed with
+`NEXT_PUBLIC_` or imported from a client component** — doing so would ship full database-bypass
+access to every visitor's browser.
 
 ## Database
 
-Supabase provides both authentication and persistence. `auth.users` (managed by Supabase Auth) is
-the identity table; `public.users` is a profile row kept in sync by a trigger. Every other table
-(`conversations`, `messages`, `user_settings`, `knowledge_nodes`, `knowledge_node_positions`) has
-Row Level Security enabled with `user_id`-scoped policies, so one user's data is unreachable by
+Supabase handles both authentication and persistence. `auth.users` (managed by Supabase Auth) is
+the identity table; `public.users` is a profile row kept in sync by a trigger. Row Level Security
+is enabled on every other table (`conversations`, `messages`, `user_settings`, `knowledge_nodes`,
+`knowledge_node_positions`) with `user_id`-scoped policies, so one user's data is unreachable by
 another at the database level — not just hidden by application logic.
 
 `knowledge_node_positions` is a separate table from `knowledge_nodes` rather than extra columns on
@@ -157,9 +163,9 @@ second step to also finish.
 
 ## 3D Knowledge Space (`/explore`)
 
-An interactive 3D visualization (React Three Fiber / Three.js) of the topics you've studied and how
-they relate. Each studied topic becomes a node; quizzes, flashcards, and manually-added topics all
-feed the same graph, nested under broader categories where the model identifies one.
+An interactive 3D visualization (React Three Fiber / Three.js) of the topics you've studied and
+how they relate. Each studied topic becomes a node; quizzes, flashcards, and manually-added
+topics all feed the same graph, nested under broader categories where the model identifies one.
 
 - **Selection** — click a node, or use the accessible HTML topic list/chips alongside the canvas;
   both drive the same selection state, so the graph is fully usable without a mouse.
@@ -184,22 +190,23 @@ feed the same graph, nested under broader categories where the model identifies 
   ([`lib/ai/extraction.ts`](lib/ai/extraction.ts)) forces a single internal "record what you saw"
   tool call to get structured output back from the vision model, since `generateObject`'s
   `response_format` mode fails for this model with image input on Groq.
-- **Error classification**: raw provider errors (rate limits, 5xx, etc.) are never sent to the
-  client — [`lib/ai/errors.ts`](lib/ai/errors.ts) reduces them to one of three safe codes
-  (`RATE_LIMITED`, `PROVIDER_UNAVAILABLE`, `GENERATION_FAILED`) before they cross the wire.
+- **Error classification**: raw provider errors (rate limits, 5xx, etc.) never reach the client —
+  [`lib/ai/errors.ts`](lib/ai/errors.ts) reduces them to one of three safe codes (`RATE_LIMITED`,
+  `PROVIDER_UNAVAILABLE`, `GENERATION_FAILED`) before they cross the wire.
 - **Resource limits**: capped message-array length and per-message text length, a capped image
   size/type, bounded output-token limits on every AI call, and bounded field lengths on every tool
   and the vision-extraction schema — see [Security / production hygiene](#security--production-hygiene).
 
 ## Security / production hygiene
 
-- **Authentication**: Supabase Auth; `requireUser()` resolves identity from the server-side session
-  only — never from anything the client sends — and rejects unauthenticated requests with 401.
-- **Row Level Security**: every user-owned table is RLS-scoped by `user_id`, enforced by Postgres.
-- **Server-only secrets**: `SUPABASE_SERVICE_ROLE_KEY` and `GROQ_API_KEY` are read only in
-  server-side modules, never imported by client components.
-- **Input caps on `/api/chat`**: the request is rejected with `400` before any DB or AI work if the
-  `messages` array exceeds 100 entries or any single message's text exceeds 8,000 characters
+- **Authentication**: Supabase Auth handles identity; `requireUser()` resolves it from the
+  server-side session only — never from anything the client sends — and rejects unauthenticated
+  requests with 401.
+- **Row Level Security**: every user-owned table is scoped by `user_id`, enforced by Postgres.
+- **Server-only secrets**: `SUPABASE_SERVICE_ROLE_KEY` and `GROQ_API_KEY` are only read in
+  server-side modules, never in anything a client component imports.
+- **Input caps on `/api/chat`**: the request is rejected with `400` before any DB or AI work if
+  the `messages` array exceeds 100 entries or any single message's text exceeds 8,000 characters
   (`lib/ai/model.ts`). Image attachments are separately capped at one per message, 3 MB, and
   JPEG/PNG/WebP only.
 - **Per-user rate limiting**: `/api/chat` allows 20 requests per user per rolling 60-second window
@@ -209,9 +216,9 @@ feed the same graph, nested under broader categories where the model identifies 
   can't grow unbounded.
 
   **This limiter is intentionally lightweight and process-local; it protects the single capstone
-  deployment from trivial abuse but is not intended to replace distributed rate limiting at larger
-  scale.** A multi-instance deployment would need a shared store (e.g. Redis/Upstash) for the limit
-  to hold across instances — out of scope for this project.
+  deployment from trivial abuse but isn't meant to replace distributed rate limiting at larger
+  scale.** A multi-instance deployment would need a shared store (e.g. Redis/Upstash) for the
+  limit to hold across instances — out of scope for this project.
 - **Streaming timeout**: `/api/chat` sets `export const maxDuration = 60`, giving a streamed
   response with tool calls a realistic ceiling without leaving a function to run indefinitely.
 - **Vision-extraction limits**: the extraction schema bounds `summary`, `extractedContent`, and
@@ -224,6 +231,8 @@ feed the same graph, nested under broader categories where the model identifies 
 
 ## Testing
 
+These are the commands to run to verify the app:
+
 ```bash
 npx tsc --noEmit      # TypeScript
 npm run lint           # ESLint
@@ -234,54 +243,56 @@ npx playwright test    # End-to-end tests (Chromium)
 
 ## Important design decisions
 
-- **Supabase + RLS** over a hand-rolled auth/authorization layer — access control is enforced by
-  Postgres itself, not application code that could have a bug in it.
-- **A separate `knowledge_node_positions` table** rather than columns on `knowledge_nodes` — most
-  nodes never get manually dragged, so most nodes never need a position row at all.
-- **A static/reduced-motion fallback for Explore** — the graph's meaning (topics, relationships,
+- **Chose Supabase + RLS** over a hand-rolled auth/authorization layer — access control is
+  enforced by Postgres itself, not application code that could have a bug in it.
+- **Kept `knowledge_node_positions` as a separate table** rather than columns on
+  `knowledge_nodes` — most nodes never get manually dragged, so most nodes never need a position
+  row at all.
+- **Gave Explore a static/reduced-motion fallback** — the graph's meaning (topics, relationships,
   selection) shouldn't depend on WebGL support or a user's motion preference; the fallback keeps
   identical functionality, just without the 3D canvas.
-- **Tool calling for quizzes/flashcards/knowledge topics** — lets the model produce structured,
-  Zod-validated data that renders as real UI, instead of parsing a written response after the fact.
-- **Knowledge-graph writes at tool-step completion, not turn completion** — the graph should
-  reflect what was just studied immediately, not only once the model's follow-up sentence also
+- **Used tool calling for quizzes/flashcards/knowledge topics** — lets the model produce
+  structured, Zod-validated data that renders as real UI, instead of parsing a written response
+  after the fact.
+- **Knowledge-graph writes happen at tool-step completion, not turn completion** — so the graph
+  reflects what was just studied immediately, not only once the model's follow-up sentence also
   finishes generating.
-- **In-memory rate limiting instead of Redis/Upstash** — this is a single-instance capstone
+- **Chose in-memory rate limiting instead of Redis/Upstash** — this is a single-instance capstone
   deployment; adding an external dependency purely for rate limiting would be infrastructure the
   project doesn't otherwise need. See the caveat under [Security](#security--production-hygiene).
 
 ## AI-Assisted Development
 
-AI tools were used throughout this project's development, under human review at every step —
+AI tools were used throughout this project's development, with every step reviewed personally —
 generated code was read, tested, and verified rather than accepted as-is.
 
-- **Claude Code** was used for implementation, debugging, and refactoring across the codebase —
-  including this production-hygiene pass itself (rate limiting, input caps, the vision-extraction
-  bounds, and this README).
-- **ChatGPT** was used for architecture discussion, debugging sessions, and planning — including
+- **Claude Code** — used for implementation, debugging, and refactoring across the codebase,
+  including production-hygiene work like rate limiting, input caps, vision-extraction bounds, and
+  this README.
+- **ChatGPT** — used for architecture discussion, debugging sessions, and planning, including
   working through the Vercel AI SDK's step/tool-calling lifecycle and Groq-specific quirks (e.g.
   why `generateObject`'s `response_format` mode fails with image input on the vision model, which
   led to the forced-tool-call workaround in `lib/ai/extraction.ts`).
-- **AI-assisted test generation and review** — unit and E2E tests were drafted with AI assistance
-  and then read, run, and adjusted by hand; new tests added in this pass (rate limiter, input caps)
-  followed the same pattern.
-- **AI-assisted accessibility and performance analysis** — informed Explore's keyboard-accessible
-  HTML controls, reduced-motion fallback, and WebGL fallback.
-- **AI-assisted debugging of Groq tool calling** — including the discovery that Groq sometimes
-  emits `""` for an omitted optional field instead of leaving the key out, handled in
+- **Test generation and review** — unit and E2E tests were drafted with AI assistance, then read,
+  run, and adjusted by hand; new tests follow the same pattern.
+- **Accessibility and performance analysis** — AI assistance informed Explore's
+  keyboard-accessible HTML controls, reduced-motion fallback, and WebGL fallback.
+- **Debugging Groq's tool calling** — AI assistance helped track down that Groq sometimes emits
+  `""` for an omitted optional field instead of leaving the key out, handled in
   `lib/ai/tools.ts`'s `optionalNonBlankString`.
-- **AI-assisted knowledge-graph persistence work** — including moving the graph write from the
-  turn's `onEnd` to the tool step's `onStepEnd`, and the topic/category-nesting resolution logic.
-- **Human verification**: every change in this pass was checked against the actual codebase before
-  being made (not assumed from a spec), validated with `tsc`, `eslint`, the full Vitest suite, a
-  production build, and the Chromium Playwright suite, and cross-checked against the existing test
-  suite to confirm nothing regressed.
+- **Knowledge-graph persistence work** — AI assistance helped work out moving the graph write from
+  the turn's `onEnd` to the tool step's `onStepEnd`, and the topic/category-nesting resolution
+  logic.
+- **Human verification** — every change is checked against the actual codebase before being made
+  (never assumed from a spec), validated with `tsc`, `eslint`, the full Vitest suite, a production
+  build, and the Playwright suite, and cross-checked against the existing test suite to confirm
+  nothing regresses.
 
 ## Cross-browser verification
 
 Automated E2E coverage (Playwright) runs on **Chromium** only — see
 [`playwright.config.ts`](playwright.config.ts); no Firefox/WebKit projects are configured, and
-Firefox/WebKit browser binaries were not available in the environment this pass was done in.
+Firefox/WebKit browser binaries aren't installed in the usual dev environment.
 
 | Area | Chrome (Chromium) | Firefox | Safari | Mobile Safari |
 |---|---|---|---|---|
@@ -290,5 +301,5 @@ Firefox/WebKit browser binaries were not available in the environment this pass 
 | Explore (select, keyboard-select, drag, persisted position, fallback) | Tested (Playwright) | Not tested in this environment | Not tested in this environment | Tested (manual) |
 | Mobile layout / touch | Not tested in this environment | Not tested in this environment | Not tested in this environment | Tested (manual) |
 
-Mobile Safari was verified manually by me, covering the areas above.
-Desktop Safari and Firefox were not — never treat those "Not tested" cells as passing.
+Mobile Safari was tested manually on a real device, covering the areas above. Desktop Safari and
+Firefox weren't — treat those "Not tested" cells as genuinely unverified, not passing.
