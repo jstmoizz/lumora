@@ -30,8 +30,16 @@ describe("Home", () => {
   // its role="img"/aria-label container still renders regardless.
   test("swaps to the animated WarpText once the dynamic import resolves", async () => {
     render(<Home />);
+    // A longer timeout than findByRole's 1000ms default — the dynamic
+    // import (WarpText + its ogl dependency graph) resolves well within
+    // that locally, but a slower/loaded CI runner can push it past 1000ms
+    // with no actual bug involved.
     expect(
-      await screen.findByRole("img", { name: "Study Smarter with Lumora." }),
+      await screen.findByRole(
+        "img",
+        { name: "Study Smarter with Lumora." },
+        { timeout: 5000 },
+      ),
     ).toBeInTheDocument();
   });
 

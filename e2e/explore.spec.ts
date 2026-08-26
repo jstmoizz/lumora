@@ -78,17 +78,21 @@ async function seedKnowledgeNodes(admin: SupabaseClient, userId: string) {
   }
 }
 
+// Wipes the whole graph, not just OWNED_TOP_LEVEL_LABELS's rows — this
+// file's tests assume the account's top-level topic list is exactly the 3
+// labels seeded below, and any stray leftover node (e.g. from a past,
+// differently-shaped test run against this same shared account) throws off
+// the keyboard sweep test, which walks a fixed number of ArrowDown presses
+// from index 0. A dedicated single-purpose E2E account has nothing else to
+// preserve here.
 async function cleanupKnowledgeNodes(admin: SupabaseClient, userId: string) {
-  await admin
-    .from("knowledge_nodes")
-    .delete()
-    .eq("user_id", userId)
-    .in("topic_key", OWNED_TOP_LEVEL_LABELS.map(normalizeTopicKey));
+  await admin.from("knowledge_nodes").delete().eq("user_id", userId);
 }
 
 test.beforeEach(async () => {
   const admin = createTestAdminClient();
   const userId = await getUserId(admin);
+  await cleanupKnowledgeNodes(admin, userId);
   await seedKnowledgeNodes(admin, userId);
 });
 
@@ -152,9 +156,16 @@ test("keyboard: a topic can be reached and selected without a mouse", async ({
   // renders the panel, which would otherwise send an extra ArrowDown past
   // Mathematics for good, well before the final assertion's own retry
   // window ever gets a chance to see it appear.
+  //
+  // The sweep bound is the *actual* rendered option count, not
+  // OWNED_TOP_LEVEL_LABELS.length — beforeEach wipes and reseeds this
+  // account's whole graph so it should always match, but bounding on the
+  // real DOM rather than an assumption about DB state is what actually
+  // guarantees every position gets checked, however many options exist.
+  const optionCount = await topics.getByRole("option").count();
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowUp");
-  for (let i = 0; i < OWNED_TOP_LEVEL_LABELS.length - 1; i++) {
+  for (let i = 0; i < optionCount - 1; i++) {
     const isMathVisible = await mathPanel
       .waitFor({ state: "visible", timeout: 500 })
       .then(() => true)

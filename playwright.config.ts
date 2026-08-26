@@ -9,6 +9,15 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
+  // Several specs (auth.spec.ts, explore.spec.ts, expanded-concepts.spec.ts)
+  // do a real Supabase sign-in per test rather than reusing the shared
+  // storageState. Left uncapped, Playwright's default worker count tracks
+  // local CPU count — on a many-core machine that's enough concurrent real
+  // logins to trip Supabase Auth's own rate limiting, which just leaves the
+  // page stuck on /login with no app-level error. Capping it keeps
+  // concurrent real logins within what Supabase actually tolerates, in both
+  // CI (already effectively 2 workers on GitHub's runners) and locally.
+  workers: process.env.CI ? 2 : 4,
   // "github" alone annotates the run but writes no report to disk — the
   // CI workflow's artifact-upload step needs the "html" reporter's output
   // in `playwright-report/` to actually have something to upload.
