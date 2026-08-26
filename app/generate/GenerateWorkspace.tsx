@@ -25,13 +25,10 @@ import MobilePanelDrawer from "./MobilePanelDrawer";
 import PracticePanel from "./PracticePanel";
 import RecentChatsPanel from "./RecentChatsPanel";
 
-// Radix's Dialog (MobilePanelDrawer's base) portals its content straight
-// into `document.body`, outside this component's DOM subtree, so
-// `data-generate-accent` on the workspace root never cascades to it — CSS
-// vars inherit through the real DOM tree, which a portal breaks even
-// though React context survives it. Wrapping each drawer's `children`
-// re-scopes the accent locally. `contents` keeps the wrapper out of
-// layout so it can't affect MobilePanelDrawer's own flex sizing.
+// Radix's Dialog portals its content into document.body, outside this
+// tree, so `data-generate-accent` on the workspace root never cascades to
+// it — wrapping the drawer's children re-scopes it locally. `contents`
+// keeps the wrapper out of layout.
 function AccentScope({
   accent,
   children,
@@ -50,21 +47,14 @@ interface GenerateWorkspaceProps {
   initialConversationId?: string;
   initialMessages?: LumoraUIMessage[];
   initialConversations: ConversationSummary[];
-  /** From /generate?topic=... (Explore's "Study Topic" link) — only ever
-   * relevant to the very first session this component mounts with, so it's
-   * read once by GenerateSession's ChatInterface and never threaded through
-   * New Chat/Recent Chat switches. */
+  /** From /generate?topic=... (Explore's "Study Topic" link) — only
+   * relevant to the first session; never threaded through session switches. */
   initialTopic?: string;
 }
 
-// One conversation's worth of state: the chat itself (owned entirely by
-// ChatInterface's useChat) plus the Resources activities that conversation
-// has generated. GenerateWorkspace mounts exactly one of these at a time,
-// keyed by `sessionKey` — switching conversations (New Chat, or picking a
-// Recent Chat) bumps that key, which remounts this component fresh rather
-// than trying to reset all of its state by hand. Same trick app/generate/
-// page.tsx used to do at the page level (see its own comment); it now lives
-// here so switching conversations no longer needs a full navigation.
+// One conversation's worth of state: the chat plus the Resources activities
+// it's generated. Keyed by `sessionKey` — switching conversations bumps
+// that key, remounting this fresh rather than resetting state by hand.
 function GenerateSession({
   initialConversationId,
   initialMessages,
@@ -90,9 +80,8 @@ function GenerateSession({
   );
 
   const handleQuizGenerated = useCallback((quiz: CreateQuizOutput) => {
-    // Dedupes by quizId defensively (ChatInterface's own onQuizGenerated
-    // effect already only fires once per id), rather than assuming it'll
-    // never be called twice for the same quiz.
+    // Dedupes by quizId defensively, rather than assuming this is never
+    // called twice for the same quiz.
     setQuizzes((prev) => [quiz, ...prev.filter((q) => q.quizId !== quiz.quizId)]);
   }, []);
 
@@ -142,11 +131,8 @@ function GenerateSession({
 }
 
 // The three-column Generate layout: Recent Chats | Chat | Resources.
-// GenerateWorkspace itself owns everything that outlives a single
-// conversation (the Recent Chats list, which conversation is active) —
-// GenerateSession above owns everything scoped to just the one currently
-// active conversation, and gets fully replaced (via `sessionKey`) whenever
-// that changes.
+// GenerateWorkspace owns everything that outlives a single conversation;
+// GenerateSession owns everything scoped to the active one.
 export default function GenerateWorkspace({
   initialConversationId,
   initialMessages,
@@ -169,33 +155,23 @@ export default function GenerateWorkspace({
   const [loadingConversationId, setLoadingConversationId] = useState<
     string | null
   >(null);
-  // User-facing message for the most recent *failed* Recent Chat selection
-  // — null the rest of the time. Kept separate from `loadingConversationId`
-  // since a failure needs to stay visible after loading clears.
+  // Kept separate from loadingConversationId since a failure needs to stay
+  // visible after loading clears.
   const [selectionError, setSelectionError] = useState<string | null>(null);
-  // Identifies the most recently *started* Recent Chat selection, bumped
-  // on every call to handleSelectConversation. A ref, not state: two
-  // clicks in the same tick must be distinguishable the instant the second
-  // starts, not after a re-render. Each in-flight request captures its own
-  // id and checks it against this ref before touching state, so only the
-  // *latest* selection's response is ever applied — a late-resolving
-  // earlier one is silently ignored.
+  // A ref, not state, so two clicks in the same tick are distinguishable
+  // instantly — each in-flight request checks this before touching state,
+  // so only the latest selection's response is ever applied.
   const selectionRequestIdRef = useRef(0);
-  // True only while restoring a conversation this tab was already on before
-  // an away-and-back navigation (see the mount effect below) — never true
-  // when the server already resolved a conversation from the URL.
+  // True only while restoring a conversation this tab was already on
+  // before an away-and-back navigation.
   const [isRestoringSession, setIsRestoringSession] = useState(false);
 
-  // Defaults to indigo so server and first client render agree —
-  // localStorage only exists client-side, so the real stored choice (set
-  // via SettingsClient.tsx's GenerateAccentRow) is picked up a moment
-  // later in the effect below. No storage-event listener: Settings and
-  // Generate are never mounted at the same time, so there's nothing to
-  // live-sync.
+  // Defaults to indigo so server and first client render agree; the real
+  // stored choice is picked up a moment later in the effect below.
   const [accent, setAccent] = useState<GenerateAccent>(DEFAULT_GENERATE_ACCENT);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time read of a value only knowable client-side (localStorage), not a state-mirrors-state loop.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time read of a client-only value (localStorage).
     setAccent(getStoredGenerateAccent());
   }, []);
 
@@ -208,16 +184,14 @@ export default function GenerateWorkspace({
       };
       setConversations(data.conversations);
     } catch {
-      // Recent Chats staying slightly stale isn't worth surfacing an
-      // error for — the list corrects itself on the next successful fetch
-      // (next turn, next selection) or a real page load.
+      // Not worth surfacing an error — the list corrects itself on the
+      // next successful fetch or page load.
     }
   }, []);
 
-  // On a bare `/generate` load with a conversation this tab already had
-  // active (e.g. navigating to Explore/Settings and back via the Dock),
-  // pick it back up instead of starting fresh. A real `?conversationId=`
-  // in the URL always wins and skips this entirely.
+  // On a bare /generate load with a conversation this tab already had
+  // active, pick it back up instead of starting fresh. A real
+  // ?conversationId= in the URL always wins and skips this.
   useEffect(() => {
     if (initialConversationId) {
       writeActiveConversationId(initialConversationId);
@@ -227,10 +201,7 @@ export default function GenerateWorkspace({
     if (!storedId) return;
 
     let cancelled = false;
-    // This flag can only be known once we've checked sessionStorage above
-    // (not derivable from props at initial render), and the fetch it gates
-    // is genuinely async — not a state-mirrors-state loop.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- only knowable after checking sessionStorage above; the fetch it gates is genuinely async.
     setIsRestoringSession(true);
     (async () => {
       try {
@@ -243,8 +214,7 @@ export default function GenerateWorkspace({
         setSessionKey((key) => key + 1);
       } catch {
         // Stored id is stale or unreadable — fall back to a fresh
-        // conversation silently rather than surfacing an error for a
-        // background restore the user never explicitly asked for.
+        // conversation silently.
       } finally {
         if (!cancelled) setIsRestoringSession(false);
       }
@@ -253,9 +223,7 @@ export default function GenerateWorkspace({
     return () => {
       cancelled = true;
     };
-    // Deliberately runs once, on mount only — a one-time "resume where this
-    // tab left off" check, not a live subscription.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, on mount only.
   }, []);
 
   const handleNewChat = useCallback(() => {
@@ -283,18 +251,13 @@ export default function GenerateWorkspace({
 
       try {
         const response = await fetch(`/api/conversations/${id}`);
-        // A newer selection has already started — discard this response
-        // entirely rather than letting it touch state belonging to
-        // whichever selection is now current.
+        // A newer selection has already started — discard this response.
         if (isStale()) return;
 
         if (!response.ok) {
           if (response.status === 404) {
             setSelectionError("This conversation is no longer available.");
             // Best-effort: drops the now-gone conversation from the list.
-            // A failure here just leaves the list stale until the next
-            // successful refresh — never something this selection's own
-            // error should also fail over.
             void refreshConversations();
           } else {
             setSelectionError("Couldn't load this conversation. Please try again.");
@@ -311,17 +274,11 @@ export default function GenerateWorkspace({
         writeActiveConversationId(id);
         router.replace(`/generate?conversationId=${id}`, { scroll: false });
       } catch {
-        // Network failure, or response.json() choked on a malformed body —
-        // the AI SDK/fetch layer doesn't distinguish these any more finely
-        // than "something went wrong reaching the server," so neither does
-        // this message; the raw error is never shown.
         if (isStale()) return;
         setSelectionError("Couldn't load this conversation. Please try again.");
       } finally {
-        // Only the request that's still current is allowed to clear the
-        // loading indicator — a stale request finishing after a newer one
-        // has already started must not rip the "loading" state out from
-        // under the row the user actually just clicked.
+        // Only the still-current request may clear the loading indicator —
+        // a stale one finishing later must not affect the newer selection.
         if (!isStale()) {
           setLoadingConversationId(null);
         }
@@ -354,12 +311,7 @@ export default function GenerateWorkspace({
       data-generate-accent={accent}
       className="flex min-h-0 w-full flex-1 flex-col gap-3 lg:mx-auto lg:max-w-[1400px] lg:grid lg:grid-cols-[220px_minmax(0,1fr)_260px] lg:items-stretch lg:gap-5"
     >
-      {/*
-        Below `lg`, both side panels collapse behind these two toggles
-        (opening MobilePanelDrawer) instead of squeezing three columns into
-        a narrow viewport — chat stays the full-width, immediately visible
-        primary surface at every size down to mobile.
-      */}
+      {/* Below lg, both side panels collapse behind these toggles instead of squeezing three columns into a narrow viewport. */}
       <div className="flex items-center justify-center gap-2 lg:hidden">
         <Button
           type="button"
@@ -407,11 +359,7 @@ export default function GenerateWorkspace({
               Restoring your conversation&hellip;
             </span>
           </div>
-          {/*
-            An inert placeholder in Resources' own grid column — keeps the
-            three-column width stable instead of collapsing to two while
-            this (brief, one-fetch) restore is in flight.
-          */}
+          {/* Inert placeholder keeping the three-column width stable during the brief restore. */}
           <div
             aria-hidden="true"
             className="hidden lg:block lg:rounded-2xl lg:border lg:border-border lg:bg-card"
@@ -422,10 +370,8 @@ export default function GenerateWorkspace({
           key={sessionKey}
           initialConversationId={activeConversationId}
           initialMessages={activeInitialMessages}
-          // Only ever meaningful for the very first session — after a New
-          // Chat or a Recent Chat switch (either of which bumps
-          // sessionKey), the original ?topic= link shouldn't keep
-          // re-prefilling the composer indefinitely.
+          // Only meaningful for the first session — a session switch
+          // shouldn't keep re-prefilling the composer.
           initialTopic={sessionKey === 0 ? initialTopic : undefined}
           resourcesMobileOpen={mobilePanel === "resources"}
           onResourcesMobileOpenChange={handleResourcesMobileOpenChange}

@@ -32,8 +32,7 @@ import { createClient } from "@/lib/supabase/server";
 const TITLE_MAX_LENGTH = 60;
 
 // A deterministic title from the first user message — no separate model
-// call just to summarize it. Whitespace-normalized and hard-capped so a
-// long prompt can never turn into a huge stored title.
+// call to summarize it.
 function titleFromMessage(message: LumoraUIMessage): string {
   const text = message.parts
     .filter(isTextUIPart)
@@ -47,9 +46,8 @@ function titleFromMessage(message: LumoraUIMessage): string {
   return `${text.slice(0, TITLE_MAX_LENGTH).trimEnd()}…`;
 }
 
-// The plain-text `content` column is a display/search convenience derived
-// from `parts` (which remains the source of truth) — null when a message
-// has no text part at all (e.g. a quiz-only assistant turn).
+// `content` is a display/search convenience derived from `parts` (the
+// source of truth) — null when a message has no text part at all.
 function extractText(message: LumoraUIMessage): string | null {
   const text = message.parts
     .filter(isTextUIPart)
@@ -58,10 +56,9 @@ function extractText(message: LumoraUIMessage): string | null {
   return text || null;
 }
 
-// Guards each message element (the array itself is already checked) before
-// title/extraction or convertToModelMessages() run `.parts.filter(...)` on
-// it — a null entry or missing `parts` would otherwise throw deep inside
-// those, past the try/catch around model-message conversion.
+// Guards each message before title/extraction or convertToModelMessages()
+// call `.parts.filter(...)` on it — a missing `parts` would otherwise throw
+// past the try/catch around model-message conversion.
 function hasValidMessageShape(message: unknown): message is LumoraUIMessage {
   return (
     typeof message === "object" &&
@@ -80,25 +77,18 @@ function isFilePart(part: LumoraUIMessage["parts"][number]): part is FilePart {
   return part.type === "file";
 }
 
-// Only ever strips attachment parts — text/tool/reasoning parts pass through
-// untouched. Used both to keep image bytes out of Supabase ("no permanent
-// image storage") and to keep image content out of model calls that aren't
-// routed to the vision model.
+// Strips attachment parts only; text/tool/reasoning parts pass through.
+// Used both to keep images out of Supabase and out of non-vision model calls.
 function withoutImageParts(parts: LumoraUIMessage["parts"]): LumoraUIMessage["parts"] {
   return parts.filter((part) => !isFilePart(part));
 }
 
-// The extraction itself is rendered client-side as a structured
-// `data-extraction` part (ChatInterface.tsx's ExtractionCard — see the
-// branch below). This plain-text mirror rides alongside it in the same
-// assistant message purely so the extraction survives as ordinary
-// conversation history: `convertToModelMessages` silently drops `data-*`
-// parts unless a `convertDataPart` callback is supplied (none is, here), so
-// without this text part a later "Create Quiz"/"Create Flashcards" turn
-// (routed to GPT-OSS, not Qwen — see the branch below) would have no way to
-// see what was actually found in the image. ChatInterface.tsx hides this
-// text part from view whenever its message also carries a `data-extraction`
-// part, so the user only ever sees the card.
+// The extraction is rendered client-side as a structured `data-extraction`
+// part (ChatInterface.tsx's ExtractionCard), but `convertToModelMessages`
+// silently drops `data-*` parts — this plain-text mirror rides alongside it
+// so a later "Create Quiz"/"Create Flashcards" turn (routed to GPT-OSS, not
+// Qwen) can still see what was found in the image. ChatInterface.tsx hides
+// this text whenever a `data-extraction` part is also present.
 function formatExtractionAsText(extraction: ImageExtraction): string {
   const sections = [
     extraction.title ? `**${extraction.title}**` : null,
@@ -114,18 +104,16 @@ const IMAGE_DATA_URL_PATTERN = new RegExp(
   `^data:image/(?:${ALLOWED_IMAGE_SUBTYPES});base64,([A-Za-z0-9+/]+=*)$`,
 );
 
-// Re-derives byte size from the actual transmitted base64 payload rather
-// than trusting anything the client claims about the file — this is the
-// server-side backstop behind the composer's own client-side check.
+// Re-derives byte size from the transmitted base64 payload rather than
+// trusting the client's own claim about file size.
 function estimateBase64Bytes(base64: string): number {
   const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
   return Math.floor((base64.length * 3) / 4) - padding;
 }
 
-// Validates the newest message's image attachment(s), if any, against the
-// app's attachment policy (lib/ai/model.ts). A non-data-URL `url` (e.g. a
-// remote URL smuggled in as a "file" part) is rejected by the same pattern
-// that checks the allowed media types, since it can't match either way.
+// Validates the newest message's image attachment(s) against the app's
+// attachment policy. A remote URL smuggled in as a "file" part is rejected
+// by the same pattern that checks allowed media types.
 function validateImageParts(
   parts: LumoraUIMessage["parts"],
 ): { ok: true; hasImage: boolean } | { ok: false; error: string } {
@@ -153,11 +141,9 @@ interface ChatRequestBody {
 }
 
 export async function POST(req: Request) {
-  // Every request must belong to a signed-in user — `/generate` being a
-  // protected page is not enough on its own, since this route can be hit
-  // directly. Identity comes only from the session Supabase already
-  // validated (`getServerUser`, via `requireUser`), never from anything the
-  // client sends in the body.
+  // /generate being a protected page isn't enough on its own, since this
+  // route can be hit directly. Identity comes only from the already-
+  // validated session, never from anything the client sends.
   let userId: string;
   try {
     const user = await requireUser();
@@ -166,13 +152,10 @@ export async function POST(req: Request) {
     return Response.json({ error: "Authentication required." }, { status: 401 });
   }
 
-  // Fail fast with an actionable message instead of letting the request
-  // reach Anthropic and fail deep inside streamText, where the client only
-  // ever sees the AI SDK's generic "An error occurred." stream error.
-  // Skipped only when the E2E suite has deliberately swapped in a mock
-  // model (see lib/ai/mockModel.ts) — that path never touches Groq, so
-  // there's genuinely nothing to configure. A normal request still requires
-  // a real key exactly as before.
+  // Fail fast with an actionable message instead of failing deep inside
+  // streamText, where the client only sees a generic stream error. Skipped
+  // only when the E2E mock model is active (see lib/ai/mockModel.ts) —
+  // that path never touches Groq.
   if (!process.env.GROQ_API_KEY && !isE2eMockAiEnabled()) {
     console.error(
       "[api/chat] GROQ_API_KEY is not set. Add it to .env.local at the project root.",
@@ -214,10 +197,7 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid message format." }, { status: 400 });
   }
 
-  // The newest message is the one this turn is about — the only message
-  // that can ever legitimately carry a fresh image attachment. Computed
-  // once, up front, so it's available both for this validation and for the
-  // persistence step further down.
+  // The only message that can legitimately carry a fresh image attachment.
   const newUserMessage = messages[messages.length - 1];
 
   const imageValidation = validateImageParts(newUserMessage?.parts ?? []);
@@ -238,11 +218,8 @@ export async function POST(req: Request) {
   let conversationId: string;
 
   if (requestedConversationId) {
-    // The server client is RLS-scoped to the signed-in user, so a
-    // conversation that exists but belongs to someone else simply won't be
-    // returned here — the same query doubles as the existence check and
-    // the ownership check, and a stranger's conversation ID can't be
-    // distinguished from a nonexistent one from the response alone.
+    // RLS-scoped, so a conversation owned by someone else simply isn't
+    // returned — this one query is both the existence and ownership check.
     const { data: conversation } = await supabase
       .from("conversations")
       .select("id")
@@ -273,13 +250,10 @@ export async function POST(req: Request) {
     conversationId = created.id;
   }
 
-  // Persisted independent of whether the assistant's response below
-  // succeeds. Skipped on a retry of an *established* conversation
-  // (`trigger: "regenerate-message"` with a known conversationId) — that
-  // resends an already-persisted message, not a new one. A retry of the
-  // very first message is different: if the original request failed before
-  // the client ever learned a conversationId, nothing was persisted yet, so
-  // it must still be treated as an initial submission or the message is lost.
+  // Persisted regardless of whether the assistant's response succeeds.
+  // Skipped on a retry of an *established* conversation, which resends an
+  // already-persisted message — but a retry of the very first message
+  // (before a conversationId ever existed) still needs to persist, or it's lost.
   const isRetryOfEstablishedConversation =
     trigger === "regenerate-message" && requestedConversationId !== null;
   if (!isRetryOfEstablishedConversation && newUserMessage?.role === "user") {
@@ -287,10 +261,8 @@ export async function POST(req: Request) {
       conversation_id: conversationId,
       role: "user",
       content: extractText(newUserMessage),
-      // No permanent image storage: strip any attached image before it
-      // ever reaches Supabase. A resumed/reloaded conversation will show
-      // this turn's text but not the image — the image only ever lives in
-      // the browser's in-memory chat state and this one model call.
+      // No permanent image storage — a reloaded conversation shows this
+      // turn's text but not the image.
       parts: withoutImageParts(newUserMessage.parts),
     });
     if (error) {
@@ -301,12 +273,10 @@ export async function POST(req: Request) {
 
   const model = resolveModel(mode, imageValidation.hasImage);
 
-  // Runs once the assistant's turn is done (success, error, or abort) —
-  // shared between the normal streamText path below and the image
-  // extraction-only path, since both need the exact same persistence
-  // behavior. `onEnd`, not the deprecated `onFinish`. Persistence happens
-  // after the stream, not in place of it, so the client keeps seeing
-  // tokens live.
+  // Runs once the turn is done (success, error, or abort) — shared between
+  // the normal streamText path and the image extraction-only path, which
+  // need identical persistence behavior. Runs after the stream, not in
+  // place of it, so the client keeps seeing tokens live.
   async function persistAssistantTurn({
     responseMessage,
     isAborted,
@@ -316,9 +286,8 @@ export async function POST(req: Request) {
     isAborted: boolean;
     finishReason?: string;
   }) {
-    // No `finish` event ever arrived (the model call itself failed) or the
-    // user hit Stop — either way, there's no complete assistant turn to
-    // persist. Never write a partial/fake assistant message.
+    // No `finish` event (the model call failed) or the user hit Stop —
+    // never write a partial/fake assistant message.
     if (isAborted || finishReason == null) return;
 
     const { error: messageError } = await supabase.from("messages").insert({
@@ -335,10 +304,9 @@ export async function POST(req: Request) {
       return;
     }
 
-    // Feeds Explore's knowledge graph: each quiz/flashcard/addKnowledgeTopic
-    // call this turn becomes (or updates) a node. try/catch on top of
-    // upsertKnowledgeNodeActivity's own handling — a failed write here must
-    // never affect the chat response already streamed to the client.
+    // Each quiz/flashcard/addKnowledgeTopic call this turn becomes a node
+    // in Explore. A failed write here must never affect the already-
+    // streamed chat response.
     for (const part of responseMessage.parts) {
       try {
         if (part.type === "tool-createQuiz" && part.state === "output-available") {
@@ -390,25 +358,16 @@ export async function POST(req: Request) {
     }
   }
 
-  // Image pipeline: an image turn routed to the vision model never gets the
-  // normal tool-enabled SYSTEM_PROMPT request at all — it goes through a
-  // dedicated extraction-only call instead (lib/ai/extraction.ts), which
-  // never receives the application tool registry (createQuiz/
-  // createFlashcards/addKnowledgeTopic — see that module's own comment on
-  // the one internal, non-application tool it does use, and why). The
-  // extraction is written as a structured `data-extraction` part, which
-  // ChatInterface.tsx's ExtractionCard renders as a review card with
+  // An image turn routed to the vision model goes through a dedicated
+  // extraction-only call (lib/ai/extraction.ts) instead of the normal
+  // tool-enabled request. The extraction renders as a review card with
   // "Create Quiz"/"Create Flashcards"/"Ask about this" actions — the user
-  // decides what happens next, nothing is generated automatically. Those
-  // actions are just a normal new chat message from the client; there is no
-  // separate GPT-OSS handoff codepath here — the existing streamText branch
-  // below already handles it once that message arrives, picking up the
-  // extraction from this turn's own text part (see formatExtractionAsText's
-  // comment above) as ordinary conversation history.
+  // decides what happens next. Those actions are just a normal follow-up
+  // message; the streamText branch below already handles it, picking up
+  // the extraction from this turn's text part as ordinary history.
   if (model === visionModel && imageValidation.hasImage) {
     const imagePart = newUserMessage.parts.find(isFilePart);
-    // imageValidation.hasImage already guarantees exactly one valid file
-    // part exists on this message — see validateImageParts above.
+    // imageValidation.hasImage already guarantees this exists.
     if (!imagePart) {
       return Response.json({ error: "Invalid message format." }, { status: 400 });
     }
@@ -438,10 +397,8 @@ export async function POST(req: Request) {
         writer.write({ type: "finish" });
       },
       onError: (error) => {
-        // Logged server-side only. The client never sees `error` itself —
-        // only the safe classification below (see lib/ai/errors.ts for why
-        // that's enough to pick the right copy without ever forwarding
-        // provider/model details).
+        // Logged server-side only — the client sees just the safe
+        // classification below, never the raw error.
         console.error("[api/chat] image extraction failed:", error);
         return classifyAIError(error);
       },
@@ -451,11 +408,9 @@ export async function POST(req: Request) {
     return createUIMessageStreamResponse({ stream });
   }
 
-  // Only the turn actually routed to the vision model may send image
-  // content to the provider — otherwise an image attached earlier in this
-  // same conversation would still be sitting in history and get sent to a
-  // model that can't accept it. (The branch above already returned for the
-  // one case that both routes to the vision model *and* has an image.)
+  // Only the turn routed to the vision model may send image content —
+  // otherwise an image from earlier in the conversation would reach a
+  // model that can't accept it.
   const messagesForModel =
     model === visionModel
       ? messages
@@ -474,35 +429,25 @@ export async function POST(req: Request) {
     messages: modelMessages,
     tools: lumoraTools,
     // Default is a single step, which would end the turn right after a
-    // tool call with no room for the model to respond to its result. Two
-    // steps lets it call `createQuiz`/`createFlashcards` and then comment
-    // on the result — SYSTEM_PROMPT instructs it to keep that comment to a
-    // short acknowledgment rather than restating the activity it just
-    // generated, since the activity itself renders in the Resources panel.
+    // tool call with no room to comment on the result. Two steps lets it
+    // call createQuiz/createFlashcards and then acknowledge it briefly.
     stopWhen: stepCountIs(2),
-    // Groq is fast enough that a whole response can arrive in one or two
-    // real network chunks — this re-chunks it into a steady word-by-word
-    // stream so the client sees a genuine progressive reveal.
-    //
-    // Ours, not the AI SDK's `smoothStream`: that paces `reasoning-delta`
-    // chunks at the same rate as text, but ChatInterface.tsx never renders
-    // reasoning parts, so smoothing them would just add latency nobody sees.
+    // Groq can return a whole response in one or two network chunks — this
+    // re-chunks it into a steady word-by-word stream. Ours, not the AI
+    // SDK's smoothStream, since that also paces reasoning-delta chunks,
+    // which ChatInterface.tsx never renders anyway.
     experimental_transform: smoothTextStream({ chunking: "word", delayInMs: 20 }),
     ...GENERATION_CONFIG,
   });
 
   return result.toUIMessageStreamResponse<LumoraUIMessage>({
-    // Attaches the (new-or-existing) conversation id to the assistant
-    // message the instant it starts, so the client can pick it up from
-    // `message.metadata` even while the response is still streaming.
-    // Metadata set on `start` is merged into anything set on `finish`
-    // (never replaced), so this doesn't need repeating below.
+    // Attaches the conversation id the instant the stream starts, so the
+    // client can read it from message.metadata mid-stream. Metadata set on
+    // `start` merges into `finish`, so this doesn't need repeating.
     messageMetadata: ({ part }) =>
       part.type === "start" ? { conversationId } : undefined,
     onEnd: persistAssistantTurn,
     onError(error) {
-      // Same reasoning as the extraction branch's onError above: log the
-      // real error server-side only, return just the safe classification.
       console.error("[api/chat] streamText error:", error);
       return classifyAIError(error);
     },

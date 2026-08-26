@@ -15,9 +15,8 @@ interface Seed {
   opacity: number;
 }
 
-// Placed at radius 5-9.5, well outside the knowledge graph's own ~2.5-3.5
-// radius, so these read as distant background texture and never get
-// mistaken for a topic node or drawn into a knowledge relationship.
+// Placed well outside the knowledge graph's own radius, so these read as
+// distant background texture.
 function randomSeed(): Seed {
   const radius = 5 + Math.random() * 4.5;
   const theta = Math.random() * Math.PI * 2;
@@ -44,9 +43,7 @@ interface AmbientElementProps {
   ringGeometry: TorusGeometry;
 }
 
-// Each element drifts on its own random phase/speed (see randomSeed) so the
-// field never reads as synchronized — slow enough that the scene should
-// feel alive before the motion itself is consciously noticed.
+// Each element drifts on its own phase/speed so the field never reads as synchronized.
 function AmbientElement({ seed, shardGeometry, ringGeometry }: AmbientElementProps) {
   const meshRef = useRef<Mesh>(null);
   const baseY = seed.position[1];
@@ -85,11 +82,9 @@ interface AmbientFieldProps {
   count: number;
 }
 
-// Purely decorative environmental elements — not knowledge nodes: no
-// labels, not clickable, no edges, never part of the graph. They exist only
-// so the wide dark space doesn't read as empty. Two geometries are created
-// once and shared across every instance (see the dispose effect) rather
-// than allocating a unique one per element.
+// Purely decorative, not knowledge nodes — no labels, not clickable, never
+// part of the graph. Two geometries are shared across every instance
+// instead of allocating one per element.
 export default function AmbientField({ count }: AmbientFieldProps) {
   const [seeds] = useState(() => Array.from({ length: count }, randomSeed));
   const shardGeometry = useMemo(() => new TetrahedronGeometry(1, 0), []);

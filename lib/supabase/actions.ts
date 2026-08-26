@@ -1,15 +1,11 @@
 "use server";
 
 /**
- * Every auth-related Server Action Lumora's forms call. Centralized in one
- * file (rather than scattered per-route `actions.ts` files) so the
- * security audit only has one place to check for role-writes, redirect
- * targets, and how identity is derived — see `promoteIfConfiguredAdmin` in
- * `lib/supabase/admin.ts` for the one place `role` is ever written.
- *
- * None of these accept or trust a client-supplied user id or role: identity
- * always comes from what Supabase's own auth response returns, and role is
- * never a form field.
+ * Every auth-related Server Action Lumora's forms call. None accept or
+ * trust a client-supplied user id or role — identity always comes from
+ * Supabase's own auth response, and role is never a form field (see
+ * `promoteIfConfiguredAdmin` in lib/supabase/admin.ts for the one place
+ * role is ever written).
  */
 
 import { headers } from "next/headers";

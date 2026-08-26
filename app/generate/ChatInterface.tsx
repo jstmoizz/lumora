@@ -45,8 +45,7 @@ import { ExtractionCard } from "./ExtractionCard";
 import { AddKnowledgeTopicToolPart, FlashcardsToolPart, QuizToolPart } from "./PracticeToolPart";
 
 // A single attached image, held only in this component's state — never
-// uploaded anywhere until the user sends the message, and never persisted
-// server-side (see app/api/chat/route.ts's "no permanent image storage").
+// uploaded until the message is sent, never persisted server-side.
 interface ImageAttachment {
   mediaType: string;
   filename: string;
@@ -72,18 +71,13 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-// How close to either edge (in pixels) counts as "at that edge" — for
-// re-engaging bottom auto-scroll, and for deciding whether "Go to top"/
-// "Go to latest" are worth showing at all. A small tolerance, not an exact
-// 0, so sub-pixel/rounding scroll positions don't falsely look "scrolled".
+// How close to either edge (px) counts as "at that edge" — a small
+// tolerance so sub-pixel scroll positions don't falsely look "scrolled".
 const NEAR_EDGE_THRESHOLD_PX = 64;
 
-// Curated pool of study-related suggestions shown in the empty state.
-// Spans multiple subjects (not just CS) and mixes plain "explain" prompts
-// with "quiz me" prompts that exercise the `createQuiz` tool — a fresh,
-// random subset of these is picked per page mount (see `pickRandomPrompts`
-// below). Purely illustrative copy — clicking one sends it as-is via the
-// same `sendMessage` path as the composer, no separate submission logic.
+// Curated pool of study-related suggestions for the empty state. A random
+// subset is picked per page mount (see pickRandomPrompts below); clicking
+// one sends it via the same path as the composer.
 const EXAMPLE_PROMPT_POOL = [
   "Explain photosynthesis",
   "Quiz me on data structures",
@@ -100,7 +94,6 @@ const EXAMPLE_PROMPT_POOL = [
   "Quiz me on the solar system",
 ] as const;
 
-// Number of suggestions shown at once — unchanged from the original UI.
 const VISIBLE_EXAMPLE_COUNT = 3;
 
 // Fisher-Yates shuffle + slice: picks `count` distinct prompts from `pool`
@@ -117,10 +110,9 @@ function pickRandomPrompts(
   return shuffled.slice(0, count);
 }
 
-// Deterministic fallback used only for the server-rendered/pre-hydration
-// snapshot below, so the very first client render matches the server's
-// markup exactly (Math.random() would otherwise diverge between the two
-// and trigger a hydration mismatch).
+// Deterministic fallback for the pre-hydration snapshot, so the first
+// client render matches the server's markup (Math.random() would otherwise
+// cause a hydration mismatch).
 const SERVER_EXAMPLE_PROMPTS = EXAMPLE_PROMPT_POOL.slice(
   0,
   VISIBLE_EXAMPLE_COUNT,
@@ -129,9 +121,8 @@ function getServerExamplePrompts(): string[] {
   return SERVER_EXAMPLE_PROMPTS;
 }
 
-// This "store" never changes/emits, so there's nothing to subscribe to —
-// `useSyncExternalStore` still requires a subscribe function, and an inert
-// one is the correct shape when the snapshot is only ever read once.
+// useSyncExternalStore requires a subscribe function even when the
+// snapshot is only ever read once.
 function subscribeToNothing() {
   return () => {};
 }
@@ -141,16 +132,12 @@ function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-// The AI SDK surfaces every chat failure as a plain `Error` with no
-// discriminated type. A network failure (a fetch that never reached the
-// server — detectable as a TypeError) gets its own copy first. Otherwise,
-// `error.message` is checked against our own known-safe AIErrorCode strings
-// (see lib/ai/errors.ts) — the *only* thing app/api/chat/route.ts's
-// onError callbacks ever return, so this can never accidentally match a raw
-// provider error. Anything that isn't a recognized code (including truly
-// unexpected error shapes) falls back to the existing generic copy via
-// getAIErrorCopy's own "GENERATION_FAILED" default — `error.message` itself
-// is never rendered directly either way.
+// A network failure (fetch never reached the server) gets its own copy
+// first. Otherwise `error.message` is checked against our known-safe
+// AIErrorCode strings — the only thing the route's onError ever returns, so
+// this can't accidentally match a raw provider error. Anything else falls
+// back to the generic "GENERATION_FAILED" copy; `error.message` is never
+// rendered directly.
 function getChatErrorCopy(error: Error | undefined, context: AIErrorContext) {
   const isNetworkError =
     error instanceof TypeError && /fetch|network/i.test(error.message);
@@ -165,12 +152,9 @@ function getChatErrorCopy(error: Error | undefined, context: AIErrorContext) {
   return getAIErrorCopy(code, context);
 }
 
-// What the current pending assistant turn is actually doing, purely for
-// picking the right loading copy below — never for deciding routing (the
-// server, via resolveModel, remains the sole authority on which model
-// handles a request; this only remembers which client action started the
-// turn currently in flight, and never a model/provider name). `null` covers
-// an ordinary text turn, which keeps the existing generic "Thinking…" copy.
+// What the current pending turn is doing, purely for loading copy — never
+// for routing (the server remains the sole authority on model choice).
+// `null` is an ordinary text turn ("Thinking…").
 type PendingIntent = "image" | "quiz" | "flashcards" | null;
 
 function pendingStatusText(intent: PendingIntent): string {
@@ -193,9 +177,7 @@ function ChatErrorCard({
   onRetry,
 }: {
   error: Error | undefined;
-  // Which kind of turn failed — an image extraction (Qwen) or a normal
-  // chat/tool-generation (GPT-OSS) turn — so the copy's recovery guidance
-  // fits (see getAIErrorCopy's own comment on why these differ).
+  // Image extraction vs. normal chat/tool-generation, so recovery copy fits.
   context: AIErrorContext;
   retrying: boolean;
   onRetry: () => void;
@@ -204,11 +186,7 @@ function ChatErrorCard({
 
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4">
-      {/*
-        This card appears mid-conversation with no navigation to cue a
-        screen reader user that something changed — `role="alert"` announces
-        it the moment it mounts, same as it would be seen appear visually.
-      */}
+      {/* role="alert" announces this card the moment it mounts mid-conversation. */}
       <div role="alert" className="flex items-center gap-2.5">
         <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
           <CircleAlertIcon aria-hidden="true" className="size-4" />
@@ -236,11 +214,8 @@ function ChatErrorCard({
   );
 }
 
-// Mode picker for the composer — mirrors the Radix DropdownMenu pattern
-// already used for the Generate accent picker in SettingsClient.tsx. The
-// "Fast" item is disabled while an image is attached (fast mode doesn't
-// support images), so the invalid combination can't be selected through
-// this control.
+// Mode picker for the composer. "Fast" is disabled while an image is
+// attached, since fast mode doesn't support images.
 function ModeSelector({
   mode,
   onModeChange,
@@ -311,33 +286,22 @@ export default function ChatInterface({
   onQuizGenerated,
   onFlashcardsGenerated,
 }: {
-  /** Set when arriving from History (or a Recent Chat selection) via
-   * /generate?conversationId=... */
+  /** Set when arriving from History via /generate?conversationId=... */
   initialConversationId?: string;
   initialMessages?: LumoraUIMessage[];
-  /** Set when arriving from Explore's "Study Topic" link
-   * (/generate?topic=...) — prefills the composer so the user can edit
-   * before sending, rather than auto-sending on their behalf. */
+  /** Set when arriving from Explore's "Study Topic" link — prefills the
+   * composer rather than auto-sending. */
   initialTopic?: string;
-  /** Fired the moment `conversationId` (see below) becomes known — either
-   * immediately, if `initialConversationId` was already given, or the
-   * instant the server creates a brand-new conversation and reports it
-   * back via message metadata. GenerateWorkspace uses this to keep the
-   * URL and its Recent Chats list in sync with whichever conversation is
-   * actually active in this tab. */
+  /** Fired the moment conversationId becomes known, so GenerateWorkspace
+   * can keep the URL and Recent Chats in sync. */
   onConversationIdKnown?: (id: string) => void;
-  /** Fired whenever a turn finishes (successfully or not) — i.e. `status`
-   * leaves "submitted"/"streaming". GenerateWorkspace uses this to
-   * refresh the Recent Chats list so a conversation's position/title stay
-   * current after each message. */
+  /** Fired whenever a turn finishes, so GenerateWorkspace can refresh
+   * Recent Chats. */
   onTurnSettled?: () => void;
-  /** Fired once per quiz the moment its tool call reaches
-   * output-available, so GenerateWorkspace can show it in Resources'
-   * Quizzes tab — see PracticeToolPart.tsx for why the in-chat rendering
-   * itself stays non-interactive. */
+  /** Fired once per quiz when its tool call reaches output-available, for
+   * Resources' Quizzes tab. */
   onQuizGenerated?: (quiz: CreateQuizOutput) => void;
-  /** Same as onQuizGenerated, for the `createFlashcards` tool and
-   * Resources' Flashcards tab. */
+  /** Same as onQuizGenerated, for createFlashcards and the Flashcards tab. */
   onFlashcardsGenerated?: (flashcards: CreateFlashcardsOutput) => void;
 }) {
   const [input, setInput] = useState(() =>
@@ -346,12 +310,8 @@ export default function ChatInterface({
   const [mode, setMode] = useState<ChatMode>(DEFAULT_CHAT_MODE);
   const [imageAttachment, setImageAttachment] = useState<ImageAttachment | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
-  // Set right before each send that should show non-generic loading copy
-  // (see PendingIntent above); read only while a turn is actually pending,
-  // so a stale value from a prior turn never matters once the next one sets
-  // its own. A retry (`handleRetry`) deliberately never touches this — it's
-  // re-attempting the exact turn that just failed, so keeping its original
-  // intent is correct, not stale.
+  // Set right before each send that should show non-generic loading copy.
+  // handleRetry never touches this, since it's re-attempting the same turn.
   const [pendingIntent, setPendingIntent] = useState<PendingIntent>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -361,31 +321,19 @@ export default function ChatInterface({
       transport: new DefaultChatTransport({ api: "/api/chat" }),
     });
 
-  // Two ways this becomes known: resuming from History arrives already
-  // knowing it (`initialConversationId`); starting fresh learns it once the
-  // server creates a conversation and reports it back via the assistant
-  // message's metadata (see `messageMetadata` in app/api/chat/route.ts).
-  // Never chosen client-side. Once known, every later request includes it
-  // as `body.conversationId` so the server continues the same conversation.
+  // Known immediately when resuming from History, or learned mid-stream
+  // once the server creates a conversation and reports it via message
+  // metadata. Never chosen client-side.
   const conversationId =
     initialConversationId ??
     messages.find((message) => message.metadata?.conversationId)?.metadata
       ?.conversationId;
 
-  // Only passes a second argument once there's a conversation to continue,
-  // keeping the first request in a session unchanged. The single choke
-  // point every send path routes through. `mode` always accompanies the
-  // request (the server defaults to "auto" if it's ever missing); an
-  // attached image, if any, goes along as a `files` part per the AI SDK's
-  // own `sendMessage({ text, files })` shape.
-  //
-  // `modeOverride` exists for the ExtractionCard's Create Quiz/Create
-  // Flashcards actions (see `handleExtractionAction` below): those must
-  // always land on the text-only GPT-OSS path regardless of whatever mode
-  // the composer's own selector currently shows — if the user were still on
-  // "Vision" from having just sent the image, reusing that mode here would
-  // route the follow-up back to Qwen (with the full tool registry, since
-  // this message carries no image) instead of GPT-OSS.
+  // The single choke point every send path routes through. `modeOverride`
+  // exists for ExtractionCard's Create Quiz/Flashcards actions, which must
+  // always land on GPT-OSS regardless of the composer's current mode — if
+  // the user were still on "Vision," reusing it here would route the
+  // follow-up back to Qwen instead.
   function sendChatMessage(message: { text: string }, options: { modeOverride?: ChatMode } = {}) {
     const effectiveMode = options.modeOverride ?? mode;
     const body = conversationId ? { conversationId, mode: effectiveMode } : { mode: effectiveMode };
@@ -408,17 +356,12 @@ export default function ChatInterface({
     );
   }
 
-  // Reports `conversationId` up the moment it's known — immediately for a
-  // resumed conversation, or mid-stream for a new one, the instant the
-  // server's `start` metadata reaches `messages`.
   useEffect(() => {
     if (conversationId) onConversationIdKnown?.(conversationId);
   }, [conversationId, onConversationIdKnown]);
 
-  // Reports every turn end (success or failure) so GenerateWorkspace can
-  // re-fetch Recent Chats. Comparing against the previous status (not just
-  // `status === "ready"`) limits this to real transitions, not every
-  // re-render while already idle.
+  // Compares against the previous status, not just `status === "ready"`,
+  // to catch real transitions rather than every re-render while idle.
   const previousStatusRef = useRef(status);
   useEffect(() => {
     const previousStatus = previousStatusRef.current;
@@ -429,11 +372,8 @@ export default function ChatInterface({
     }
   }, [status, onTurnSettled]);
 
-  // Reports each quiz exactly once, when its tool call's output becomes
-  // available — scans every message, not just the latest, since a resumed
-  // conversation can already contain a finished quiz on first render.
-  // `seenQuizIdsRef` (not state) keeps this a pure "notify once" side
-  // effect with nothing to re-render for.
+  // Notifies once per quiz. Scans every message, not just the latest,
+  // since a resumed conversation can already contain a finished quiz.
   const seenQuizIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!onQuizGenerated) return;
@@ -449,8 +389,7 @@ export default function ChatInterface({
     }
   }, [messages, onQuizGenerated]);
 
-  // Same "notify once" mechanism as the quiz effect above, for
-  // `tool-createFlashcards` parts.
+  // Same notify-once mechanism, for tool-createFlashcards parts.
   const seenFlashcardSetIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!onFlashcardsGenerated) return;
@@ -471,12 +410,10 @@ export default function ChatInterface({
     }
   }, [messages, onFlashcardsGenerated]);
 
-  // Randomized once per mount, cached in the ref, never recomputed
-  // afterward. `useSyncExternalStore`'s server snapshot keeps this
-  // hydration-safe: React renders the deterministic
-  // `getServerExamplePrompts()` value through hydration, then swaps to the
-  // real random snapshot right after — no `Math.random()` ever runs during
-  // render itself, so there's nothing to mismatch.
+  // Randomized once per mount, cached in the ref. useSyncExternalStore's
+  // server snapshot keeps this hydration-safe: the deterministic server
+  // value renders first, then swaps to the real random one — Math.random()
+  // never runs during render itself.
   const randomExamplePromptsRef = useRef<string[] | null>(null);
   const examplePrompts = useSyncExternalStore(
     subscribeToNothing,
@@ -498,29 +435,22 @@ export default function ChatInterface({
   const isEmpty = messages.length === 0;
   const hasError = status === "error";
 
-  // A ref (not just the mirrored `isRetrying` state below) so the guard is
-  // effective the instant a second click happens — state updates only take
-  // effect on the next render, which is too late to stop a synchronous
-  // double-click from firing `regenerate()` twice.
+  // A ref, not just state, so the guard is effective the instant a second
+  // click happens — state updates land too late to stop a synchronous
+  // double-click from firing regenerate() twice.
   const isRetryingRef = useRef(false);
   const [isRetrying, setIsRetrying] = useState(false);
 
-  // Same principle as `isRetryingRef` above, for the composer's submit
-  // path: `canSend` is derived from `status`, so two submissions in the
-  // same synchronous pass can both read it as still true before either
-  // sees a render. This ref closes that window on top of the `canSend`
-  // check, not in place of it.
+  // Same principle for the composer's submit path: canSend is derived from
+  // status, so two synchronous submissions could both read it as true.
   const isSubmittingRef = useRef(false);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  // Mirrors "is the user currently near the bottom", read on every scroll
-  // event without triggering a re-render. Only the boolean transitions
-  // (near <-> away) touch React state, via `showJumpToLatest` below.
+  // Mirrors "is the user near the bottom" without triggering a re-render;
+  // only near/away transitions touch state, via showJumpToLatest below.
   const isNearBottomRef = useRef(true);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
-  // Symmetric to the above, for the top edge. Unlike `isNearBottomRef` this
-  // has no "auto-follow" behavior attached to it — it only ever drives
-  // whether the "Go to top" button is shown.
+  // Symmetric, for the top edge — drives only the "Go to top" button.
   const isNearTopRef = useRef(true);
   const [showGoToTop, setShowGoToTop] = useState(false);
 
@@ -534,9 +464,8 @@ export default function ChatInterface({
   const jumpButtonWrapperRef = useRef<HTMLDivElement>(null);
   const goToTopButtonWrapperRef = useRef<HTMLDivElement>(null);
 
-  // Message ids already given their entrance animation, so a message is
-  // only ever animated in once — never re-triggered while its text is
-  // still streaming in.
+  // Message ids already animated in, so it never re-triggers while
+  // streaming.
   const animatedMessageIdsRef = useRef<Set<string>>(new Set());
 
   function isScrolledNearBottom() {
@@ -564,13 +493,9 @@ export default function ChatInterface({
     el.scrollTo({ top: 0, behavior });
   }
 
-  // A conversation that already has history on mount (resumed from
-  // History, a Recent Chat, or a refresh) starts at the *top* of it
-  // instead of jumping to the latest message — a fresh conversation has no
-  // history and never reaches this (the scroll container isn't rendered
-  // yet, see `isEmpty`). "Go to latest" is how the user reaches the
-  // bottom; whether it's shown is computed from the real post-scroll
-  // position, not assumed.
+  // A conversation resumed with existing history starts at the top rather
+  // than jumping to the latest message. "Go to latest" is how the user
+  // reaches the bottom.
   const hasAppliedInitialScrollRef = useRef(false);
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -581,24 +506,17 @@ export default function ChatInterface({
     const nearBottom = isScrolledNearBottom();
     isNearBottomRef.current = nearBottom;
     isNearTopRef.current = true;
-    // Not a state-mirrors-state loop: `showJumpToLatest` reflects the real
-    // post-mutation scroll position, which can only be measured once the
-    // scroll container exists and `scrollTop` above has actually been
-    // applied — there's no way to know it before that DOM mutation runs.
+    // Reflects the real post-mutation scroll position — can only be
+    // measured once scrollTop above has actually been applied.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setShowJumpToLatest(!nearBottom);
-    // We just forced scrollTop to 0 above, so this is always at the top —
-    // no measurement needed, unlike the bottom case.
+    // We just forced scrollTop to 0, so this is always at the top.
     setShowGoToTop(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, the first time the scroll container exists; only `isEmpty` flipping to false makes that happen.
   }, [isEmpty]);
 
-  // Recomputes both edge states from the real, current scroll position, and
-  // only touches React state on an actual near/away transition — shared by
-  // the scroll listener below (the user's own scrolling) and the auto-
-  // follow effect further down (programmatic scrolling as new content
-  // arrives), so both sources of movement keep "Go to top"/"Go to latest"
-  // correct the same way.
+  // Shared by the scroll listener (user scrolling) and the auto-follow
+  // effect (programmatic scrolling), so both keep the edge buttons correct.
   function updateScrollEdgeState() {
     const nearBottom = isScrolledNearBottom();
     if (nearBottom !== isNearBottomRef.current) {
@@ -612,13 +530,8 @@ export default function ChatInterface({
     }
   }
 
-  // Tracks the user's own scrolling. Passive + only updates state on an
-  // actual near/away transition, so this doesn't re-render on every pixel
-  // scrolled while the list is being auto-followed.
-  //
-  // The scroll container only exists once the conversation has started
-  // (see `isEmpty`), so this must re-run when that mounts — an empty dep
-  // array would never pick the container up once it appears.
+  // Passive, and only updates state on an actual near/away transition, so
+  // this doesn't re-render on every pixel scrolled.
   useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
@@ -628,27 +541,19 @@ export default function ChatInterface({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- updateScrollEdgeState is recreated every render; only isEmpty (the container mounting) should re-attach the listener.
   }, [isEmpty]);
 
-  // Auto-follows new content, but only while the user hasn't scrolled away
-  // from the bottom. Instant ("auto"), not smooth — this can fire once per
-  // token and a restarting smooth-scroll looks janky; smooth is reserved
-  // for the explicit "Go to latest" action below.
-  //
-  // `updateScrollEdgeState()` here catches the top scrolling out of view as
-  // content grows, since that growth never fires a native `scroll` event
-  // on its own.
+  // Auto-follows new content, but only while not scrolled away from the
+  // bottom. Instant, not smooth — this can fire once per token, and smooth
+  // is reserved for the explicit "Go to latest" action.
   useEffect(() => {
     if (isNearBottomRef.current) scrollToBottom("auto");
-    // Reflects the real, just-applied scroll position (including the
-    // programmatic scroll above, when it ran) — not a state-mirrors-state
-    // loop, the DOM mutation is the source of truth being measured.
+    // Content growth never fires a native scroll event on its own, so this
+    // catches the top scrolling out of view as it grows.
     updateScrollEdgeState();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- updateScrollEdgeState is recreated every render; only new message content should re-run this.
   }, [messages]);
 
-  // One-time cascading entrance for the empty state (heading -> description
-  // -> example prompts -> composer). The empty state only ever renders once
-  // per session — there's no "clear chat" affordance — so this runs once on
-  // mount and never again.
+  // One-time cascading entrance for the empty state — there's no "clear
+  // chat" affordance, so this only ever runs once on mount.
   useGSAP(
     () => {
       if (prefersReducedMotion()) return;
@@ -674,10 +579,8 @@ export default function ChatInterface({
     { scope: emptyStateRef, dependencies: [] },
   );
 
-  // Fade + scale the Jump-to-latest badge in whenever it becomes visible.
-  // No matching exit animation: it would need extra state just to delay
-  // unmounting past the existing `showJumpToLatest` condition, and instant
-  // disappearance doesn't hurt the UX enough to justify that.
+  // Fade + scale in whenever the Jump-to-latest badge appears. No exit
+  // animation — instant disappearance is fine here.
   useGSAP(
     () => {
       if (
@@ -696,7 +599,7 @@ export default function ChatInterface({
     { dependencies: [showJumpToLatest] },
   );
 
-  // Same fade + scale-in as "Go to latest" above, for "Go to top".
+  // Same fade + scale-in, for "Go to top".
   useGSAP(
     () => {
       if (
@@ -715,12 +618,9 @@ export default function ChatInterface({
     { dependencies: [showGoToTop] },
   );
 
-  // Animate a message row in only the first time it's introduced into the
-  // list — never on subsequent content updates. `messages.length` only
-  // changes when a message is pushed (a new user message, or the
-  // assistant's first streamed chunk); it stays constant while an existing
-  // message's text is being replaced chunk-by-chunk, so this intentionally
-  // does not fire on every streamed token.
+  // Animates a message row in only the first time it's introduced.
+  // messages.length stays constant while an existing message's text
+  // streams in, so this doesn't fire on every token.
   useGSAP(
     () => {
       if (prefersReducedMotion()) return;
@@ -757,11 +657,7 @@ export default function ChatInterface({
     scrollToTop(prefersReducedMotion() ? "auto" : "smooth");
   }
 
-  // The ref guard (`isSubmittingRef`) is checked first and synchronously —
-  // see its declaration above for why `canSend` alone isn't enough to stop
-  // two submissions fired before React re-renders. It's released in
-  // `finally` so a real failure (or just the turn finishing) never leaves
-  // the composer permanently unable to submit again.
+  // Released in `finally` so a failure never leaves the composer stuck.
   async function handleSubmit(event?: FormEvent) {
     event?.preventDefault();
     if (isSubmittingRef.current) return;
@@ -787,10 +683,8 @@ export default function ChatInterface({
     }
   }
 
-  // A new selection always replaces any existing attachment (the composer
-  // only ever allows one image at a time) — the input is reset immediately
-  // after reading so selecting the exact same file again still fires
-  // `onChange`.
+  // Input reset immediately after reading, so selecting the same file
+  // again still fires onChange.
   async function handleImageFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -816,12 +710,8 @@ export default function ChatInterface({
     setImageError(null);
   }
 
-  // The text of the follow-up message an ExtractionCard action sends. Kept
-  // short and natural-sounding rather than re-dumping the full extraction
-  // (which is already in this conversation's history via the extraction
-  // turn's own hidden text part — see formatExtractionAsText's comment in
-  // app/api/chat/route.ts) — naming the extracted title, when there is one,
-  // gives GPT-OSS a concrete subject without that repetition.
+  // Kept short rather than re-dumping the full extraction, which is
+  // already in history via the extraction turn's own hidden text part.
   function extractionActionText(title: string | null, kind: "quiz" | "flashcards"): string {
     const subject = title?.trim() || "the image I shared";
     return kind === "quiz"
@@ -829,12 +719,8 @@ export default function ChatInterface({
       : `Create flashcards based on ${subject}.`;
   }
 
-  // Same double-submit race as handleSubmit/handleExampleClick above, same
-  // fix. `modeOverride: "auto"` (not the composer's current `mode` state) is
-  // what actually keeps this on the GPT-OSS path — see sendChatMessage's own
-  // comment for why. No image is ever attached at this point (it was
-  // cleared when the extraction turn itself was sent), so this always goes
-  // out as a plain text-only message.
+  // `modeOverride: "auto"`, not the composer's current mode, is what keeps
+  // this on the GPT-OSS path — see sendChatMessage's own comment.
   async function handleExtractionAction(title: string | null, kind: "quiz" | "flashcards") {
     if (isSubmittingRef.current || status !== "ready") return;
     isSubmittingRef.current = true;
@@ -849,19 +735,13 @@ export default function ChatInterface({
     }
   }
 
-  // The ExtractionCard's "Ask about this" affordance — chat is already
-  // free-form, so this just moves focus to the composer rather than sending
-  // anything on the user's behalf.
+  // Moves focus to the composer rather than sending anything automatically.
   function handleAskAboutThis() {
     composerTextareaRef.current?.focus();
   }
 
-  // Same race as `handleSubmit` (see `isSubmittingRef`'s own comment above)
-  // and the same fix, reusing the identical ref rather than a second one —
-  // both paths funnel through the one `sendChatMessage` choke point, so one
-  // guard covering both is enough to stop either from double-firing, and
-  // also stops one path from double-firing together with the other (e.g. an
-  // example-prompt click landing mid-composer-submit).
+  // Same race as handleSubmit, reusing the same ref since both paths
+  // funnel through sendChatMessage.
   async function handleExampleClick(prompt: string) {
     if (isSubmittingRef.current) return;
     if (status !== "ready") return;
@@ -875,23 +755,14 @@ export default function ChatInterface({
     }
   }
 
-  // Re-requests the failed turn via the SDK's own `regenerate` — drops the
-  // failed assistant message and resends from the last user message, never
-  // appending a duplicate. `regenerate` resolves rather than throws even on
-  // a failed retry, since AbstractChat routes that into `status` instead.
-  //
-  // A quiz/flashcards handoff retry must force `mode: "auto"` the same way
-  // its original send did (see sendChatMessage's `modeOverride`) — the
-  // composer's own `mode` state is never changed by that override, so if
-  // the user was on "Vision" when they sent the image (or picked it any
-  // time earlier in this same conversation), `mode` here would still be
-  // "vision". Retrying with that raw value would resend the handoff's
-  // text-only message to Qwen (with the full tool registry, since it
-  // carries no image) instead of GPT-OSS — silently burning Qwen's
-  // constrained daily quota on a request that was always meant for GPT-OSS.
-  // An image-extraction retry (`pendingIntent === "image"`) is the opposite
-  // case: it must keep whatever mode is currently selected, since that's
-  // what correctly routes the resent image back to Qwen's extraction path.
+  // Drops the failed assistant message and resends via the SDK's own
+  // regenerate. A quiz/flashcards handoff retry must force mode: "auto" the
+  // same way its original send did — the composer's mode state was never
+  // changed by that override, so retrying with the raw (possibly "vision")
+  // value would resend the handoff to Qwen instead of GPT-OSS, burning
+  // quota on a request meant for GPT-OSS. An image-extraction retry is the
+  // opposite: it must keep the current mode, since that's what routes the
+  // resent image back to Qwen.
   async function handleRetry() {
     if (isRetryingRef.current || status !== "error") return;
     isRetryingRef.current = true;
@@ -908,23 +779,15 @@ export default function ChatInterface({
     }
   }
 
-  // No assistant message exists yet for this turn (the API hasn't sent the
-  // message-start event). Once it does, the per-message "pending" branch
-  // below takes over with the same "Thinking..." text, so there is no
-  // visible swap between this and the in-message indicator.
+  // No assistant message exists yet for this turn. Once it does, the
+  // per-message "pending" branch below takes over with the same text.
   const lastMessage = messages[messages.length - 1];
   const awaitingAssistantMessage =
     status === "submitted" && (!lastMessage || lastMessage.role === "user");
-  // A failure before any assistant content appeared for this turn (network
-  // failure, or an HTTP/API error before the stream started). No assistant
-  // message exists to attach an inline error to, so it renders as its own
-  // row — mirrors `awaitingAssistantMessage` above.
+  // A failure before any assistant content appeared — no message exists to
+  // attach an inline error to, so it renders as its own row.
   const erroredBeforeAssistantMessage =
     hasError && (!lastMessage || lastMessage.role === "user");
-  // Which copy ChatErrorCard shows — driven by the same `pendingIntent` set
-  // for the turn that's now failing (see PendingIntent's own comment: it's
-  // never reset except by a fresh, unrelated send, so it's still correct
-  // here even though the turn ended in error rather than success).
   const errorContext: AIErrorContext = pendingIntent === "image" ? "extraction" : "generation";
 
   const composer = (
@@ -941,13 +804,7 @@ export default function ChatInterface({
             <span className="truncate text-xs text-muted-foreground">
               {imageAttachment.filename}
             </span>
-            {/*
-              Auto and Vision both handle an attached image the same way
-              (Fast is simply unavailable — see the ModeSelector's own
-              fastDisabled prop) — this explains that without pushing the
-              user toward switching modes themselves, and without naming
-              any provider/model.
-            */}
+            {/* Auto and Vision both handle an attached image the same way; Fast is simply unavailable. */}
             <span className="truncate text-[11px] text-muted-foreground/70">
               Image attached · Vision processing
             </span>
@@ -1052,11 +909,7 @@ export default function ChatInterface({
             </p>
           </div>
 
-          {/*
-            DOM order intentionally puts the composer before the example
-            prompts so Tab reaches the primary input first; `order-last`
-            keeps it rendered visually below the prompts as before.
-          */}
+          {/* DOM order puts the composer before the prompts so Tab reaches it first; order-last keeps it visually below. */}
           <div ref={emptyComposerRef} className="order-last w-full">
             {composer}
           </div>
@@ -1085,13 +938,7 @@ export default function ChatInterface({
       ) : (
         <>
           <div className="relative min-h-0 flex-1">
-            {/*
-              Plain scroll container — only establishes the scrollable
-              region the near-bottom/auto-follow effects read from.
-              `justify-end` lives on the inner wrapper, not here, since
-              justify-content on the overflow:auto element itself is a
-              known source of scroll-position quirks.
-            */}
+            {/* justify-end lives on the inner wrapper, not here — justify-content on the overflow:auto element causes scroll-position quirks. */}
             <div
               ref={scrollContainerRef}
               className="chat-scrollbar h-full overflow-y-auto"
@@ -1104,11 +951,8 @@ export default function ChatInterface({
                     .map((part) => part.text)
                     .join("");
                   const isLastMessage = index === messages.length - 1;
-                  // Whether this message already has anything worth
-                  // rendering — text content or a tool call that's at
-                  // least started. A tool part existing (even still in
-                  // input-streaming) counts, since QuizToolPart renders
-                  // its own "preparing" state instead of leaving a gap.
+                  // A tool part counts even mid-input-streaming, since
+                  // QuizToolPart renders its own "preparing" state.
                   const hasRenderableContent = message.parts.some(
                     (part) =>
                       (part.type === "text" && part.text.length > 0) ||
@@ -1117,13 +961,9 @@ export default function ChatInterface({
                       part.type === "tool-addKnowledgeTopic" ||
                       part.type === "data-extraction",
                   );
-                  // A message carrying a `data-extraction` part also carries
-                  // a sibling plain-text part with the same content (see
-                  // formatExtractionAsText's comment in
-                  // app/api/chat/route.ts) — kept only so the extraction
-                  // survives as conversation history for a later GPT-OSS
-                  // turn, never meant to be shown; the ExtractionCard is
-                  // this message's entire visible rendering.
+                  // A data-extraction message also carries a hidden
+                  // sibling text part (history for a later GPT-OSS turn);
+                  // the ExtractionCard is the entire visible rendering.
                   const hasExtraction = message.parts.some(
                     (part) => part.type === "data-extraction",
                   );
@@ -1132,11 +972,9 @@ export default function ChatInterface({
                     isLastMessage &&
                     !hasRenderableContent &&
                     isGenerating;
-                  // This message is the one the current failed turn was
-                  // streaming into (possibly with no content at all yet) —
-                  // render whatever it managed to produce, followed by the
-                  // error card, instead of a "Thinking..." indicator that
-                  // will now never resolve.
+                  // The message the failed turn was streaming into — render
+                  // whatever it produced, then the error card, instead of a
+                  // "Thinking..." indicator that will never resolve.
                   const isErroredMessage = !isUser && isLastMessage && hasError;
 
                   return (
@@ -1162,11 +1000,7 @@ export default function ChatInterface({
                               {pendingStatusText(pendingIntent)}
                             </span>
                           ) : (
-                            // Walk parts in the order the model produced
-                            // them — text parts render through Streamdown
-                            // as before; a `createQuiz` tool part renders
-                            // via QuizToolPart, keyed by toolCallId so it
-                            // stays mounted across its own state changes.
+                            // Walk parts in the order the model produced them.
                             <div className="flex flex-col gap-3">
                               {message.parts.map((part, partIndex) => {
                                 if (part.type === "text") {

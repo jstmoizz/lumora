@@ -1,9 +1,7 @@
 import { test, expect, type Route } from "@playwright/test";
 
-// Encodes a sequence of AI SDK UI-message-stream chunks the same way
-// `toUIMessageStreamResponse` does server-side (see
-// `node_modules/ai/dist/index.js`, `JsonToSseTransformStream`): one
-// `data: <json>\n\n` line per chunk, terminated by `data: [DONE]\n\n`.
+// Encodes chunks the same way toUIMessageStreamResponse does server-side:
+// one `data: <json>\n\n` line per chunk, terminated by `data: [DONE]\n\n`.
 function sseBody(chunks: object[]): string {
   return (
     chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") +
@@ -42,12 +40,8 @@ async function fulfillAssistantReply(
   });
 }
 
-// Mirrors what app/api/chat/route.ts's onError callbacks actually put on
-// the wire (see lib/ai/errors.ts): only ever one of the three safe
-// `AIErrorCode` strings, never the raw provider error. Mid-stream, matching
-// how a real streamText failure reaches the client (`{type:"error",
-// errorText}`, no finish chunk after it — confirmed directly against
-// node_modules/ai/dist/index.js).
+// Mirrors what app/api/chat/route.ts's onError callbacks put on the wire —
+// only a safe AIErrorCode string, mid-stream with no finish chunk after it.
 function errorSseBody(code: "RATE_LIMITED" | "PROVIDER_UNAVAILABLE" | "GENERATION_FAILED"): string {
   return sseBody([{ type: "start" }, { type: "start-step" }, { type: "error", errorText: code }]);
 }

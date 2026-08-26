@@ -4,20 +4,15 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import "./OptionWheel.css";
 
 /**
- * A faithful TypeScript port of React Bits' `OptionWheel`. Structure, the
- * rAF easing loop, and the drag/wheel/keyboard interaction are unchanged
- * from the original; only type annotations were added, `items` was made
- * required with no built-in demo fallback, and `aria-label` was made a
- * prop instead of a hardcoded string.
+ * TypeScript port of React Bits' `OptionWheel`, with `items` required and
+ * `aria-label` as a prop instead of a hardcoded string.
  */
 
 export interface OptionWheelProps {
   items: string[];
   defaultSelected?: number;
-  // Third argument is the wheel's own root listbox element — the sole real,
-  // focusable DOM node in this roving-focus control (its `role="option"`
-  // rows are plain, non-tabbable divs). Passed on every selection change so
-  // a caller can restore focus after navigating away.
+  // Third argument is the wheel's own root listbox element, so a caller can
+  // restore focus to it after navigating away.
   onChange?: (index: number, item: string, element: HTMLDivElement | null) => void;
   textColor?: string;
   activeColor?: string;
@@ -71,14 +66,10 @@ interface RunFrameRefs {
   cfgRef: React.RefObject<WheelConfig>;
 }
 
-// A plain module-level function, not a `useCallback` — it closes only over
-// refs, so it needs no stable-identity dance, and an ordinary named
-// function sidesteps `react-hooks/immutability` flagging a rAF callback
-// that schedules another call to itself.
-//
-// Single rAF loop: eases the wheel position toward its target with
-// frame-rate independent exponential smoothing, then lays out every option
-// along the curve based on its distance from the current position.
+// Module-level (not useCallback) so a self-scheduling rAF callback doesn't
+// trip react-hooks/immutability. Eases the wheel toward its target with
+// frame-rate independent smoothing, then lays out each option along the
+// curve by distance from the current position.
 function runFrame(now: number, refs: RunFrameRefs) {
   const { itemRefs, rafRef, lastRef, posRef, targetRef, cfgRef } = refs;
   const dt = Math.min((now - lastRef.current) / 1000, 0.05);
@@ -184,11 +175,8 @@ export default function OptionWheel({
   const [selectedIndex, setSelectedIndex] = useState(defaultSelected);
   const [isDragging, setIsDragging] = useState(false);
 
-  // `cfgRef`/`onChangeRef` need to reflect the latest props by the time any
-  // event handler or rAF frame reads them, but writing `ref.current` during
-  // render itself trips `react-hooks/refs` — an effect (running after every
-  // commit whose listed values actually changed, i.e. before the browser is
-  // next interactive) is the sanctioned place to do this instead.
+  // Writing ref.current during render trips react-hooks/refs, so keeping
+  // cfgRef/onChangeRef current happens in an effect instead.
   useEffect(() => {
     onChangeRef.current = onChange;
     const remPx =

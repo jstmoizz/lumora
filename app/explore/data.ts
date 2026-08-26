@@ -1,9 +1,5 @@
-// Five stops walking across Lumora's own brand gradient — indigo -> violet
-// -> pink, the same three-stop identity as the header mark (LumoraMark.css'
-// --mark-start/--mark-mid/--mark-end) and the Home hero shader
-// (lumora.frag.ts, "Lumora's own palette"). Brighter/more saturated than a
-// muted UI palette on purpose: these are meant to read as glowing light
-// sources against near-black, not flat UI chips.
+// Five stops across Lumora's brand gradient (indigo -> violet -> pink),
+// brighter than a flat UI palette since these read as glowing light sources.
 export type AccentId = "indigo" | "violet" | "orchid" | "magenta" | "rose";
 
 export const NODE_ACCENTS: Record<AccentId, { color: string; emissive: string }> = {
@@ -16,12 +12,9 @@ export const NODE_ACCENTS: Record<AccentId, { color: string; emissive: string }>
 
 const ACCENT_CYCLE: AccentId[] = ["indigo", "violet", "orchid", "magenta", "rose"];
 
-// The central Lumora element. Deliberately not a KnowledgeGraphNode: it has
-// no `position` (it sits at the origin, rendered by CentralNode), is never a
-// row in `knowledge_nodes` (virtual/implicit for every user — see
-// supabase/schema.sql), and can never be selected as a `parentId` target by
-// name since it isn't in the node list at all — every top-level node simply
-// has `parentId === null`, which *means* "attached to Core."
+// Lumora Core. Deliberately not a KnowledgeGraphNode — it's virtual, never
+// a row in `knowledge_nodes`; a top-level node's `parentId === null` is what
+// means "attached to Core."
 export const CENTRAL_NODE = {
   id: "lumora-core",
   label: "Lumora Core",
@@ -29,11 +22,8 @@ export const CENTRAL_NODE = {
 } as const;
 
 /**
- * One topic the user has actually studied — mirrors a `knowledge_nodes` row
- * (see `lib/supabase/knowledge-graph.ts`). Deliberately holds no rendering
- * data (position, color, tier) — `graphLayout.ts` derives those from this shape
- * instead of storing them, same discipline `schema.sql`'s own comment on
- * this table calls for.
+ * One topic the user has studied — mirrors a `knowledge_nodes` row. Holds
+ * no rendering data (position, color); graphLayout.ts derives that instead.
  */
 export interface KnowledgeGraphNode {
   id: string;
@@ -50,11 +40,9 @@ export interface KnowledgeGraphNode {
 }
 
 /**
- * Assigns each node a stable accent: top-level nodes (`parentId === null`)
- * cycle through the palette in creation order, so the same topic always
- * gets the same color across reloads; every descendant inherits its
- * top-level ancestor's accent, so a whole branch reads as one color family
- * (a "cluster"), rather than every node getting an independent color.
+ * Assigns each node a stable accent: top-level nodes cycle through the
+ * palette in creation order; every descendant inherits its top-level
+ * ancestor's accent, so a whole branch reads as one color family.
  */
 export function assignAccents(nodes: KnowledgeGraphNode[]): Record<string, AccentId> {
   const byId = new Map(nodes.map((node) => [node.id, node]));

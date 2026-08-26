@@ -1,7 +1,4 @@
-// A lightweight sense of progression, not a gamification system: no XP
-// bars, just a name derived from how many topics the user has actually
-// studied. Pure and deterministic — no separate table, computed fresh from
-// the node count every time.
+// A name derived from topic count, computed fresh each time — no XP bars, no separate table.
 export const LEVELS = [
   { level: 1, name: "Curious", minNodes: 0 },
   { level: 2, name: "Explorer", minNodes: 4 },

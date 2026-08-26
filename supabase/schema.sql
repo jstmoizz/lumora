@@ -1,34 +1,20 @@
 -- Lumora — Supabase database setup.
 --
--- Paste this whole file into the Supabase SQL Editor (Project -> SQL Editor
--- -> New query) and run it once, against a fresh project with no existing
--- Lumora data. It creates every table, enum, trigger, and Row Level
--- Security policy Lumora's data model needs.
+-- Paste this whole file into the Supabase SQL Editor and run it once,
+-- against a fresh project with no existing Lumora data. It creates every
+-- table, enum, trigger, and Row Level Security policy Lumora needs.
 --
--- This replaces the earlier Neon + Drizzle schema. The conceptual model is
--- unchanged (same tables, same relationships, same cascade behavior), with
--- two deliberate differences now that Supabase Auth is the auth system:
+-- No hand-rolled `session`/`verification_token` table: Supabase Auth
+-- (GoTrue) manages sessions and email verification in its own `auth`
+-- schema. `public.users` is a profile table, not the identity table —
+-- `auth.users` is the identity table, and `public.users.id` is a foreign
+-- key to it, kept in sync by the trigger below.
 --
---   1. There is no hand-rolled `session` or `verification_token` table
---      anymore. Supabase Auth (GoTrue) manages sessions (as JWTs) and email
---      verification internally, in its own `auth` schema — duplicating
---      that here would just be two sources of truth for the same thing.
---
---   2. `public.users` is a *profile* table, not the identity table itself.
---      Supabase's own `auth.users` (which you never write to directly) is
---      the identity table; `public.users.id` is a foreign key to it, kept
---      in sync by the trigger below. This is Supabase's standard pattern.
---
--- IMPORTANT — admin bootstrap is NOT done here:
--- Every new profile row defaults to role = 'user'. The trigger below never
--- compares the signing-up user's email against an admin address, and this
--- file never contains the real admin email — putting it in a tracked SQL
--- file would be the same mistake as hardcoding it in application source.
--- Promotion to 'admin' happens in Phase 2's server-side application code:
--- after a user authenticates and their email is verified, server-side code
--- reads the server-only ADMIN_EMAIL env var and — only if it matches —
--- updates that one row's role to 'admin'. The client never sends or
--- chooses a role, and nothing in this file can be used to self-promote.
+-- IMPORTANT — admin bootstrap is NOT done here: every new profile defaults
+-- to role = 'user', and this file never contains the real admin email.
+-- Promotion to 'admin' happens in server-side application code, which
+-- reads the server-only ADMIN_EMAIL env var and updates that one row's
+-- role — the client never sends or chooses a role.
 
 create extension if not exists "pgcrypto";
 
@@ -57,18 +43,12 @@ create policy "Users can view own profile"
   on public.users for select
   using (auth.uid() = id);
 
--- Deliberately no insert/update/delete policy for authenticated users here.
--- Rows are created only by the trigger below (which runs with elevated
--- privileges as `security definer`, so it isn't blocked by RLS); `role` is
--- never writable by a client under any policy, in this file or later ones —
--- that's what makes "clients can never set their own role" actually true
--- rather than just a convention.
+-- No insert/update/delete policy for authenticated users — rows are
+-- created only by the trigger below, so `role` is never client-writable.
 
--- Creates a matching `public.users` row whenever someone signs up via
--- Supabase Auth. `security definer` + a pinned `search_path` is the
--- standard, documented Supabase pattern for this — it lets the trigger
--- write to `public.users` regardless of the RLS policy above, since the
--- function runs as its owner rather than as the newly-created auth user.
+-- Creates a matching `public.users` row on signup. `security definer` +
+-- a pinned `search_path` lets the trigger write to `public.users`
+-- regardless of the RLS policy above.
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -152,10 +132,8 @@ create policy "Users can insert own messages"
     )
   );
 
--- No update/delete policy: messages are append-only in how the app actually
--- uses them (nothing edits or deletes an individual message once sent) —
--- the only way a message disappears is its conversation being deleted,
--- which cascades regardless of these policies.
+-- No update/delete policy: messages are append-only. A message only
+-- disappears via its conversation being deleted (cascades).
 
 -- ============================================================================
 -- user_settings — one row per user (1:1). Defaults mirror the placeholder
@@ -188,22 +166,16 @@ create policy "Users can update own settings"
 
 -- ============================================================================
 -- knowledge_nodes — each user's personal knowledge graph (Explore). One row
--- per topic they've actually studied (quiz/flashcard generation via
--- Generate) — the graph's root, "Lumora Core", is never a row here: it's
--- virtual/implicit, exactly like the app's own CENTRAL_NODE constant, which
--- is what makes it un-deletable by construction. A node with parent_id null
--- is attached directly under Core; parent_id otherwise points at the node
--- whose related_labels first suggested this topic.
+-- per topic they've actually studied. The graph's root, "Lumora Core", is
+-- never a row here — it's virtual, like the app's own CENTRAL_NODE
+-- constant. A node with parent_id null is attached directly under Core.
 --
--- topic_key is a normalized (lowercased/trimmed/whitespace-collapsed) form
--- of `label`, used only for per-user dedup — not a foreign key into
--- anything, since topics are free text the model chooses, not a fixed
--- vocabulary.
+-- topic_key is a normalized form of `label`, used only for per-user dedup —
+-- not a foreign key, since topics are free text, not a fixed vocabulary.
 --
 -- Holds knowledge/activity facts only. Never store Three.js/R3F rendering
--- data here (position, rotation, scale, color, camera state, animation
--- state) — the visual graph derives its layout from this data (see
--- app/explore/graphLayout.ts), it doesn't store the layout itself.
+-- data here (position, rotation, scale, camera state) — the visual graph
+-- derives its layout from this data instead of storing it.
 -- ============================================================================
 
 create table public.knowledge_nodes (
@@ -242,3 +214,48 @@ create policy "Users can delete own knowledge nodes"
   using (auth.uid() = user_id);
 
 create index knowledge_nodes_user_id_idx on public.knowledge_nodes (user_id);
+
+-- ============================================================================
+-- knowledge_node_positions — manual 3D overrides for Explore's graph. A
+-- separate table, not columns on knowledge_nodes (see its own comment
+-- above) — one row per node the user has actually dragged, not one per node.
+-- ============================================================================
+
+create table public.knowledge_node_positions (
+  node_id uuid primary key references public.knowledge_nodes (id) on delete cascade,
+  user_id uuid not null references public.users (id) on delete cascade,
+  position_x double precision not null,
+  position_y double precision not null,
+  position_z double precision not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.knowledge_node_positions enable row level security;
+
+create policy "Users can view own node positions"
+  on public.knowledge_node_positions for select
+  using (auth.uid() = user_id);
+
+create policy "Users can insert own node positions"
+  on public.knowledge_node_positions for insert
+  with check (
+    auth.uid() = user_id
+    and exists (
+      select 1
+      from public.knowledge_nodes
+      where id = node_id
+        and user_id = auth.uid()
+    )
+  );
+
+create policy "Users can update own node positions"
+  on public.knowledge_node_positions for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create policy "Users can delete own node positions"
+  on public.knowledge_node_positions for delete
+  using (auth.uid() = user_id);
+
+create index knowledge_node_positions_user_id_idx
+  on public.knowledge_node_positions (user_id);

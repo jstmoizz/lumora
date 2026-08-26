@@ -5,22 +5,13 @@ import { Vector3 } from "three";
 import KnowledgeNode from "../KnowledgeNode";
 import type { KnowledgeGraphNode } from "../../data";
 
-// jsdom has no WebGL, so the real 3D <Scene> (and, in turn, KnowledgeNode)
-// is never render-tested through ExploreClient — see that test file's own
-// top-of-file comment. Rendering KnowledgeNode directly here still isn't
-// possible against a real R3F/WebGL canvas, but its two hooks into
-// react-three-fiber/drei are narrow enough to stub out precisely: `useFrame`
-// only drives imperative per-frame mesh transforms (irrelevant to what's
-// being asserted here), and `Html` is a portal wrapper whose children are
-// plain DOM — replacing it with a passthrough renders the actual button
-// this component produces, with no reimplementation of KnowledgeNode itself.
+// jsdom can't render a real R3F/WebGL canvas, so useFrame/useThree are
+// stubbed and Html is replaced with a passthrough — this renders the actual
+// button KnowledgeNode produces without reimplementing the component.
 vi.mock("@react-three/fiber", () => ({
   useFrame: () => {},
-  // A minimal stand-in so KnowledgeNode's drag-handling code (camera/
-  // controls lookups) doesn't throw during these tests — none of the tests
-  // here actually exercise pointer-drag (jsdom has no WebGL/raycasting to
-  // make that meaningful; see this file's own top-of-file comment), they
-  // only ever click the Html label button, which never reaches this code.
+  // Minimal stand-in so drag-handling code's camera/controls lookups don't
+  // throw — no test here exercises pointer-drag, only the Html label click.
   useThree: (selector: (state: { camera: { getWorldDirection: () => void }; controls: null }) => unknown) =>
     selector({ camera: { getWorldDirection: () => {} }, controls: null }),
 }));
@@ -63,12 +54,10 @@ function renderNode(onSelect = vi.fn()) {
   return onSelect;
 }
 
-// The Topics list (OptionWheel on desktop, a chip row on mobile) renders
-// this exact same set of topics as real, accessible controls — matching
-// StaticFallback's already-established treatment of its own duplicate
-// overlay buttons (see StaticFallback.tsx's own comment for the full
-// rationale).
-describe("KnowledgeNode — floating label accessibility (H6)", () => {
+// The Topics list already renders this same set of topics as real,
+// accessible controls, so the overlay label is deliberately hidden from
+// the accessibility tree (matching StaticFallback's own overlay buttons).
+describe("KnowledgeNode — floating label accessibility", () => {
   test("the label is excluded from the tab order and hidden from the accessibility tree", () => {
     renderNode();
 
@@ -81,16 +70,11 @@ describe("KnowledgeNode — floating label accessibility (H6)", () => {
   test("a hidden label is not reachable via an accessible role query, mirroring StaticFallback's overlay buttons", () => {
     renderNode();
 
-    // getByRole excludes aria-hidden elements by default (an aria-hidden
-    // node has no computable accessible name at all, by spec) — this is the
-    // actual mechanism by which the label stops duplicating the Topics
-    // list's tab stops for keyboard/screen-reader users.
+    // aria-hidden elements are excluded from role queries by default.
     expect(
       screen.queryByRole("button", { name: "Machine Learning" }),
     ).not.toBeInTheDocument();
-    // It's still genuinely present in the DOM (confirmed via plain text, not
-    // a role query, since an aria-hidden element's role/name are themselves
-    // suppressed) — only excluded from the accessibility tree, not removed.
+    // Still genuinely in the DOM — only hidden from the accessibility tree.
     expect(screen.getByText("Machine Learning")).toBeInTheDocument();
   });
 });

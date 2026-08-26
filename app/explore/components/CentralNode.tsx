@@ -18,11 +18,8 @@ interface CentralNodeProps {
   dimmed: boolean;
 }
 
-// The central Lumora element: a slightly larger low-poly form with a
-// restrained emissive tint, only the barest rotation, and the strongest glow
-// in the scene — it should read as present and steady, the calm center
-// everything else relates to, not as the thing drawing the eye through
-// motion.
+// Lumora Core: a low-poly form with the strongest glow in the scene and
+// only the barest rotation — steady, not attention-grabbing.
 export default function CentralNode({ dimmed }: CentralNodeProps) {
   const meshRef = useRef<Mesh>(null);
   const materialRef = useRef<MeshStandardMaterial>(null);

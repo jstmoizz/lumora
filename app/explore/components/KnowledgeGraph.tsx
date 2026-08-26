@@ -17,15 +17,12 @@ interface KnowledgeGraphProps {
   onDragEnd: (id: string, position: [number, number, number]) => void;
 }
 
-// A ref, not a resolved Map/Vector3 — passed down as-is to KnowledgeNode and
-// Connections, which each do their own `.current` reads/writes exclusively
-// inside `useFrame` (never during render, which `react-hooks/refs` disallows
-// — see this file's own effect below for why the *seeding* also has to live
-// in an effect rather than directly in the render body).
+// Passed down as-is to KnowledgeNode/Connections, which read/write it only
+// inside `useFrame`, never during render.
 export type LivePositions = RefObject<Map<string, Vector3>>;
 
-// A node's own parent/children (direct graph neighbors), plus anything it
-// named as a related subtopic that happens to already be a studied node.
+// A node's parent/children, plus anything it named as a related subtopic
+// that's already a studied node.
 function relatedIdsOf(nodeId: string, nodes: KnowledgeGraphNode[]): Set<string> {
   const node = nodes.find((candidate) => candidate.id === nodeId);
   if (!node) return new Set();
@@ -53,19 +50,13 @@ export default function KnowledgeGraph({
   const positions = new Map(layout.map((entry) => [entry.id, entry]));
   const relatedIds = selectedNodeId ? relatedIdsOf(selectedNodeId, nodes) : new Set<string>();
 
-  // One shared, live Vector3 per node: each KnowledgeNode writes its own
-  // actual rendered position (drag target, idle float, or at rest) into its
-  // entry every frame, and Connections reads the same entries every frame to
-  // keep edges attached to a moving node continuously — with no React state
-  // update (and therefore no re-render) driving any of it.
+  // Shared live position per node: KnowledgeNode writes its actual rendered
+  // position every frame, and Connections reads it to keep edges attached
+  // during drag/float — no React state or re-render involved.
   const livePositionsRef: LivePositions = useRef(new Map<string, Vector3>());
 
-  // Keeps the map in sync with the current layout — in a layout effect, not
-  // the render body itself (react-hooks/refs disallows reading/writing a
-  // ref's `.current` during render), but still synchronous and complete
-  // before the browser paints or the next R3F frame ticks, so
-  // KnowledgeNode's/Connections' own useFrame loops always see a fully
-  // seeded map the first time they run.
+  // A layout effect, not the render body, so the map is fully seeded before
+  // the first useFrame tick.
   useLayoutEffect(() => {
     const map = livePositionsRef.current;
     const liveIds = new Set(layout.map((entry) => entry.id));

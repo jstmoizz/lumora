@@ -12,6 +12,7 @@ describe("supabase/schema.sql", () => {
       "public.messages",
       "public.user_settings",
       "public.knowledge_nodes",
+      "public.knowledge_node_positions",
     ]) {
       expect(sql).toContain(`create table ${table}`);
     }
@@ -29,6 +30,7 @@ describe("supabase/schema.sql", () => {
       "public.messages",
       "public.user_settings",
       "public.knowledge_nodes",
+      "public.knowledge_node_positions",
     ]) {
       expect(sql).toContain(`alter table ${table} enable row level security`);
     }
@@ -50,6 +52,29 @@ describe("supabase/schema.sql", () => {
     expect(sql).not.toMatch(/on public\.users for insert/);
     expect(sql).not.toMatch(/on public\.users for update/);
     expect(sql).not.toMatch(/on public\.users for delete/);
+  });
+
+  test("knowledge_node_positions cascades from both its node and its user", () => {
+    expect(sql).toMatch(
+      /node_id uuid primary key references public\.knowledge_nodes \(id\) on delete cascade/,
+    );
+    expect(sql).toMatch(
+      /user_id uuid not null references public\.users \(id\) on delete cascade/,
+    );
+  });
+
+  test("knowledge_node_positions can only be inserted for a node the caller actually owns", () => {
+    // Not just `auth.uid() = user_id` on the new row (a client could set
+    // user_id to its own id while pointing node_id at someone else's node) —
+    // the insert policy must also check the referenced node's own ownership.
+    const insertPolicyMatch = sql.match(
+      /create policy "Users can insert own node positions"[\s\S]*?with check \(([\s\S]*?)\);/,
+    );
+    expect(insertPolicyMatch).not.toBeNull();
+    const withCheck = insertPolicyMatch![1];
+    expect(withCheck).toMatch(/auth\.uid\(\) = user_id/);
+    expect(withCheck).toMatch(/from public\.knowledge_nodes/);
+    expect(withCheck).toMatch(/id = node_id/);
   });
 
   test("never contains a real admin email address", () => {

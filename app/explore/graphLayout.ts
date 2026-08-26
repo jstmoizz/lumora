@@ -4,47 +4,36 @@ import type { KnowledgeGraphNode } from "./data";
 export interface LayoutEntry {
   id: string;
   // 0 = top-level (attached directly to Core), 1+ = nested under another
-  // studied topic — still used by KnowledgeNode for its icosahedron/larger
-  // vs octahedron/smaller geometry choice.
+  // studied topic.
   depth: number;
   position: [number, number, number];
 }
 
-// Golden angle (~137.5°): the standard way to place points one at a time,
-// each depending only on its own index, that still end up evenly spread —
-// no need to know the eventual total count up front. That "never look
-// ahead" property is exactly what keeps this whole layout stable as new
-// nodes are added (see computeGraphLayout's own comment below).
+// Golden angle (~137.5°): places points one at a time, each depending only
+// on its own index, while still ending up evenly spread.
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
 // How far a top-level node sits from Core, and how much farther each
-// subsequent generation reaches beyond its own parent — additive, so a
-// depth-2 node's actual distance from Core is CORE_CLEARANCE +
-// GENERATION_STEP, not a separately-tuned constant per depth.
+// generation reaches beyond its parent.
 const CORE_CLEARANCE = 2.4;
 const GENERATION_STEP = 1.35;
 
-// Flattens the vertical spread a little so the graph reads as one coherent
-// "space" rather than nodes scattered in a full sphere around Core — real
-// 3D depth without turning into a chaotic ball.
+// Flattens the vertical spread so the graph reads as one coherent space
+// rather than a full sphere around Core.
 const Y_SQUASH = 0.65;
 
-// Minimum center-to-center distance any two nodes must keep. KnowledgeNode's
-// own geometry (CORE_RADIUS 0.34 / SECONDARY_RADIUS 0.24) plus Glow's
-// biggest halo (haloScaleOuter 3 on a 0.34 radius ≈ 1.0) comfortably fits
-// inside this, so two nodes at exactly this distance still read as visually
-// distinct light sources rather than a single overlapping blob.
+// Minimum center-to-center distance between any two nodes — comfortably
+// larger than a node's glow halo, so nodes at this distance still read as
+// distinct light sources rather than overlapping.
 const MIN_SEPARATION = 0.85;
-// Deterministic nudge growth per failed placement attempt — no extra
-// randomness, just walks the same already-chosen direction further out.
+// Deterministic nudge per failed placement attempt — no randomness, just
+// walks the same direction further out.
 const COLLISION_STEP = 0.35;
 const MAX_COLLISION_ATTEMPTS = 6;
 
-/** Van der Corput low-discrepancy sequence. Unlike an even division
- * (i / total), every prefix of this sequence is already well-spread across
- * [0,1) on its own — index 3's value never has to change just because a
- * 4th point showed up later. That's the other half (alongside the golden
- * angle above) of what makes per-sibling placement stable under append. */
+/** Van der Corput low-discrepancy sequence — every prefix is already
+ * well-spread across [0,1), so an earlier index never has to change when a
+ * later point is appended. */
 function vanDerCorput(index: number, base = 2): number {
   let n = index;
   let denominator = 1;
@@ -57,10 +46,9 @@ function vanDerCorput(index: number, base = 2): number {
   return result;
 }
 
-/** A deterministic unit direction for the i-th point in some group (e.g. the
- * i-th child of a given parent), using only `index` — never the group's
- * eventual total size. `seed` offsets the azimuth so unrelated groups (two
- * different parents' children) don't all fan out in an identical pattern. */
+/** A deterministic unit direction for the i-th point in a group, using only
+ * `index` (never the group's eventual size). `seed` offsets the azimuth so
+ * different parents' children don't fan out identically. */
 function sphereDirection(index: number, seed: number): [number, number, number] {
   const azimuth = (index + seed) * GOLDEN_ANGLE;
   const polar = Math.acos(1 - 2 * vanDerCorput(index + 1));
@@ -85,24 +73,15 @@ function tooClose(
 /**
  * Deterministic, true-3D, relationship-aware, append-stable graph layout.
  *
- * No force simulation and no full-graph relaxation — each node's position is
- * computed once, from its parent's already-fixed position plus a direction
- * derived purely from its index among siblings (golden angle + Van der
- * Corput, both "no lookahead" sequences — see their own comments). Nodes are
- * placed in a single top-down pass (Core outward), so a child is always
- * positioned after its parent's final position is already known, and a
- * newly-appended node — whichever parent it lands under — is always the
- * *last* sibling considered at its level, so it can never change where an
- * earlier sibling (or any other already-placed node) ended up. That's what
- * keeps the whole graph visually stable as it grows, without needing to
- * remember anything across calls.
+ * Each node's position is derived from its parent's already-fixed position
+ * plus a direction based on its index among siblings (golden angle + Van
+ * der Corput), placed top-down from Core outward. A newly-appended node is
+ * always the last sibling considered at its level, so it can never shift an
+ * already-placed node — that's what keeps the graph stable as it grows.
  *
- * This stability guarantee covers *addition* only (the actual complaint
- * this rewrite fixes) — a node's direction is derived from its rank among
- * still-existing siblings, so deleting an earlier sibling can shift a later
- * one. Not a regression: the previous implementation had no stability
- * under any change, and a delete already triggers a fresh `nodes` array
- * (and therefore an already-expected fresh layout) via `router.refresh()`.
+ * Stability covers addition only: deleting an earlier sibling can shift a
+ * later one, but a delete already produces a fresh `nodes` array (and
+ * therefore an expected fresh layout) anyway.
  */
 export function computeGraphLayout(nodes: KnowledgeGraphNode[]): LayoutEntry[] {
   const byParent = new Map<string | null, KnowledgeGraphNode[]>();
@@ -117,7 +96,7 @@ export function computeGraphLayout(nodes: KnowledgeGraphNode[]): LayoutEntry[] {
 
   const entries = new Map<string, LayoutEntry>();
   // Every already-placed position, Core included, so a new node avoids
-  // overlapping *any* nearby cluster — not just its own siblings.
+  // overlapping any nearby cluster, not just its own siblings.
   const placed = new Map<string, [number, number, number]>([["lumora-core", [0, 0, 0]]]);
 
   function place(parentId: string | null, depth: number, parentPosition: [number, number, number]) {
@@ -139,11 +118,8 @@ export function computeGraphLayout(nodes: KnowledgeGraphNode[]): LayoutEntry[] {
       }
 
       let candidate = candidateAt(baseDistance);
-      // Generate the next candidate, check it, repeat — capped, then fall
-      // back to whatever the last attempt produced (pushed further out
-      // along the same direction each time, so it's still deterministic and
-      // still relationship-aware, just not guaranteed collision-free in a
-      // pathologically dense graph).
+      // Push further out along the same direction each attempt — still
+      // deterministic, just not guaranteed collision-free in a dense graph.
       for (let attempt = 1; attempt <= MAX_COLLISION_ATTEMPTS && tooClose(candidate, placed); attempt++) {
         candidate = candidateAt(baseDistance + attempt * COLLISION_STEP);
       }
@@ -158,10 +134,8 @@ export function computeGraphLayout(nodes: KnowledgeGraphNode[]): LayoutEntry[] {
   return Array.from(entries.values());
 }
 
-/** The farthest any node sits from Core (full 3D distance) — used to size
- * the camera's overview framing to the graph's actual extent (see
- * Scene.tsx) rather than a fixed distance that overlaps a wide/deep graph or
- * leaves a small one adrift. */
+/** The farthest any node sits from Core — used to size the camera's
+ * overview framing to the graph's actual extent. */
 export function maxLayoutRadius(layout: LayoutEntry[]): number {
   return layout.reduce(
     (max, entry) => Math.max(max, Math.hypot(...entry.position)),
@@ -169,18 +143,13 @@ export function maxLayoutRadius(layout: LayoutEntry[]): number {
   );
 }
 
-/** A layout entry's position is already the real 3D position — this stays a
- * function (rather than every call site reading `.position` directly) so
- * existing call sites didn't need to change when the layout moved from
- * angle/radius to raw cartesian coordinates. */
+/** A layout entry's position is already the real 3D position — kept as a
+ * function so call sites don't need to change if that ever stops being true. */
 export function toVector3(entry: LayoutEntry): [number, number, number] {
   return entry.position;
 }
 
-/** 2D percentage position for StaticFallback: a top-down (X/Z) projection,
- * scaled to stay within a roughly centered viewbox regardless of how far the
- * graph's 3D layout actually reaches. Y is intentionally ignored here — the
- * static map is a flat plan view, not an attempt to render true 3D. */
+/** 2D percentage position for StaticFallback: a top-down (X/Z) projection. */
 export function toPercentPosition(entry: LayoutEntry, maxRadius: number): { top: string; left: string } {
   const [x, , z] = entry.position;
   const radius = Math.hypot(x, z);
@@ -188,22 +157,17 @@ export function toPercentPosition(entry: LayoutEntry, maxRadius: number): { top:
   const scale = maxRadius > 0 ? (radius / maxRadius) * 38 : 0;
   const top = 50 - Math.sin(angle) * scale;
   const left = 50 + Math.cos(angle) * scale;
-  // Fixed precision, not the raw float: `Math.sin`/`Math.cos` can differ in
-  // their last bit between Node (SSR) and the browser (CSR) for the same
-  // input, which otherwise trips React's hydration-mismatch warning over a
-  // difference smaller than a pixel.
+  // Fixed precision: Math.sin/cos can differ in their last bit between
+  // Node (SSR) and the browser (CSR), which otherwise trips a hydration
+  // mismatch over a sub-pixel difference.
   return { top: `${top.toFixed(4)}%`, left: `${left.toFixed(4)}%` };
 }
 
 /**
  * Layers manually-dragged positions on top of a freshly computed layout.
- * Pure and cheap enough to call on every render: `overrides` only ever holds
- * nodes the user has actually dragged (typically zero or a handful), so this
- * is not a full re-layout — every other node's position still comes straight
- * from `computeGraphLayout`, untouched. Keeping this separate from
- * `computeGraphLayout` itself is what lets a manual position survive a graph
- * update (a new node elsewhere) without the automatic placement system ever
- * needing to know a node was moved.
+ * `overrides` typically holds zero or a handful of nodes, so this is cheap
+ * enough to call on every render — every other node's position still comes
+ * straight from `computeGraphLayout`.
  */
 export function applyManualOverrides(
   layout: LayoutEntry[],

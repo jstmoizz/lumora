@@ -14,35 +14,25 @@ interface ConnectionsProps {
   layout: LayoutEntry[];
   accents: Record<string, AccentId>;
   selectedNodeId: string | null;
-  // The same shared live-position store KnowledgeNode writes its own current
-  // rendered position into every frame (drag target, idle float, or at
-  // rest) — read here, also every frame, so an edge follows a moving node
-  // continuously instead of only updating once a drag commits and `layout`
-  // itself changes.
+  // Same live-position store KnowledgeNode writes every frame — read here
+  // too, so an edge follows a moving node continuously.
   livePositions: LivePositions;
 }
 
 const ORIGIN: [number, number, number] = [0, 0, 0];
-// Core never drags or floats, so its side of a spoke edge is always exactly
-// the origin — reused rather than allocated fresh every frame.
+// Core never drags or floats, so its side of a spoke edge is always the origin.
 const ORIGIN_VECTOR = new Vector3(0, 0, 0);
 
-// Bold, glowing spokes from Core to every top-level node, plus one line per
-// parent->child edge in the graph's own tree — no invented connections, the
-// same real edge set as before, just styled more dramatically (brighter,
-// thicker, glow-halo'd) so the graph reads as dense and energized rather
-// than a sparse diagram, while staying on Lumora's own brand gradient.
-const HOT_COLOR = "#f9a8d4"; // --mark-end (pink-300), the brand gradient's hot end
-const DIM_COLOR = "#3d2a52"; // deep, desaturated indigo/violet
+// Glowing spokes from Core to every top-level node, plus one line per
+// parent->child edge — Lumora's brand gradient, styled to read as dense and
+// energized rather than a plain diagram.
+const HOT_COLOR = "#f9a8d4"; // brand gradient's hot end
+const DIM_COLOR = "#3d2a52";
 
 type LineRefMap = React.RefObject<Map<string, LineSegments2>>;
 
-// A plain module-level function, not a closure — mirrors KnowledgeNode.tsx's
-// own `setControlsEnabled`: writing into a ref's Map from inside a callback
-// ref (itself invoked by React at commit time, never during render) still
-// gets flagged by react-hooks/immutability when the writing function is
-// defined inside the component; moving it out sidesteps that, and avoids
-// ever reading `.current` in the render body at all (react-hooks/refs).
+// Module-level so writing into the ref's Map doesn't trip
+// react-hooks/immutability.
 function setLineRef(map: LineRefMap, key: string, instance: LineSegments2 | null): void {
   if (instance) map.current.set(key, instance);
   else map.current.delete(key);
@@ -52,13 +42,8 @@ export default function Connections({ nodes, layout, accents, selectedNodeId, li
   const positions = new Map(layout.map((entry) => [entry.id, toVector3(entry)]));
   const byId = new Map(nodes.map((node) => [node.id, node]));
 
-  // Two parallel maps (not one map-of-pairs) so every write from a JSX ref
-  // callback is a single, direct `setLineRef(mapRef, key, instance)` call —
-  // no object needs to be read from a ref first (see setLineRef's own
-  // comment on why that matters). Keyed by "fromId::toId"; entries for edges
-  // no longer in the graph are simply never looked up again once their
-  // <Line>s unmount and null out their own refs — inert, not a real leak at
-  // this graph's scale.
+  // Keyed by "fromId::toId". Stale entries for removed edges are simply
+  // never looked up again once their <Line>s unmount.
   const glowRefs = useRef<Map<string, LineSegments2>>(new Map());
   const brightRefs = useRef<Map<string, LineSegments2>>(new Map());
 
@@ -92,9 +77,7 @@ export default function Connections({ nodes, layout, accents, selectedNodeId, li
           const opacity = selectedNodeId === null ? 0.4 : involvesSelected ? 0.6 : 0.1;
           return (
             <group key={`spoke-${node.id}`}>
-              {/* A wider, fainter additive copy behind the bright line fakes
-                  a soft glow along the edge, same technique as Glow.tsx's
-                  node halos, without a postprocessing pass. */}
+              {/* Wider, fainter copy behind the bright line fakes a glow, same technique as Glow.tsx. */}
               <Line
                 ref={(instance) => setLineRef(glowRefs, key, instance)}
                 points={[ORIGIN, position]}

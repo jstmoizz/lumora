@@ -17,33 +17,20 @@ function createTestAdminClient() {
   });
 }
 
-// Mirrors lib/knowledge-graph/topics.ts's normalizeTopicKey exactly — see
-// expanded-concepts.spec.ts's own copy of this function for why it's
-// duplicated rather than imported.
+// Mirrors lib/knowledge-graph/topics.ts's normalizeTopicKey — not imported,
+// since e2e specs avoid reaching into app modules.
 function normalizeTopicKey(label: string): string {
   return label.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-// Uses the dedicated history-test account (otherwise only used by
-// history.spec.ts, which never touches /explore or knowledge_nodes) rather
-// than the default shared account. These tests used to rely on the default
-// storageState and were flaky for the same reason documented in
-// settings.spec.ts: auth.spec.ts's "log out"
-// test calls Supabase's signOut() with its default global scope against
-// the default account, which can revoke this test's session mid-run on a
-// concurrent worker. That race went from "rare" to "reliably reproduced" as
-// Phase 4.2/4.3 added more e2e specs and stretched the suite's total
-// runtime — fixed here using the same established pattern the other
-// specs already use, not a change to any of the actual assertions below.
+// Uses the dedicated history-test account rather than the default shared
+// one — auth.spec.ts's "log out" test signs the default account out
+// globally, which can revoke this test's session mid-run on a concurrent worker.
 test.use({ storageState: { cookies: [], origins: [] } });
 
-// All three tests below seed and clean up the SAME set of knowledge_nodes
-// rows under the shared history-test account. Under Playwright's default
-// fullyParallel scheduling they'd race each other within this file (one
-// test's afterEach cleanup deleting rows a concurrently-running sibling
-// still needs) — serializing just this file's own tests relative to each
-// other avoids that without opting the rest of the suite out of
-// parallelism. Same pattern as expanded-concepts.spec.ts.
+// All three tests seed and clean up the same knowledge_nodes rows, which
+// would race under fullyParallel scheduling. Serializing just this file
+// avoids that without opting the rest of the suite out of parallelism.
 test.describe.configure({ mode: "serial" });
 
 const ALGORITHMS_LABEL = "Algorithms";
@@ -71,13 +58,8 @@ async function getUserId(admin: SupabaseClient): Promise<string> {
   return profile.id as string;
 }
 
-// Creates the real knowledge_nodes rows this spec's UI assertions depend
-// on — the actual root cause of these tests' failures was that the account
-// had zero topics, so the Topics list (OptionWheel, backed entirely by
-// knowledge_nodes — see ExploreClient.tsx's allTopicLabels) had nothing to
-// show. Upserts rather than plain inserts so a re-run after an interrupted
-// previous cleanup never collides on knowledge_nodes' `unique (user_id,
-// topic_key)` constraint.
+// Upserts rather than plain inserts so a re-run after an interrupted
+// previous cleanup never collides on the unique (user_id, topic_key) constraint.
 async function seedKnowledgeNodes(admin: SupabaseClient, userId: string) {
   for (const label of OWNED_TOP_LEVEL_LABELS) {
     const { error } = await admin.from("knowledge_nodes").upsert(
@@ -126,19 +108,12 @@ test("primary flow: select a topic, read its panel, return to overview", async (
     page.getByRole("heading", { name: "Your knowledge universe" }),
   ).toBeVisible();
 
-  // The top-level topic list is OptionWheel's roving-focus listbox (an
-  // `<aside aria-label="Topics">` wrapping a `role="listbox"`, `role="option"`
-  // structure) — not a `<nav>`/`<button>` list.
   const topics = page.getByRole("listbox", { name: "Topics" });
   await expect(topics).toBeVisible();
 
-  // OptionWheel always starts with index 0 selected internally
-  // (`defaultSelected` defaults to 0) but node order from the DB query
-  // isn't guaranteed, so it's never safe to assume Algorithms starts there.
-  // Selection only fires its onChange when a click actually *changes* the
-  // selected index, so a throwaway click on a different item first
-  // guarantees the real selection below always registers as a change,
-  // regardless of which item happened to start selected.
+  // OptionWheel always starts at index 0, but node order from the DB isn't
+  // guaranteed, and onChange only fires on an actual index change — a
+  // throwaway click first guarantees the real selection below registers.
   await topics.getByRole("option", { name: MATHEMATICS_LABEL }).click();
 
   const algorithmsOption = topics.getByRole("option", { name: ALGORITHMS_LABEL });
@@ -167,21 +142,11 @@ test("keyboard: a topic can be reached and selected without a mouse", async ({
 
   const mathPanel = page.getByRole("region", { name: "Mathematics details" });
 
-  // OptionWheel's keyboard handling lives on the listbox root, not on
-  // individual (non-tabbable) options: ArrowUp/ArrowDown move the selected
-  // index by one and fire selection immediately (there's no separate
-  // "Enter to activate" step — see OptionWheel.tsx's handleKeyDown/
-  // applyTarget). It always starts at index 0 (`defaultSelected`'s default),
-  // but which label that is isn't guaranteed, so a fixed number of
-  // "ArrowDown to Mathematics" presses would be unsafe to assume.
-  //
-  // Force one real transition first (0 -> 1 is guaranteed to be a genuine
-  // index change, since the wheel always starts at 0), then walk back to
-  // index 0 and sweep forward through every remaining index in order,
-  // checking after each press whether Mathematics' panel has opened. Every
-  // step in this sweep is a real, adjacent index change, so every press
-  // genuinely exercises keyboard activation rather than relying on a
-  // possibly-stale initial aria-selected value.
+  // Keyboard handling lives on the listbox root — ArrowUp/ArrowDown move
+  // the selected index and fire selection immediately, no separate
+  // "Enter to activate" step. Which label starts at index 0 isn't
+  // guaranteed, so force one real transition, walk back to 0, then sweep
+  // forward checking after each press whether Mathematics' panel opened.
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowUp");
   for (let i = 0; i < OWNED_TOP_LEVEL_LABELS.length - 1; i++) {
@@ -200,9 +165,7 @@ test("reduced motion: the static knowledge space is shown and stays interactive"
   await page.goto("/explore");
 
   const topics = page.getByRole("listbox", { name: "Topics" });
-  // See the primary-flow test's own comment: a throwaway click on a
-  // different item first guarantees the real selection below registers as
-  // a change, regardless of which item the wheel started on.
+  // A throwaway click first guarantees the real selection registers.
   await topics.getByRole("option", { name: ALGORITHMS_LABEL }).click();
 
   const networksOption = topics.getByRole("option", { name: NETWORKS_LABEL });

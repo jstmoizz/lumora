@@ -12,7 +12,11 @@ vi.mock("../server", () => ({
   createClient: createClientMock,
 }));
 
-import { getKnowledgeGraph, upsertKnowledgeNodeActivity } from "../knowledge-graph";
+import {
+  getKnowledgeGraph,
+  getKnowledgeNodePositions,
+  upsertKnowledgeNodeActivity,
+} from "../knowledge-graph";
 
 function mockSelectEq(result: { data: unknown; error?: unknown }) {
   const eqMock = vi.fn(() => Promise.resolve(result));
@@ -94,6 +98,90 @@ describe("getKnowledgeGraph", () => {
     const result = await getKnowledgeGraph();
 
     expect(result).toEqual([]);
+  });
+});
+
+describe("getKnowledgeNodePositions", () => {
+  test("returns an empty object when no one is signed in, without querying the database", async () => {
+    getServerUserMock.mockResolvedValue(null);
+
+    const result = await getKnowledgeNodePositions();
+
+    expect(result).toEqual({});
+    expect(fromMock).not.toHaveBeenCalled();
+  });
+
+  test("scopes the query to the authenticated user's own rows", async () => {
+    getServerUserMock.mockResolvedValue({ id: "user-1" });
+    const { select, eqMock } = mockSelectEq({ data: [], error: null });
+    fromMock.mockReturnValue({ select });
+
+    await getKnowledgeNodePositions();
+
+    expect(fromMock).toHaveBeenCalledWith("knowledge_node_positions");
+    expect(eqMock).toHaveBeenCalledWith("user_id", "user-1");
+  });
+
+  test("returns a map keyed by node id, with coordinates as [x, y, z]", async () => {
+    getServerUserMock.mockResolvedValue({ id: "user-1" });
+    const { select } = mockSelectEq({
+      data: [
+        { node_id: "node-1", position_x: 1.2, position_y: 0.4, position_z: -2.1 },
+        { node_id: "node-2", position_x: -3, position_y: 1.1, position_z: 0.7 },
+      ],
+      error: null,
+    });
+    fromMock.mockReturnValue({ select });
+
+    const result = await getKnowledgeNodePositions();
+
+    expect(result).toEqual({
+      "node-1": [1.2, 0.4, -2.1],
+      "node-2": [-3, 1.1, 0.7],
+    });
+  });
+
+  test("returns {} when the signed-in user has no saved positions", async () => {
+    getServerUserMock.mockResolvedValue({ id: "user-1" });
+    const { select } = mockSelectEq({ data: [], error: null });
+    fromMock.mockReturnValue({ select });
+
+    const result = await getKnowledgeNodePositions();
+
+    expect(result).toEqual({});
+  });
+
+  // A node with no override row simply never gets a key in the map — never
+  // a [0, 0, 0] placeholder, which would make it indistinguishable from a
+  // node genuinely (and legitimately) manually placed at the origin.
+  test("a node without a saved position is simply absent, never zero-filled", async () => {
+    getServerUserMock.mockResolvedValue({ id: "user-1" });
+    const { select } = mockSelectEq({
+      data: [{ node_id: "node-1", position_x: 5, position_y: 0, position_z: 0 }],
+      error: null,
+    });
+    fromMock.mockReturnValue({ select });
+
+    const result = await getKnowledgeNodePositions();
+
+    expect(Object.keys(result)).toEqual(["node-1"]);
+    expect(result["node-2"]).toBeUndefined();
+  });
+
+  // Covers the "table not deployed yet against an older database" case
+  // called out in this function's own comment — a query failure (missing
+  // table included) must degrade to {}, never break the rest of the page.
+  test("returns {} (not a crash) when the query fails", async () => {
+    getServerUserMock.mockResolvedValue({ id: "user-1" });
+    const { select } = mockSelectEq({
+      data: null,
+      error: { message: 'relation "knowledge_node_positions" does not exist' },
+    });
+    fromMock.mockReturnValue({ select });
+
+    const result = await getKnowledgeNodePositions();
+
+    expect(result).toEqual({});
   });
 });
 

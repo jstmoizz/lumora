@@ -1,14 +1,10 @@
 /**
- * Read-side data access for Settings persistence. The write side (updating
- * a single preference) is a Server Action in `lib/supabase/settings-
- * actions.ts` — kept separate since anything exported from a "use server"
- * file becomes a network-callable endpoint; this module is only ever
- * imported by Server Components, so it stays a plain module.
+ * Read-side data access for Settings. The write side is a Server Action in
+ * `lib/supabase/settings-actions.ts` — kept separate since anything
+ * exported from a "use server" file becomes a network-callable endpoint.
  *
- * Every query here goes through the RLS-scoped server client — never the
- * service-role client — so "only the signed-in user's own row" is enforced
- * by Postgres itself (`supabase/schema.sql`'s `user_settings` policies),
- * not by application logic.
+ * Every query goes through the RLS-scoped server client, never the
+ * service-role client, so access is enforced by Postgres itself.
  */
 
 import { createClient, getServerUser } from "./server";
@@ -41,19 +37,11 @@ const SETTINGS_COLUMNS =
   "theme, response_style, explanation_depth, learning_focus, updated_at";
 
 /**
- * The signed-in user's `user_settings` row, creating it first if this is
- * their first visit to Settings. The insert deliberately supplies nothing
- * but `user_id` — every other column is left to the database's own
- * `default` (see `supabase/schema.sql`), so the actual default values live
- * in exactly one place rather than being duplicated here and risking
- * drift.
- *
- * Returns `null` only if there's no signed-in user (shouldn't happen —
- * middleware already protects /settings — but this stays defensive rather
- * than assuming that guarantee always holds, same as
- * `app/settings/page.tsx`'s existing handling of `account`) or if Supabase
- * itself fails; the page renders a plain fallback message in either case
- * rather than crashing.
+ * The signed-in user's `user_settings` row, creating it first on their
+ * first visit. The insert supplies only `user_id`, leaving every other
+ * column to the database's own default, so defaults live in one place.
+ * Returns `null` on no user or a Supabase failure; the page falls back to
+ * a plain message rather than crashing.
  */
 export async function getOrCreateUserSettings(): Promise<UserSettings | null> {
   const user = await getServerUser();

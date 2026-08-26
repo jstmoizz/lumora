@@ -20,12 +20,8 @@ function createTestAdminClient() {
   });
 }
 
-// Reuses generate-persistence.spec.ts's dedicated account. Safe here,
-// unlike history.spec.ts's first attempt at the same idea: this test
-// never asserts an exact count or anything else that another concurrently
-// running test touching a *different* table could disturb — it only ever
-// reads/writes `user_settings` (a 1:1 table by user_id), a table no other
-// spec file touches at all.
+// Reuses generate-persistence.spec.ts's dedicated account — safe here
+// since this only reads/writes user_settings, a table no other spec touches.
 test.use({ storageState: { cookies: [], origins: [] } });
 
 const RESPONSE_STYLE_OPTIONS = [
@@ -60,11 +56,8 @@ test("Settings loads real preferences, persists a change across reload, and scop
   await page.goto("/settings");
   await expect(page).toHaveURL("/settings");
 
-  // "existing preferences are displayed": whatever this account's row
-  // currently holds (its first-ever default, or a value left over from an
-  // earlier run of this same test) renders as the active option — not a
-  // hardcoded assumption about which one, since this test is designed to
-  // be safely re-run against the same account indefinitely.
+  // Whatever this account's row currently holds renders as the active
+  // option — not a hardcoded assumption, so this test is safely re-runnable.
   const group = page.getByRole("group", { name: "Response style" });
   const selectedButton = group.locator('[aria-current="true"]');
   await expect(selectedButton).toBeVisible();
@@ -81,16 +74,12 @@ test("Settings loads real preferences, persists a change across reload, and scop
   await group.getByRole("button", { name: nextValue }).click();
   await expect(page.getByText("Saved")).toBeVisible({ timeout: 10_000 });
 
-  // A real reload, not just client state — this is what actually proves
-  // persistence rather than an optimistic UI update that never made it to
-  // the database.
+  // A real reload proves persistence, not just an optimistic UI update.
   await page.reload();
   await expect(group.locator('[aria-current="true"]')).toHaveText(nextValue);
 
-  // "preferences remain associated with the correct user": the row this
-  // change landed in belongs to this account's own id, read via the
-  // service-role client (bypassing RLS deliberately, only for this
-  // out-of-band verification — the app itself never does this).
+  // Read via the service-role client for this out-of-band verification —
+  // the app itself never bypasses RLS this way.
   const { data: row, error: rowError } = await admin
     .from("user_settings")
     .select("user_id, response_style")

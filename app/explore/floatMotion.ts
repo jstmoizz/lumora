@@ -8,21 +8,11 @@ const AMPLITUDE = 0.045;
 const BASE_FREQUENCY = 0.22;
 
 /**
- * A tiny, deterministic idle offset for a node's rendered position — no
- * physics, no per-frame randomness, just three out-of-phase sine waves keyed
- * off the node's own id (via hashToUnit) so every node's motion differs
- * without needing three independently "random" inputs. Purely a function of
- * `nodeId` and `elapsedTime`: the same inputs always produce the same
- * output, which is what lets this be driven straight from
- * `state.clock.elapsedTime` in a `useFrame` loop with no extra state to
- * manage, and what makes it safe to unit-test without any R3F/WebGL
- * scaffolding.
- *
- * `reducedMotion` is threaded through explicitly (rather than only relied on
- * structurally) so this function's own contract — "disabled for
- * reduced-motion users" — is independently true and testable, even though in
- * practice KnowledgeNode only ever renders at all when reduced motion is
- * off (see ExploreClient.tsx's `showScene`).
+ * A tiny, deterministic idle offset for a node's rendered position — three
+ * out-of-phase sine waves keyed off the node's id, pure in `nodeId` and
+ * `elapsedTime` so it can be driven straight from `state.clock.elapsedTime`
+ * with no extra state, and unit-tested without any R3F/WebGL scaffolding.
+ * `reducedMotion` disables it outright.
  */
 export function computeFloatOffset(
   nodeId: string,

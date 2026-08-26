@@ -1,13 +1,8 @@
 /**
- * Server-side tools available to Lumora's chat model.
- *
- * Tools defined here are registered with `streamText` in
- * `app/api/chat/route.ts` and run entirely server-side — only their
- * validated, JSON-serializable output ever reaches the client. Unlike
- * `lib/ai/config.ts` (which reads the Groq API key and must only be
- * imported by server code), this module touches no secrets and no
- * environment variables, so its types are safe to import from client
- * components to type `useChat`.
+ * Server-side tools available to Lumora's chat model, registered with
+ * `streamText` in app/api/chat/route.ts. Only validated, JSON-serializable
+ * output ever reaches the client. Unlike lib/ai/config.ts, this module
+ * touches no secrets, so its types are safe to import client-side for `useChat`.
  */
 
 import { randomUUID } from "node:crypto";
@@ -20,15 +15,8 @@ import { z } from "zod";
 import type { ImageExtraction } from "./extraction";
 
 // Groq's tool-calling sometimes emits "" for an omitted optional field
-// instead of leaving the key out (reproduced in production: createQuiz
-// rejected with `/category: length must be >= 1, but got 0` even though
-// SYSTEM_PROMPT tells the model to omit category entirely when there isn't
-// one). A plain `.min(1)` on an `.optional()` field only guards against a
-// missing key, not this "present but blank" case, so it fails validation
-// before execute() ever runs and can apply its own trim-then-omit handling.
-// This treats a blank value the same as "not provided" instead of
-// rejecting the whole tool call, while still enforcing the same non-blank/
-// length bounds on any real value.
+// instead of leaving the key out, which a plain `.min(1).optional()` would
+// reject outright. Treats a blank value the same as "not provided."
 function optionalNonBlankString(max: number) {
   return z
     .string()
@@ -49,17 +37,11 @@ const quizQuestionInputSchema = z.object({
 export const createQuizInputSchema = z.object({
   topic: z.string().min(1).max(80),
   questions: z.array(quizQuestionInputSchema).min(1).max(5),
-  // Feeds Explore's knowledge graph (lib/supabase/knowledge-graph.ts) as
-  // suggested "unlocked" topics once this one has been studied — optional
-  // since not every quiz needs to name related subtopics, but the model is
-  // asked to include 3-6 whenever the subject genuinely has some (see
-  // SYSTEM_PROMPT).
+  // Suggested "unlocked" topics for Explore's knowledge graph once this one
+  // is studied.
   relatedTopics: z.array(z.string().min(1).max(60)).min(3).max(6).optional(),
-  // The broader field `topic` belongs under (e.g. topic "Binary Search
-  // Trees" -> category "Data Structures and Algorithms"), so Explore can
-  // nest it under that category even the very first time it's studied,
-  // without needing the category to already exist as its own node. Omitted
-  // when `topic` is itself already a broad top-level subject.
+  // The broader field `topic` belongs under, so Explore can nest it there
+  // even the first time it's studied. Omitted when `topic` is itself broad.
   category: optionalNonBlankString(80),
 });
 
@@ -80,17 +62,10 @@ export interface CreateQuizOutput {
   category?: string;
 }
 
-/**
- * Generates a short multiple-choice quiz. The model supplies the actual
- * question content as tool-call arguments (validated against the Zod
- * schema below); `execute` itself does no further model calls — it only
- * trims/normalizes that input, assigns stable per-question ids, and runs a
- * few deterministic sanity checks a real quiz feature needs regardless of
- * where the questions came from (no duplicate answer choices, a correct
- * answer that actually points at one of them). Any of those checks failing
- * throws a plain `Error`, which the AI SDK catches and surfaces to the
- * client as the tool's `output-error` state.
- */
+// `execute` makes no further model calls — it trims/normalizes the model's
+// own arguments, assigns stable per-question ids, and runs sanity checks
+// (no duplicate options, a correct answer that exists). A failed check
+// throws, surfaced to the client as the tool's `output-error` state.
 export const createQuizTool = tool({
   description:
     "Create a short multiple-choice quiz to test the student's understanding of a topic they're studying. Call this whenever the user asks to be quizzed, tested, or wants practice questions. Write 1-5 clear questions, each with exactly four distinct answer options and exactly one correct answer.",
@@ -171,7 +146,6 @@ const flashcardInputSchema = z.object({
 export const createFlashcardsInputSchema = z.object({
   topic: z.string().min(1).max(80),
   cards: z.array(flashcardInputSchema).min(1).max(10),
-  // See createQuizInputSchema's relatedTopics/category for what these feed.
   relatedTopics: z.array(z.string().min(1).max(60)).min(3).max(6).optional(),
   category: optionalNonBlankString(80),
 });
@@ -193,13 +167,8 @@ export interface CreateFlashcardsOutput {
   category?: string;
 }
 
-/**
- * Generates a flashcard set. Mirrors createQuizTool exactly — same
- * validate-the-model's-own-arguments shape, same normalize/id-assign-only
- * `execute` (no further model calls), same per-item stable-id scheme keyed
- * off a freshly minted set id — so Practice's two activity types share one
- * mental model end to end, not just similar-looking UI.
- */
+// Mirrors createQuizTool: same validate-then-normalize shape, same
+// per-item stable-id scheme.
 export const createFlashcardsTool = tool({
   description:
     "Create a set of flashcards to help the student review and memorize a topic they're studying. Call this whenever the user asks for flashcards, or to review/memorize/study a topic that way. Write 1-10 cards, each with a short front (the question or term) and a back (the answer or definition); an optional brief explanation can add context the back alone doesn't cover.",
@@ -251,19 +220,12 @@ export const createFlashcardsTool = tool({
 
 export const addKnowledgeTopicInputSchema = z.object({
   topic: z.string().min(1).max(80),
-  // See createQuizInputSchema's relatedTopics/category for what these feed —
-  // same fields, same meaning, just supplied without a quiz/flashcard set
-  // attached.
   relatedTopics: z.array(z.string().min(1).max(60)).min(3).max(6).optional(),
   category: optionalNonBlankString(80),
-  // Explore's TopicPanel shows this when present. createQuiz/createFlashcards
-  // never supply one — their own content is the "detail" — but a topic
-  // added this way has nothing else to show. Capped well above what
-  // SYSTEM_PROMPT asks for (~200 chars): Groq validates tool-call arguments
-  // against this schema *before* execute() runs, so a tighter cap the model
-  // can overshoot (240 was too tight — summaries regularly landed at
-  // 250-260) fails the whole request with an opaque error, not execute()'s
-  // own `output-error` state.
+  // Explore's TopicPanel shows this when present, since a topic added this
+  // way has nothing else to display. Capped at 400 (well above the ~200
+  // asked for) since Groq validates before execute() runs, and tighter
+  // caps got overshot, failing the whole request with an opaque error.
   summary: z.string().min(1).max(400).optional(),
 });
 
@@ -276,15 +238,9 @@ export interface AddKnowledgeTopicOutput {
   summary?: string;
 }
 
-/**
- * Adds a topic to the user's Explore knowledge graph directly, with no quiz
- * or flashcard set attached — for when the user explicitly asks to
- * track/add/remember a topic there rather than study it right now.
- * createQuiz/createFlashcards already add their topic to the graph as a
- * side effect (see app/api/chat/route.ts's onEnd); this tool exists for the
- * case those don't cover; SYSTEM_PROMPT tells the model not to call both for
- * the same topic in the same turn.
- */
+// For when the user asks to track/add/remember a topic without studying it
+// right now — createQuiz/createFlashcards already add their topic to the
+// graph as a side effect.
 export const addKnowledgeTopicTool = tool({
   description:
     "Add a topic to the user's Explore knowledge graph when they explicitly ask to track, add, or remember it there — e.g. \"add World War II to my knowledge graph\", \"track that I'm learning Rust\", \"add this to Explore\". Do not call this for every topic mentioned in conversation, and do not call it in the same turn as createQuiz/createFlashcards for the same topic — those already add it as a side effect of studying it.",
@@ -310,51 +266,30 @@ export const addKnowledgeTopicTool = tool({
   },
 });
 
-/**
- * The set of tools registered with the chat model, keyed by tool name.
- * `streamText`'s `tools` option in `app/api/chat/route.ts` is passed this
- * object directly, so the tool set used for typing and the one actually
- * registered can never drift apart.
- */
+// Passed directly to streamText's `tools` option, so the typed set and the
+// registered set can never drift apart.
 export const lumoraTools = {
   createQuiz: createQuizTool,
   createFlashcards: createFlashcardsTool,
   addKnowledgeTopic: addKnowledgeTopicTool,
 };
 
-/**
- * Per-message metadata `app/api/chat/route.ts` attaches to the assistant's
- * response so the client can learn which conversation it's part of.
- * `conversationId` is set once, on the stream's `start` event, for a
- * message that was just created (a brand-new conversation) — see the
- * route's `messageMetadata` callback. It's never present on a user message,
- * only ever on the assistant message the server generates.
- */
+// Set once, on a brand-new conversation's first assistant message, so the
+// client learns which conversation it belongs to. Never present on a user message.
 export interface LumoraMessageMetadata {
   conversationId?: string;
 }
 
-/**
- * Custom "data-*" UI part types the server can stream to the client outside
- * the tool-call/text vocabulary above. Currently just one: the vision
- * extraction path (lib/ai/extraction.ts, wired up in app/api/chat/route.ts)
- * sends a `data-extraction` part carrying the full `ImageExtraction` so
- * ChatInterface.tsx's ExtractionCard can render it directly from structured
- * data instead of parsing it back out of freeform text.
- */
+// Custom "data-*" part types beyond tool-call/text. Currently one: vision
+// extraction sends a `data-extraction` part so ExtractionCard can render
+// structured data directly instead of parsing it back out of text.
 export type LumoraUIDataTypes = {
   extraction: ImageExtraction;
 };
 
-/**
- * The chat message type shared by client and server, parameterized with
- * Lumora's registered tools (via `InferUITools`, which converts each raw
- * `Tool` into the `{ input, output }` shape `UIMessage` expects) so
- * `message.parts` narrows correctly — e.g. a `tool-createQuiz` part's
- * `output` is typed as `CreateQuizOutput`, not `unknown` — without manual
- * casts at the render boundary. `LumoraUIDataTypes` above does the same for
- * `data-*` parts.
- */
+// The chat message type shared by client and server. InferUITools narrows
+// `message.parts` so e.g. a `tool-createQuiz` part's output is typed as
+// CreateQuizOutput, not unknown.
 export type LumoraUIMessage = UIMessage<
   LumoraMessageMetadata,
   LumoraUIDataTypes,

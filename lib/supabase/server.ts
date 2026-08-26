@@ -1,18 +1,10 @@
 /**
- * Server-side Supabase client — for Server Components, Server Actions, and
- * route handlers. Uses the anon key (same as the browser client) plus the
- * request's own cookies, so queries run as whichever user is actually
- * signed in and are subject to Row Level Security exactly as they would be
- * from the browser. This is not the privileged client — see
- * `lib/supabase/admin.ts` for the service-role client, which is only for
- * trusted server-side operations that must bypass RLS.
+ * Server-side Supabase client for Server Components, Server Actions, and
+ * route handlers. Uses the anon key plus the request's cookies, so queries
+ * run as whichever user is signed in, subject to RLS. Not the privileged
+ * client — see lib/supabase/admin.ts for the service-role client.
  *
- * Must only ever be imported by server-side code — it reads `next/headers`,
- * which isn't available to client components.
- *
- * Wrapped in an async function rather than constructed at module scope, so
- * merely importing this file never throws even before the Supabase env
- * vars are configured — nothing calls `createClient()` yet.
+ * Server-side only — reads `next/headers`, unavailable to client components.
  */
 
 import { createServerClient } from "@supabase/ssr";
@@ -36,10 +28,9 @@ export async function createClient() {
               cookieStore.set(name, value, options);
             }
           } catch {
-            // `cookieStore.set` throws when called from a Server Component
-            // (only Server Actions/route handlers can write cookies) — safe
-            // to ignore since middleware.ts refreshes the session on every
-            // request instead.
+            // Throws from a Server Component (only Actions/route handlers
+            // can write cookies) — safe to ignore, middleware.ts refreshes
+            // the session on every request instead.
           }
         },
       },

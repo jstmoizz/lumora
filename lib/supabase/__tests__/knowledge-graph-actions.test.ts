@@ -12,7 +12,11 @@ vi.mock("../server", () => ({
   createClient: createClientMock,
 }));
 
-import { deleteKnowledgeNode, resetKnowledgeGraph } from "../knowledge-graph-actions";
+import {
+  deleteKnowledgeNode,
+  resetKnowledgeGraph,
+  saveKnowledgeNodePosition,
+} from "../knowledge-graph-actions";
 
 // A chainable, thenable query-builder stand-in: `.eq()` can be called any
 // number of times (delete scopes by id+user_id; reset scopes by user_id
@@ -68,6 +72,57 @@ describe("deleteKnowledgeNode", () => {
     const result = await deleteKnowledgeNode("node-1");
 
     expect(result).toEqual({ ok: false });
+  });
+});
+
+describe("saveKnowledgeNodePosition", () => {
+  test("rejects an unauthenticated request without touching the database", async () => {
+    getServerUserMock.mockResolvedValue(null);
+
+    const result = await saveKnowledgeNodePosition("node-1", [1, 2, 3]);
+
+    expect(result).toEqual({ ok: false });
+    expect(fromMock).not.toHaveBeenCalled();
+  });
+
+  test("upserts node_id/user_id/position_x/y/z, conflict-scoped to node_id", async () => {
+    const upsertMock = vi.fn(() => Promise.resolve({ error: null }));
+    fromMock.mockReturnValue({ upsert: upsertMock });
+
+    const result = await saveKnowledgeNodePosition("node-1", [1.2, 0.4, -2.1]);
+
+    expect(result).toEqual({ ok: true });
+    expect(fromMock).toHaveBeenCalledWith("knowledge_node_positions");
+    expect(upsertMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        node_id: "node-1",
+        user_id: "user-1",
+        position_x: 1.2,
+        position_y: 0.4,
+        position_z: -2.1,
+      }),
+      { onConflict: "node_id" },
+    );
+  });
+
+  test("always uses the authenticated user's own id, never a caller-supplied one", async () => {
+    getServerUserMock.mockResolvedValue({ id: "the-real-signed-in-user" });
+    const upsertMock = vi.fn(() => Promise.resolve({ error: null }));
+    fromMock.mockReturnValue({ upsert: upsertMock });
+
+    await saveKnowledgeNodePosition("node-1", [0, 0, 0]);
+
+    expect(upsertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ user_id: "the-real-signed-in-user" }),
+      expect.anything(),
+    );
+  });
+
+  test("returns ok: false (not a throw) when the upsert fails", async () => {
+    const upsertMock = vi.fn(() => Promise.resolve({ error: { message: "connection reset" } }));
+    fromMock.mockReturnValue({ upsert: upsertMock });
+
+    await expect(saveKnowledgeNodePosition("node-1", [1, 2, 3])).resolves.toEqual({ ok: false });
   });
 });
 

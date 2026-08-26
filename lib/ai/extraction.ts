@@ -1,30 +1,16 @@
 /**
  * Vision-only image extraction: Qwen inspects an attached image and returns
- * structured, tool-free study content. This is the first stage of a
- * two-stage image pipeline — Qwen extracts here; a later stage (not yet
- * built) decides what, if anything, to do with the extraction, including
- * any application tool calls.
- *
- * Kept in its own module, separate from lib/ai/config.ts's tool-enabled
- * SYSTEM_PROMPT/streamText path, so it's structurally impossible for an
- * application tool to end up in this request — this module never imports
- * lib/ai/tools.ts. The only tool ever registered here is `recordExtraction`
- * below, a plain structured-output capture mechanism, not an application
- * capability — see its own comment for why it exists and why it's safe.
+ * structured, tool-free study content. Kept separate from lib/ai/config.ts's
+ * tool-enabled path — this module never imports lib/ai/tools.ts, so an
+ * application tool call can't end up in this request.
  */
 
 import { convertToModelMessages, generateText, tool, type ModelMessage } from "ai";
 import { z } from "zod";
 import { visionModel } from "./config";
 
-// `title` is nullable rather than `.optional()` so a schema-validating
-// consumer downstream doesn't need special-casing for a missing key versus
-// an explicit "there isn't one" — the model always reports one or the
-// other. (Groq's own `response_format: json_schema` mode enforces this same
-// "every property must be listed in `required`" rule and was the original
-// reason this was written as `.nullable()` — see the comment on
-// `recordExtractionTool` below for why this module doesn't use that mode at
-// all anymore, but the nullable shape is worth keeping regardless.)
+// `title` is nullable rather than `.optional()` so the model always reports
+// one or the other explicitly, with no missing-key special-casing downstream.
 export const imageExtractionSchema = z.object({
   title: z.string().nullable(),
   summary: z.string(),
@@ -34,9 +20,8 @@ export const imageExtractionSchema = z.object({
 
 export type ImageExtraction = z.infer<typeof imageExtractionSchema>;
 
-// Deliberately short and vision-only — no tool-use instructions, nothing
-// naming createQuiz/createFlashcards/addKnowledgeTopic, nothing for a later
-// tool-enabled stage to trip over.
+// Deliberately vision-only — no tool-use instructions, nothing naming
+// application tools.
 const EXTRACTION_SYSTEM_PROMPT = `You are looking at an image attached to a study app. Extract its study-relevant content — nothing else.
 
 - Transcribe relevant text accurately, including headings, definitions, terminology, and equations where possible.
@@ -48,24 +33,15 @@ const EXTRACTION_SYSTEM_PROMPT = `You are looking at an image attached to a stud
 
 Report what you found using the recordExtraction tool.`;
 
-// A single internal tool that exists only to capture the model's structured
-// output in a reliable, schema-validated shape. This is NOT an application
-// capability like createQuiz/createFlashcards/addKnowledgeTopic — it never
-// touches the database, never renders anything, and is never registered
-// alongside the real application tools (lib/ai/tools.ts isn't even
-// imported here). It's forced via `toolChoice` below, purely as a
-// structured-output mechanism.
+// A single internal tool, forced via `toolChoice` below, that exists only
+// to capture the model's structured output — not an application capability,
+// never touches the database or renders anything.
 //
-// This exists because the more obvious approach — `generateObject()`,
-// which drives structured output through `response_format` — turned out to
-// be broken for this exact combination: confirmed directly against the
-// real Groq API, an otherwise-identical request to qwen/qwen3.6-27b
-// succeeds with no `response_format` and fails with "invalid image data"
-// the instant one is added, regardless of whether it's `json_schema` mode
-// or plain `json_object` mode. Forcing a single tool call sidesteps that
-// entirely, since image content plus tool-calling is the one combination
-// this model *does* support — also confirmed directly, including with a
-// real application-shaped tool call.
+// `generateObject()` (structured output via `response_format`) is broken
+// for this model with image input: Groq returns "invalid image data" the
+// instant `response_format` is added, in either json mode. Forcing a tool
+// call sidesteps that, since image input plus tool-calling is the
+// combination this model does support.
 const recordExtractionTool = tool({
   description: "Record the study content extracted from the image.",
   inputSchema: imageExtractionSchema,
@@ -74,16 +50,10 @@ const recordExtractionTool = tool({
 
 interface ExtractImageContentInput {
   image: { mediaType: string; filename?: string; url: string };
-  // The user's own message text alongside the image, if any (e.g. "quiz me
-  // on this") — passed through only as context to help extraction focus on
-  // what's relevant, never as an instruction to act on. Extraction never
-  // has application tools to act with regardless.
+  // Context only, to help extraction focus — never an instruction to act on.
   userText?: string;
 }
 
-/**
- * Runs the vision-only extraction pass.
- */
 export async function extractImageContent({
   image,
   userText,
@@ -119,9 +89,6 @@ export async function extractImageContent({
     throw new Error("The vision model did not report an extraction.");
   }
 
-  // The tool framework already validates `call.input` against
-  // `imageExtractionSchema` before this point (an invalid call would have
-  // thrown its own error) — parsing again here is just how the return type
-  // narrows from the tool's generic input type to `ImageExtraction`.
+  // Already validated by the tool framework; parsing again just narrows the type.
   return imageExtractionSchema.parse(call.input);
 }

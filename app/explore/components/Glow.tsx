@@ -7,26 +7,17 @@ interface GlowProps {
   radius: number;
   color: string;
   opacity: number;
-  // How far the glow halo extends past the node's own geometry, as a
-  // multiplier on `radius`. Defaults to a subtle bleed (CentralNode); the
-  // small star-point KnowledgeNodes pass a larger value so a soft halo — not
-  // postprocessing bloom — is what makes them read as light sources rather
-  // than tiny solid shapes.
+  // Multiplier on `radius` for how far the halo extends past the geometry.
   haloScale?: number;
-  // An optional second, larger/softer halo layered behind the first —
-  // a tight bright inner halo plus a big faint outer haze reads closer to
-  // real bloom's soft falloff than one flat halo, with no postprocessing
-  // pass. Omit for the original single-layer look.
+  // Optional second, larger/softer halo layered behind the first, for a
+  // closer approximation of real bloom falloff. Omit for a single layer.
   haloScaleOuter?: number;
   opacityOuter?: number;
 }
 
-// A restrained "fake glow": a larger, low-opacity, additive-blended copy of
-// a node's own geometry sitting just outside it — enough to read as a soft
-// light bleed against the dark background without a postprocessing bloom
-// pass. `raycast={() => null}` makes it fully transparent to pointer events,
-// so it never steals hover/click from the node it's wrapping (or from
-// anything behind it).
+// A larger, low-opacity, additive-blended copy of the node's geometry,
+// faking a glow without a postprocessing pass. `raycast={() => null}`
+// keeps it fully transparent to pointer events.
 export default function Glow({
   shape,
   radius,
@@ -36,10 +27,8 @@ export default function Glow({
   haloScaleOuter,
   opacityOuter,
 }: GlowProps) {
-  // Detail 1 (not 0): a smoother, higher-facet-count copy of the shape reads
-  // as a soft-edged halo at the larger scales this component is used at now;
-  // detail 0 is fine for a node's own small solid mesh but a hard-edged
-  // hexagon/octagon silhouette once blown up several times its own size.
+  // Detail 1: smoother facets read as a soft halo at this scale; detail 0
+  // looks hard-edged once blown up.
   const geometryArgs: [number, number] = [radius, 1];
   return (
     <>

@@ -1,79 +1,40 @@
 /**
- * Single source of truth for Lumora's AI chat configuration.
- *
- * The API route (`app/api/chat/route.ts`) imports the model, system prompt,
- * and generation settings from here rather than defining them inline, so
- * every place that talks to the model stays in sync when this changes.
+ * Single source of truth for Lumora's AI chat configuration — model, system
+ * prompt, and generation settings, imported by app/api/chat/route.ts.
  */
 
 import { groq } from "@ai-sdk/groq";
 import { createE2eMockLanguageModel, isE2eMockAiEnabled } from "./mockModel";
 import type { ChatMode } from "./model";
 
-// Raw provider model IDs live only here, in this server-only module — never
-// exported as strings, so they can't end up client-visible (e.g. via
-// Settings, which used to display the old single CHAT_MODEL_ID directly).
-//
-// Both IDs were verified live against this account's actual Groq API key
-// before being wired in here (plain text + tool-calling for the text model;
-// image understanding + tool-calling from an image for the vision model —
-// Groq's own /models listing doesn't label qwen/qwen3.6-27b as
-// vision-capable, but it demonstrably is: it correctly described a real
-// test photo and built a createQuiz call from it).
+// Raw model IDs live only here, server-only, never exported as strings so
+// they can't end up client-visible.
 const TEXT_MODEL_ID = "openai/gpt-oss-20b";
 const VISION_MODEL_ID = "qwen/qwen3.6-27b";
 
-/**
- * The two Groq models Lumora's chat feature routes between. Some models
- * emit a separate reasoning stream alongside chat text; ChatInterface.tsx
- * doesn't render it, so it's silently skipped on the client.
- *
- * The `groq()` provider reads `GROQ_API_KEY` automatically — never read,
- * stored, or hardcoded here. This module must only be imported server-side.
- */
+// `groq()` reads GROQ_API_KEY automatically — never read or stored here.
 export const textModel = groq(TEXT_MODEL_ID);
 export const visionModel = groq(VISION_MODEL_ID);
 
-// Re-exported so route.ts (and anything else already importing from this
-// module) doesn't need a second import line just to check this flag.
 export { isE2eMockAiEnabled };
 
-/**
- * The real routing decision — unchanged from before `LUMORA_E2E_MOCK_AI`
- * existed. `mode` is the user's explicit choice (Auto/Fast/Vision);
- * `hasImage` is whether the message actually being sent this turn carries
- * an image. Fast never routes to the vision model — a fast+image request is
- * rejected earlier in the route (see app/api/chat/route.ts) and never
- * reaches this function with hasImage set.
- */
+// Fast never routes to vision — a fast+image request is rejected earlier
+// in the route and never reaches this function with hasImage set.
 function resolveRealModel(mode: ChatMode, hasImage: boolean) {
   if (mode === "vision") return visionModel;
   if (mode === "fast") return textModel;
   return hasImage ? visionModel : textModel; // auto
 }
 
-/**
- * Picks which model a turn uses. Delegates entirely to `resolveRealModel`
- * above for *which* model would normally be used — the only thing added
- * here is a single, deliberate swap for the E2E suite running in CI (see
- * lib/ai/mockModel.ts's own comment): the routing decision itself, and the
- * real Groq models it can choose between, are completely untouched.
- */
+// Swaps in the E2E mock model when enabled; otherwise identical to resolveRealModel.
 export function resolveModel(mode: ChatMode, hasImage: boolean) {
   const model = resolveRealModel(mode, hasImage);
   if (!isE2eMockAiEnabled()) return model;
   return createE2eMockLanguageModel(model.modelId);
 }
 
-/**
- * System prompt establishing Lumora's assistant persona.
- *
- * Deliberately scoped narrow for this skeleton: a general study/learning
- * assistant, not the full "notes into knowledge" feature set from the
- * wider Lumora product vision. Later assignments (note ingestion,
- * summarization, generation from user content) should extend this prompt
- * rather than duplicate a separate one elsewhere.
- */
+// System prompt establishing Lumora's assistant persona. Extend this rather
+// than duplicating a separate prompt elsewhere.
 export const SYSTEM_PROMPT = `You are Lumora, a friendly and knowledgeable study assistant.
 
 Help the user understand topics, answer questions clearly, and support
@@ -142,13 +103,8 @@ just built a quiz or flashcards for in the same turn — those already add it
 to the graph on their own. After calling it, respond with only a short
 one-sentence acknowledgment, the same as for createQuiz/createFlashcards.`;
 
-/**
- * Generation settings passed to `streamText`.
- *
- * Kept conservative for a learning assistant: a moderate temperature for
- * clear, consistent explanations rather than highly creative output, and a
- * bounded output length so a single response can't run away indefinitely.
- */
+// Moderate temperature for consistent explanations; bounded output length
+// so a response can't run away.
 export const GENERATION_CONFIG = {
   temperature: 0.5,
   maxOutputTokens: 2048,

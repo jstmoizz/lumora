@@ -27,13 +27,8 @@ describe("OptionWheel", () => {
     expect(onChange).toHaveBeenCalledWith(1, "Transformers", screen.getByRole("listbox"));
   });
 
-  // The listbox root — not the individual (non-tabbable) `role="option"`
-  // row — is the sole real, focusable DOM node in this roving/virtual-focus
-  // control, so it's what a caller wanting to restore keyboard focus after
-  // navigating away actually needs. Asserted as its own case (not just
-  // folded into the assertion above) since this is the one part of the
-  // contract callers rely on for focus restoration, not just "some element
-  // was passed."
+  // The listbox root, not the option row, is the sole focusable DOM node —
+  // what a caller needs to restore keyboard focus after navigating away.
   test("the element passed to onChange is the listbox root, not the clicked option row", () => {
     const onChange = vi.fn();
     render(<OptionWheel items={["Neural Networks", "Transformers"]} onChange={onChange} />);
@@ -64,9 +59,7 @@ describe("OptionWheel", () => {
     );
   });
 
-  // Keyboard navigation is handled on the listbox container itself (roving
-  // virtual focus, not per-item DOM focus) — matches the ported component's
-  // actual interaction model, not a per-item roving-tabindex pattern.
+  // Keyboard nav is handled on the listbox container (virtual focus), not per-item.
   test("ArrowDown on the listbox moves the selection to the next item", () => {
     const onChange = vi.fn();
     render(

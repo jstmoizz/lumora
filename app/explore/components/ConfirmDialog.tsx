@@ -17,17 +17,14 @@ interface ConfirmDialogProps {
   description: string;
   confirmLabel: string;
   onConfirm: () => void;
-  // True while the caller's mutation from a previous confirm is still in
-  // flight. Radix keeps the Confirm button mounted (and clickable) through
-  // its exit animation after `onOpenChange(false)`, so without this it
-  // could fire a second mutation during that window.
+  // True while a previous confirm's mutation is still in flight — Radix
+  // keeps the Confirm button clickable through its exit animation, which
+  // could otherwise fire a second mutation.
   confirmDisabled?: boolean;
 }
 
-// Shared confirmation step for Explore's two destructive actions (deleting a
-// topic, resetting the whole graph) — built on the project's existing
-// Dialog primitive (components/ui/dialog.tsx), which already gives focus
-// trapping, Escape-to-close, and keyboard accessibility for free via Radix.
+// Shared confirmation step for Explore's destructive actions (delete topic,
+// reset graph).
 export default function ConfirmDialog({
   open,
   onOpenChange,

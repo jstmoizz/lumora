@@ -54,11 +54,9 @@ function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-// A settings section: small icon badge + title/description, then whatever
-// preview content the section wants. No border/background/radius of its
-// own — sections live inside one shared panel (see SettingsClient's return
-// below) and are separated by that panel's `divide-y`, not by stacking
-// five identical cards on top of each other.
+// A settings section: icon badge + title/description, then content. No
+// border/background of its own — sections share one panel, separated by
+// its divide-y.
 function SettingsSection({
   sectionRef,
   icon: Icon,
@@ -88,12 +86,8 @@ function SettingsSection({
   );
 }
 
-// A real, persisted study preference: label on top, a small group of
-// mutually-exclusive options below — same "outline/secondary + CheckIcon"
-// button-group pattern the Appearance row below uses, just for free-text
-// preferences instead of the fixed theme enum. Clicking an option calls the
-// `updateUserSetting` Server Action directly; there's no separate "Save"
-// button, an isPending/error/justSaved cycle is the only feedback.
+// A persisted study preference. Clicking an option calls updateUserSetting
+// directly — no separate Save button, just an isPending/error/justSaved cycle.
 function StudyPreferenceRow({
   label,
   field,
@@ -109,16 +103,10 @@ function StudyPreferenceRow({
   const [error, setError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
-  // `isPending`/`current` are React state — two clicks in the same
-  // synchronous pass both still see the pre-click values, so the check
-  // alone can't stop both from starting a save. This ref closes that
-  // window — same pattern as `isSubmittingRef` in ChatInterface.tsx.
+  // Two clicks in the same synchronous pass both see pre-click state, so
+  // this ref closes the window state alone can't.
   const isSavingRef = useRef(false);
 
-  // Clears the transient "Saved" confirmation a couple seconds after it
-  // appears — never fires for a save that never actually succeeded, since
-  // `justSaved` is only ever set to true once updateUserSetting resolves
-  // without an error.
   useEffect(() => {
     if (!justSaved) return;
     const timeout = setTimeout(() => setJustSaved(false), SAVED_CONFIRMATION_MS);
@@ -211,32 +199,26 @@ const THEME_OPTIONS: { value: ThemePreference; label: string; icon: typeof Monit
   { value: "dark", label: "Dark", icon: MoonIcon },
 ];
 
-// Applies instantly and locally (`applyThemePreference`, no round trip
-// needed) and separately persists to `user_settings.theme` for cross-
-// device durability — the two are independent, so a slow or failed save
-// never blocks the theme from actually changing on screen. See theme.ts.
+// Applies instantly and locally, and separately persists to
+// user_settings.theme for cross-device durability — the two are
+// independent, so a slow or failed save never blocks the visible change.
 function AppearanceRow({ initialTheme }: { initialTheme: ThemePreference }) {
   const [current, setCurrent] = useState<ThemePreference>(initialTheme);
   const [error, setError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
-  // See StudyPreferenceRow's `isSavingRef` above for why `isPending`/
-  // `current` alone can't close the same-tick double-click window — same
-  // pattern, applied to this row's own separate theme mutation.
+  // Same double-click guard as StudyPreferenceRow's isSavingRef.
   const isSavingRef = useRef(false);
 
-  // Reconciles the durable (database) value into local storage/DOM, but
-  // ONLY on a browser that's never made a local theme choice — the
-  // cross-device bootstrap case. A real local choice, once made, is
-  // authoritative for this browser from then on; nothing here should ever
-  // second-guess it again (comparing against a merely-disagreeing database
-  // value caused theme to silently revert to "system" on navigation).
+  // Reconciles the database value into local storage, but only on a
+  // browser that's never made a local choice — a real local choice, once
+  // made, is authoritative from then on (comparing against a disagreeing
+  // database value caused theme to silently revert on navigation).
   useEffect(() => {
     if (!hasStoredThemePreference()) {
       applyThemePreference(initialTheme);
     }
-    // Only ever meant to run once, against the value Settings loaded with.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, against the value Settings loaded with.
   }, []);
 
   useEffect(() => {
@@ -319,18 +301,14 @@ function AppearanceRow({ initialTheme }: { initialTheme: ThemePreference }) {
   );
 }
 
-// A dropdown, not a button row like AppearanceRow — 10 options don't fit
-// as buttons without wrapping. localStorage-only (see generateAccent.ts):
-// no server round trip, so unlike AppearanceRow this never shows a
-// pending/error/"Saved" state — the selection just applies instantly.
-//
-// No `initial*` prop: nothing durable backs this value, so it starts at
-// the default and corrects itself from localStorage in an effect.
+// A dropdown, not buttons like AppearanceRow — 10 options don't fit without
+// wrapping. localStorage-only, so no pending/error/"Saved" state; no
+// `initial*` prop since nothing durable backs this value.
 function GenerateAccentRow() {
   const [accent, setAccent] = useState<GenerateAccent>(DEFAULT_GENERATE_ACCENT);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time read of a value only knowable client-side (localStorage), not a state-mirrors-state loop.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time read of a client-only value (localStorage).
     setAccent(getStoredGenerateAccent());
   }, []);
 
@@ -441,11 +419,9 @@ export default function SettingsClient({
   const aiRef = useRef<HTMLElement>(null);
   const aboutRef = useRef<HTMLElement>(null);
 
-  // One-time entrance: page title -> subtitle -> the section cards
-  // (staggered together). Short fade + small upward move, matching the
-  // recipe already established on Home/History. `clearProps: "all"` on
-  // every tween so GSAP's inline transforms don't linger and block the
-  // section rows' CSS hover transitions afterward.
+  // One-time entrance: title -> subtitle -> section cards, staggered.
+  // clearProps: "all" so GSAP's inline transforms don't block the section
+  // rows' CSS hover transitions afterward.
   useGSAP(
     () => {
       if (prefersReducedMotion()) return;

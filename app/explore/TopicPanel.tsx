@@ -17,10 +17,7 @@ interface TopicPanelProps {
   // The real, studied topic in context. Mutually exclusive with
   // `previewLabel` — ExploreClient guarantees at most one is set.
   node: KnowledgeGraphNode | null;
-  // An unlocked-but-not-yet-studied topic being previewed (from the wheel or
-  // a related item that isn't a node yet). Lumora Core is never passed as
-  // either of these — it's never selectable, so there's no "core" case to
-  // special-case a missing delete button for.
+  // An unlocked-but-not-yet-studied topic being previewed.
   previewLabel: string | null;
   relatedItems: RelatedItem[];
   onBack: () => void;
@@ -29,11 +26,9 @@ interface TopicPanelProps {
   onDelete: (node: KnowledgeGraphNode) => void;
 }
 
-// HTML, not inside the Canvas. A compact contextual panel, not a modal —
-// desktop gets a floating side card, mobile gets a bottom sheet-style strip.
-// Also the accessible entry point into a topic's related suggestions:
-// reduced-motion and keyboard users browse/select them here, as real
-// buttons, rather than needing the 3D scene or the wheel.
+// HTML, not inside the Canvas — a floating card on desktop, a bottom sheet
+// on mobile. Also the accessible entry point into related suggestions for
+// reduced-motion and keyboard users.
 export default function TopicPanel({
   node,
   previewLabel,
@@ -63,16 +58,9 @@ export default function TopicPanel({
       aria-label={`${title} details`}
       className="absolute inset-x-3 bottom-3 z-10 rounded-xl border border-zinc-800 bg-[#0c0b12]/95 p-4 backdrop-blur-sm sm:inset-x-auto sm:top-4 sm:right-4 sm:bottom-4 sm:w-72 sm:overflow-y-auto"
     >
-      {/*
-        Fixed light colors, not `text-foreground`: this panel sits on the
-        canvas's fixed-dark background regardless of site theme, so its
-        text must stay fixed-light rather than flipping to near-black.
-      */}
-      {/*
-        Takes programmatic focus on every selection change (see the effect
-        above), so it needs its own visible focus style — the default
-        outline doesn't read well against this fixed-dark background.
-      */}
+      {/* Fixed light colors: this panel sits on the canvas's fixed-dark
+          background regardless of site theme. Custom focus ring since the
+          default outline doesn't read well here. */}
       <h2
         ref={headingRef}
         tabIndex={-1}

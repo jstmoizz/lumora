@@ -1,10 +1,6 @@
-/** Deterministic, seeded [0,1) value from a string — no runtime randomness
- * involved, so the same input always produces the same output. Not
- * cryptographic, only stable and reasonably well-distributed (an FNV-1a-style
- * fold, then an irrational-multiplier scramble so adjacent seeds don't land
- * suspiciously close). Shared by graphLayout.ts (node placement) and
- * floatMotion.ts (idle float phase/frequency) so both draw from the same one
- * deterministic-randomness primitive instead of duplicating it. */
+/** Deterministic, seeded [0,1) value from a string. Not cryptographic, just
+ * stable and well-distributed (FNV-1a fold + an irrational-multiplier
+ * scramble). Shared by graphLayout.ts and floatMotion.ts. */
 export function hashToUnit(seed: string): number {
   let hash = 2166136261;
   for (let i = 0; i < seed.length; i++) {

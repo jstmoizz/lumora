@@ -17,28 +17,22 @@ import { useElementVisible } from "./useElementVisible";
 import { useTabVisible } from "./useTabVisible";
 import "./ShaderScene.css";
 
-// Deliberately no @react-three/fiber here: R3F's Canvas imports `* as THREE
-// from "three"` internally (to build its JSX-element catalog), which forces
-// bundlers to keep the entire three.js namespace alongside R3F's own
-// reconciler runtime in whatever chunk contains it. That's the ~900KB chunk
-// Home and Explore were sharing. Explore genuinely needs R3F's declarative
-// scene graph (many nodes, camera rig, Drei controls) — Home only ever
-// draws one fullscreen shader plane, so it's cheaper and simpler to drive
-// three.js's own renderer directly with named (tree-shakeable) imports and
-// a plain requestAnimationFrame loop than to pay for a reconciler here.
+// No @react-three/fiber here: R3F's Canvas imports the whole three.js
+// namespace, which forced Home and Explore to share a ~900KB chunk. Home
+// only ever draws one fullscreen shader plane, so a plain
+// requestAnimationFrame loop with tree-shakeable imports is cheaper than
+// paying for a reconciler.
 
-// Coarse pointers (touch) skip straight to the cap's floor — a phone's GPU
-// doesn't need to shade this many physical pixels for a decorative
-// full-bleed background.
+// Coarse pointers (touch) skip to the cap's floor — a phone's GPU doesn't
+// need to shade this many pixels for a decorative background.
 function isCoarsePointer(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
 }
 function getDprRange(): [number, number] {
   return isCoarsePointer() ? [1, 1] : [1, 1.5];
 }
-// Matches @react-three/fiber's own dpr-clamping formula
-// (Math.min(Math.max(min, devicePixelRatio), max)) — replicated by hand now
-// that R3F isn't the one resolving it for us.
+// Matches @react-three/fiber's own dpr-clamping formula, replicated by
+// hand now that R3F isn't resolving it for us.
 function resolveDpr([min, max]: [number, number]): number {
   const target = typeof window !== "undefined" ? (window.devicePixelRatio ?? 2) : 1;
   return Math.min(Math.max(min, target), max);
@@ -50,11 +44,7 @@ interface Engine {
   material: ShaderMaterial;
 }
 
-// A plain module-level function, not a closure — same pattern already used
-// elsewhere in this codebase (see explore/components/OptionWheel.tsx's
-// `runFrame`) to sidestep `react-hooks/immutability` flagging a mutation of
-// a ref-held imperative object (the shader material's own uniform, not
-// React-managed render state) from inside a component-scoped effect.
+// Module-level so mutating the material's uniform doesn't trip react-hooks/immutability.
 function setIsLightUniform(material: ShaderMaterial, isDark: boolean): void {
   material.uniforms.u_isLight.value = isDark ? 0 : 1;
 }
@@ -67,10 +57,8 @@ export default function ShaderScene() {
   const mouseRef = useRef({ x: 0.5, y: 0.5 });
   const engineRef = useRef<Engine | null>(null);
 
-  // Tracked on `window`, independent of the canvas's own (deliberately
-  // pointer-events: none) hit-testing — see the wrapping div below, which
-  // blocks the canvas from ever intercepting clicks meant for the hero's
-  // real content.
+  // Tracked on `window`, independent of the canvas's own pointer-events:
+  // none hit-testing (see the wrapping div below).
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
       mouseRef.current = {
@@ -82,18 +70,15 @@ export default function ShaderScene() {
     return () => window.removeEventListener("pointermove", handlePointerMove);
   }, []);
 
-  // Mount-once: owns the renderer/scene/material/render-loop for this
-  // component's whole lifetime. Split out from the visibility effect below
-  // so toggling frameloop on/off never tears down or recreates the WebGL
-  // context — it only starts/stops the same loop.
+  // Mount-once: owns the renderer/scene/material/render-loop. Split out
+  // from the visibility effect below so toggling the loop never tears down
+  // the WebGL context.
   useEffect(() => {
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
 
     const canvas = document.createElement("canvas");
-    // Canvases default to `display: inline`, which leaves a few pixels of
-    // baseline whitespace below them — R3F's own Canvas sets this same
-    // `block` override; ShaderScene.css handles the actual width/height.
+    // Canvases default to display: inline, leaving baseline whitespace below.
     canvas.style.display = "block";
     wrapper.appendChild(canvas);
 
@@ -105,11 +90,8 @@ export default function ShaderScene() {
     });
 
     const scene = new Scene();
-    // The vertex shader below writes straight to clip space and ignores
-    // the camera entirely (see lumora.vert.ts), so the camera's own
-    // fov/position/aspect never affect what's on screen — this is just
-    // three.js's WebGLRenderer.render() requiring *a* camera argument to
-    // exist.
+    // The vertex shader writes straight to clip space and ignores the
+    // camera — this only exists because render() requires one.
     const camera = new PerspectiveCamera(75, 1, 0.1, 1000);
     camera.position.z = 5;
     camera.lookAt(0, 0, 0);
@@ -129,9 +111,8 @@ export default function ShaderScene() {
       depthWrite: false,
     });
     const mesh = new Mesh(geometry, material);
-    // The shader's fullscreen-clip-space trick doesn't behave like a normal
-    // 3D object for frustum-intersection purposes — disable culling rather
-    // than risk it being (incorrectly) treated as off-screen.
+    // The fullscreen-clip-space trick doesn't behave like a normal 3D
+    // object for frustum-intersection, so disable culling.
     mesh.frustumCulled = false;
     scene.add(mesh);
 
@@ -139,9 +120,8 @@ export default function ShaderScene() {
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
 
     function applySize() {
-      // Non-null assertion: `wrapper` was already null-checked above: TS
-      // just can't carry that narrowing through a nested function
-      // declaration for a captured closure variable.
+      // Non-null: TS can't carry the earlier null-check through this
+      // nested closure.
       const rect = wrapper!.getBoundingClientRect();
       const width = Math.max(1, rect.width);
       const height = Math.max(1, rect.height);
@@ -151,17 +131,12 @@ export default function ShaderScene() {
       camera.updateProjectionMatrix();
     }
 
-    // HeroScrollShell resizes this wrapper continuously while the hero
-    // shrinks from 100svh down to its resting height as the page scrolls —
-    // reallocating the WebGL drawing buffer on every one of those ticks
-    // caused a visible hitch. ShaderScene.css forces the canvas's *visual*
-    // size to always match its parent via `!important`, decoupled from
-    // when the buffer itself actually catches up, so a long debounce here
-    // has no visual downside (the browser just bitmap-scales the existing
-    // frame in the meantime) — it only trades off how often the buffer is
-    // reallocated. A plain window resize (not scroll-driven) applies
-    // immediately instead, since there's no continuous-resize hitch to
-    // guard against there.
+    // HeroScrollShell resizes this wrapper continuously as the hero shrinks
+    // on scroll — reallocating the WebGL buffer on every tick caused a
+    // visible hitch. ShaderScene.css locks the canvas's visual size to its
+    // parent, so a long debounce here has no visual downside; a plain
+    // window resize applies immediately since there's no scroll hitch to
+    // guard against.
     function scheduleResize(delayMs: number) {
       if (resizeTimer) clearTimeout(resizeTimer);
       if (delayMs <= 0) {
@@ -192,32 +167,24 @@ export default function ShaderScene() {
     function tick() {
       rafId = requestAnimationFrame(tick);
 
-      // Wall-clock elapsed time, not a pausable clock — the loop simply
-      // isn't scheduled while frameloop is stopped (see start/stop below),
-      // so u_time freezes at its last value while paused and jumps ahead
-      // (rather than resuming smoothly) once frames resume. Matches the
-      // previous R3F-driven behavior exactly, since useFrame callbacks
-      // there were likewise just not invoked while stopped.
+      // Wall-clock elapsed time — the loop simply isn't scheduled while
+      // stopped, so u_time freezes and jumps ahead on resume rather than
+      // pausing smoothly.
       material.uniforms.u_time.value = (performance.now() - clockStart) / 1000;
 
-      // The renderer's own drawing-buffer size already equals
-      // CSS-size * resolved-DPR (that's what setSize/setPixelRatio above
-      // produce) — reading it straight off the canvas keeps this in sync
-      // with whatever the renderer is actually using, with no separate
-      // bookkeeping.
+      // Reading straight off the canvas keeps this in sync with whatever
+      // the renderer is actually using, with no separate bookkeeping.
       material.uniforms.u_resolution.value.set(canvas.width, canvas.height);
 
-      // Read live, every frame, independent of the debounced resize above —
-      // keeps aspect correction accurate during HeroScrollShell's
-      // scroll-linked resize instead of lagging behind by up to 500ms.
+      // Read live every frame, independent of the debounced resize, so
+      // aspect stays accurate during scroll-linked resizing.
       const rect = wrapper!.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
         material.uniforms.u_aspect.value = rect.width / rect.height;
       }
 
-      // Ease toward the latest pointer sample instead of snapping to it, so
-      // the field's response to the mouse reads as a gentle pull rather
-      // than a twitch.
+      // Ease toward the latest pointer sample so the response reads as a
+      // gentle pull, not a twitch.
       const target = mouseRef.current;
       const current = material.uniforms.u_mouse.value;
       current.x += (target.x - current.x) * 0.05;
@@ -251,24 +218,18 @@ export default function ShaderScene() {
       window.removeEventListener("scroll", handleWindowScroll);
       geometry.dispose();
       material.dispose();
-      // Matches @react-three/fiber's own unmount teardown (dispose +
-      // forceContextLoss), which explicitly releases the GPU context
-      // rather than relying on garbage collection to get to it eventually.
+      // Explicitly releases the GPU context rather than waiting on GC.
       renderer.dispose();
       renderer.forceContextLoss();
       wrapper.removeChild(canvas);
     };
-    // Constructed exactly once; `isDark`'s value here only seeds the very
-    // first frame — later theme changes are pushed through the effect
-    // below instead of rebuilding the scene.
+    // Constructed once; `isDark` here only seeds the first frame — later
+    // changes go through the effect below instead of rebuilding the scene.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // "never" stops the render loop entirely (freezing u_time along with it)
-  // whenever the tab is backgrounded or the hero has scrolled out of
-  // HeroScrollShell's pinned range — there's no reason to keep paying for
-  // a WebGL frame past that. Only starts/stops the existing loop; never
-  // recreates the renderer/scene.
+  // Stops the render loop (freezing u_time) when the tab is backgrounded
+  // or the hero scrolls out of view — only starts/stops, never recreates.
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
@@ -279,9 +240,7 @@ export default function ShaderScene() {
     }
   }, [tabVisible, heroVisible]);
 
-  // Theme can change after mount (Settings' Light/Dark/System control) —
-  // push the new value into the existing uniform immediately rather than
-  // waiting for it to matter next frame.
+  // Push a theme change into the existing uniform immediately.
   useEffect(() => {
     const material = engineRef.current?.material;
     if (material) setIsLightUniform(material, isDark);

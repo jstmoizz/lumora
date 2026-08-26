@@ -65,15 +65,9 @@ test.describe("signed in", () => {
   });
 });
 
-// A dedicated, disposable account (see global-setup.ts's own comment on
-// E2E_LOGOUT_TEST_EMAIL) — this test calls Supabase's signOut(), which
-// defaults to GLOBAL scope (every session for that user, everywhere).
-// Running it against the shared default account (used by nearly every
-// other spec's storageState) would revoke those sessions too, regardless
-// of Playwright worker/ordering, since the revocation is real and
-// server-side. Same isolation pattern as generate-persistence.spec.ts,
-// history.spec.ts, and generate-workspace.spec.ts: start signed out here,
-// log in fresh within the test, on an account nothing else touches.
+// A dedicated, disposable account — this test calls Supabase's signOut(),
+// which defaults to global scope and would revoke every other spec's
+// session if run against the shared default account.
 test.describe("log out", () => {
   test.use({ storageState: { cookies: [], origins: [] } });
 

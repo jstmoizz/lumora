@@ -1,10 +1,8 @@
 /**
- * Read-side data access for History — the write side (creating
- * conversations, persisting messages, bumping `updated_at`) lives in
- * `app/api/chat/route.ts`. Both go through the same RLS-scoped server
- * client as everything else in `lib/supabase/` — ownership is enforced by
- * Postgres itself, never an application-level check, so these functions
- * can't be used to read another user's data no matter what id is passed.
+ * Read-side data access for History — the write side lives in
+ * app/api/chat/route.ts. Ownership is enforced by Postgres via RLS, never
+ * an application-level check, so these functions can't leak another user's
+ * data no matter what id is passed.
  */
 
 import { createClient } from "./server";
@@ -37,18 +35,10 @@ export async function listConversations(): Promise<ConversationSummary[]> {
 }
 
 /**
- * A conversation's messages, oldest first, ready to seed `useChat`'s
- * initial state — or `null` if `conversationId` doesn't exist or doesn't
- * belong to the signed-in user. Those two cases are deliberately
- * indistinguishable (both come back as "no row" under RLS), the same
- * non-leaking shape `app/api/chat/route.ts` already uses for the same
- * reason.
- *
- * The explicit existence check below (rather than just querying `messages`
- * directly and treating an empty result as "not found") is what lets the
- * caller tell "a conversation with no messages yet" apart from "not yours"
- * — querying `messages` alone can't distinguish those, since RLS makes
- * both come back empty.
+ * A conversation's messages, oldest first, or `null` if it doesn't exist or
+ * doesn't belong to the signed-in user (indistinguishable under RLS). The
+ * explicit existence check below is what lets "no messages yet" be told
+ * apart from "not yours" — querying `messages` alone can't.
  */
 export async function getConversationMessages(
   conversationId: string,

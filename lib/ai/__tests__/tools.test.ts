@@ -292,16 +292,9 @@ describe("addKnowledgeTopicTool.execute", () => {
   });
 });
 
-// Regression coverage for a production bug: Groq's tool-calling sometimes
-// emits `category: ""` instead of omitting the key, even though it's
-// `.optional()` and SYSTEM_PROMPT tells the model to leave it out entirely
-// for a broad topic. A plain `.min(1)` on an optional field only guards
-// against a missing key, not this "present but blank" case, so the raw
-// model output failed schema validation before execute() ever ran — never
-// reaching execute()'s own trim-then-omit handling. These tests exercise
-// `inputSchema` directly (the same validation the AI SDK runs against the
-// model's raw tool-call arguments), not `execute()`, since that's the layer
-// the bug actually lived in.
+// Groq's tool-calling sometimes emits `category: ""` instead of omitting
+// the key. Tests inputSchema directly (the layer that actually validates
+// the model's raw arguments), not execute().
 describe("tool input schemas tolerate a blank category (production bug regression)", () => {
   const quizArgs = (category: unknown) => ({
     topic: "Operating Systems",

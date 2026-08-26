@@ -9,11 +9,8 @@ import type { LumoraUIMessage } from "@/lib/ai/tools";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-// Real `APICallError` instances (not mocked — see the `vi.mock("ai", ...)`
-// below, which only overrides streamText/generateText/createUIMessageStream/
-// createUIMessageStreamResponse) so these tests exercise the actual
-// `classifyAIError` logic end to end, the same way a real Groq 429/5xx
-// response would surface through `@ai-sdk/groq`.
+// Real APICallError instances, so these tests exercise classifyAIError end
+// to end, the same way a real Groq 429/5xx response would surface.
 function rateLimitedProviderError(): APICallError {
   return new APICallError({
     message: "Rate limit reached for model qwen/qwen3.6-27b. Please try again in 7m25s.",
@@ -34,10 +31,8 @@ function providerUnavailableError(): APICallError {
   });
 }
 
-// Builds a syntactically valid (but not a real decodable image) base64
-// data URL of a controlled byte size — the route never decodes the image
-// itself, only measures/pattern-matches the transmitted string, so a
-// repeated-character payload exercises the same code paths as a real one.
+// A base64 data URL of a controlled byte size — the route never decodes
+// the image, only measures/pattern-matches the string.
 function makeDataUrl(mediaType: string, byteLength: number): string {
   const base64Length = Math.ceil((byteLength * 4) / 3 / 4) * 4;
   return `data:${mediaType};base64,${"A".repeat(base64Length)}`;
@@ -140,12 +135,7 @@ interface SupabaseMockConfig {
 }
 
 // Mimics just enough of Supabase's fluent query builder for `conversations`
-// and `messages` — the two tables app/api/chat/route.ts touches — without
-// depending on a real database. `insert`/`update` mark which operation is
-// in flight so `.single()`/the final `.eq()` resolve with the right
-// test-configured result; `select` never changes that, since the route's
-// own insert-then-select-id pattern (`.insert(...).select("id").single()`)
-// is one logical operation, not a separate lookup.
+// and `messages` without a real database.
 function setupSupabaseMock(config: SupabaseMockConfig = {}) {
   const conversationsSelectSpy = vi.fn();
   const conversationsInsertSpy = vi.fn();
@@ -223,10 +213,8 @@ interface FakeOnEndEvent {
   finishReason?: "stop" | "length" | "error" | undefined;
 }
 
-// Stands in for `streamText(...).toUIMessageStreamResponse(options)` — runs
-// the route's own `onEnd` callback (the hook the real AI SDK calls once the
-// assistant's turn is over) with a test-controlled outcome, without ever
-// calling a real model.
+// Stands in for streamText(...).toUIMessageStreamResponse(options) — runs
+// the route's own onEnd callback with a test-controlled outcome.
 function setupStreamText(onEndEvent?: FakeOnEndEvent) {
   streamTextMock.mockReturnValue({
     toUIMessageStreamResponse: vi.fn(
@@ -241,10 +229,8 @@ function setupStreamText(onEndEvent?: FakeOnEndEvent) {
       }) => {
         if (onEndEvent) {
           // `??` would treat an intentionally-passed `finishReason:
-          // undefined` (simulating "no finish event ever arrived") the
-          // same as "not provided" and silently default it back to
-          // "stop" — so the fallback only applies when the key itself is
-          // absent.
+          // undefined` the same as "not provided" — the fallback must only
+          // apply when the key itself is absent.
           const finishReason =
             "finishReason" in onEndEvent ? onEndEvent.finishReason : "stop";
           await options.onEnd?.({
@@ -261,14 +247,9 @@ function setupStreamText(onEndEvent?: FakeOnEndEvent) {
   });
 }
 
-// Simulates a provider/model failure reaching streamText's own `onError` —
-// the real AI SDK calls this mid-stream (before any content, after some has
-// streamed, or during tool execution all funnel through the same hook), so
-// this is the one place that needs testing regardless of when the failure
-// actually happened. Captures the route's `onError` return value (the safe
-// `AIErrorCode` — see lib/ai/errors.ts) in the mocked Response body so the
-// test can assert on it directly, since a real stream error never produces
-// a completed assistant turn for `onEnd` to receive.
+// Simulates a provider/model failure reaching streamText's onError.
+// Captures the route's onError return value (the safe AIErrorCode) in the
+// mocked Response body so the test can assert on it directly.
 function setupStreamTextError(error: unknown) {
   streamTextMock.mockReturnValue({
     toUIMessageStreamResponse: vi.fn(
@@ -303,16 +284,10 @@ const SAMPLE_EXTRACTION = {
   keyConcepts: ["Chlorophyll", "Light-dependent reactions", "ATP"],
 };
 
-// Stands in for the image-extraction path's `createUIMessageStream(...)` +
-// `createUIMessageStreamResponse(...)` pair — mirrors setupStreamText's own
-// "await onEnd deterministically" approach so tests can assert on
-// persistence without racing a real background stream. `createUIMessageStream`
-// normally returns a plain synchronous ReadableStream; here it returns a
-// Promise instead, which `createUIMessageStreamResponseMock` awaits before
-// resolving — and since `POST`'s own `return createUIMessageStreamResponse(...)`
-// is itself awaited via return-promise-chaining, `await POST(...)` in a test
-// still doesn't resolve until the whole execute()+onEnd() sequence below has
-// finished, exactly like the streamText path already does.
+// Stands in for the image-extraction path's createUIMessageStream +
+// createUIMessageStreamResponse pair, mirroring setupStreamText's "await
+// onEnd deterministically" approach so tests can assert on persistence
+// without racing a real background stream.
 function setupImageExtraction(
   options: { extraction?: Partial<typeof SAMPLE_EXTRACTION>; rejectWith?: Error } = {},
 ) {
@@ -365,12 +340,8 @@ function setupImageExtraction(
             .filter((chunk) => chunk.type === "text-delta")
             .map((chunk) => chunk.delta ?? "")
             .join("");
-          // Mirrors the route's real behavior: a `data-*` chunk (e.g.
-          // `data-extraction`) becomes a non-transient part on the
-          // finished message, same as a real UIMessageStreamWriter would
-          // assemble it — see app/generate/ChatInterface.tsx's
-          // `hasExtraction` logic, which depends on that part actually
-          // being present on `responseMessage.parts`.
+          // Mirrors the real behavior: a data-* chunk becomes a
+          // non-transient part on the finished message.
           const dataParts = chunks
             .filter((chunk) => chunk.type.startsWith("data-"))
             .map((chunk) => ({ type: chunk.type, id: chunk.id, data: chunk.data }));
@@ -383,11 +354,8 @@ function setupImageExtraction(
           }
         } catch (error) {
           finishReason = undefined;
-          // Mirrors the real createUIMessageStream behavior confirmed
-          // earlier (node_modules/ai/dist/index.js): an execute() throw is
-          // caught and enqueued as `{type: "error", errorText: onError(error)}`
-          // — the only place the route's classified, safe error code (see
-          // lib/ai/errors.ts) is observable from outside.
+          // Mirrors real createUIMessageStream behavior: an execute()
+          // throw is caught and enqueued as {type: "error", errorText}.
           const errorText = streamOptions.onError?.(error);
           chunks.push({ type: "error", errorText });
         }
@@ -410,11 +378,9 @@ function setupImageExtraction(
   );
 }
 
-// Reads back the chunk list `setupImageExtraction`'s mock produced for the
-// most recent `POST()` call — the only way to observe what the extraction
-// branch actually wrote to the stream (including, on failure, the `error`
-// chunk's classified `errorText`), since `createUIMessageStreamResponseMock`
-// itself only ever returns a plain `Response("ok")`.
+// Reads back the chunk list setupImageExtraction's mock produced for the
+// most recent POST() call — the only way to observe what the extraction
+// branch wrote to the stream.
 async function getLastExtractionChunks(): Promise<
   Array<{ type: string; errorText?: unknown; data?: unknown }>
 > {
@@ -465,10 +431,8 @@ describe("authentication", () => {
   });
 
   test("streams the response through a smoothing transform, not raw provider chunks", async () => {
-    // Groq responds fast enough that raw chunks can otherwise arrive as one
-    // or two bursts — indistinguishable from the message just appearing all
-    // at once. Asserting only that some transform is wired in (not its
-    // exact pacing) so tuning delayInMs/chunking later doesn't break this.
+    // Asserting only that some transform is wired in, not its exact
+    // pacing, so tuning delayInMs/chunking later doesn't break this.
     setupSupabaseMock();
     setupStreamText({
       responseMessage: assistantMessageWithParts([
@@ -519,12 +483,10 @@ describe("malformed messages", () => {
     expect(fromMock).not.toHaveBeenCalled();
   });
 
-  // titleFromMessage()/extractText() both do `message.parts.filter(...)` —
-  // called before convertToModelMessages()'s own try/catch is ever reached,
-  // for both the new-conversation (titleFromMessage) and existing-
-  // conversation (extractText, at persistence time) branches. A message
-  // missing `parts` entirely used to throw past both of those, reaching
-  // neither this route's own error response nor the DB.
+  // titleFromMessage()/extractText() both call message.parts.filter(...)
+  // before convertToModelMessages()'s own try/catch — a message missing
+  // `parts` entirely used to throw past both, reaching neither an error
+  // response nor the DB.
   test("a message missing `parts` entirely is rejected with 400 before any DB work happens, for a new conversation", async () => {
     setupSupabaseMock();
 
@@ -730,11 +692,8 @@ describe("mode routing and image attachments", () => {
     );
 
     const [callArgs] = generateTextMock.mock.calls[0];
-    // The critical requirement: verified directly on the outgoing request,
-    // not inferred from "no tool calls happened to be made". Exactly one
-    // tool is registered for this call, and it isn't one of the
-    // application's — see lib/ai/extraction.ts's own comment on why a
-    // non-application `recordExtraction` tool exists at all.
+    // Verified directly on the outgoing request: exactly one tool is
+    // registered, and it isn't one of the application's.
     const toolNames = Object.keys(callArgs.tools);
     expect(toolNames).toEqual(["recordExtraction"]);
     expect(toolNames).not.toContain("createQuiz");
@@ -809,9 +768,8 @@ describe("mode routing and image attachments", () => {
     const dataPart = parts.find((part) => part.type === "data-extraction");
     expect(dataPart).toBeDefined();
     expect((dataPart as { data: unknown }).data).toEqual(SAMPLE_EXTRACTION);
-    // The plain-text mirror still rides alongside it — see
-    // formatExtractionAsText's comment in the route for why (conversation
-    // history for a later GPT-OSS turn, not for direct display).
+    // The plain-text mirror rides alongside it — history for a later
+    // GPT-OSS turn, not for direct display.
     expect(parts.some((part) => part.type === "text")).toBe(true);
   });
 
@@ -846,19 +804,14 @@ describe("mode routing and image attachments", () => {
 
     expect(streamTextMock).toHaveBeenCalled();
     const [[callArgs]] = streamTextMock.mock.calls;
-    // The real convertToModelMessages runs here (only streamText itself is
-    // mocked) — asserting on its actual output, not a stand-in.
+    // The real convertToModelMessages runs here — asserting on its actual output.
     const serialized = JSON.stringify(callArgs.messages);
     expect(serialized).not.toContain("data:image");
   });
 
-  // End-to-end across two real POST() calls, using the route's own actual
-  // extraction persistence for the history fed into the second call —
-  // not a hand-built stand-in for what formatExtractionAsText produces.
-  // Proves GPT-OSS genuinely receives enough to act on: title, summary,
-  // extractedContent, and keyConcepts all have to survive the full
-  // extraction -> persistence -> next-turn-history -> convertToModelMessages
-  // chain intact.
+  // End-to-end across two real POST() calls: title, summary,
+  // extractedContent, and keyConcepts must all survive the full
+  // extraction -> persistence -> next-turn-history chain intact.
   test("the extracted title/summary/extractedContent/keyConcepts all reach GPT-OSS on the handoff turn", async () => {
     const spies = setupSupabaseMock();
     setupImageExtraction();
@@ -901,11 +854,8 @@ describe("mode routing and image attachments", () => {
     }
   });
 
-  // Qwen returning genuinely weak content (no invented text — see
-  // lib/ai/extraction.ts) must not crash the pipeline or produce garbage
-  // like "undefined"/"null" in the follow-up context. The existing GPT-OSS
-  // clarification behavior (SYSTEM_PROMPT) is the intended fallback for
-  // "not enough to act on", not anything this route needs to special-case.
+  // Qwen returning genuinely weak content must not crash the pipeline or
+  // produce garbage like "undefined"/"null" in the follow-up context.
   test("weak extraction content (no title, empty optional fields) still produces a valid, crash-free handoff turn", async () => {
     const spies = setupSupabaseMock();
     setupImageExtraction({
@@ -1073,9 +1023,8 @@ describe("conversation ownership", () => {
   });
 
   test("another user's conversation cannot be accessed by guessing its id", async () => {
-    // RLS scopes the lookup to the signed-in user, so a conversation that
-    // exists but belongs to someone else comes back exactly like one that
-    // doesn't exist at all: no row.
+    // RLS scopes the lookup, so a conversation belonging to someone else
+    // comes back exactly like one that doesn't exist.
     setupSupabaseMock({ conversationLookup: { data: null, error: null } });
     setupStreamText();
 
@@ -1184,12 +1133,9 @@ describe("persistence", () => {
   });
 });
 
-// `handleRetry` in ChatInterface.tsx always sends `trigger:
-// "regenerate-message"` (the AI SDK sets this itself), with a
-// `conversationId` in the body only when the client already knows one.
-// A retry of the very first message of a session — when the original
-// request failed before the client ever learned a conversationId — arrives
-// here exactly like an initial submission except for that trigger value.
+// A retry of the very first message of a session — before the client ever
+// learned a conversationId — arrives here exactly like an initial
+// submission except for the trigger value.
 describe("retry (regenerate-message)", () => {
   test("regenerate-message with no conversationId is treated like an initial submission: a conversation is created and the user message is persisted", async () => {
     const spies = setupSupabaseMock({

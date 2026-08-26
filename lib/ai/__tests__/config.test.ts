@@ -1,12 +1,9 @@
 import { describe, test, expect } from "vitest";
 import { SYSTEM_PROMPT } from "../config";
 
-// Guards the topic-recovery guidance in SYSTEM_PROMPT (typo confirmation,
-// ambiguous-topic clarification, missing-topic clarification, confirming
-// follow-through, and not over-asking for an already-clear topic) against
+// Guards the topic-recovery instructions in SYSTEM_PROMPT against
 // accidental removal — the model's actual judgment can only be checked
-// live (see topicRecovery.live.test.ts), but this at least ensures the
-// instructions it depends on stay present.
+// live (see topicRecovery.live.test.ts).
 describe("SYSTEM_PROMPT topic-recovery guidance", () => {
   test("instructs confirming an obvious typo before calling a tool", () => {
     expect(SYSTEM_PROMPT).toMatch(/misspelling/i);

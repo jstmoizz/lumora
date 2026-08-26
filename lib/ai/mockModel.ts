@@ -1,47 +1,28 @@
 /**
  * A deterministic, offline stand-in for the real Groq model, used only when
- * `LUMORA_E2E_MOCK_AI=true` (see `isE2eMockAiEnabled` below). This exists so
- * `e2e/generate-persistence.spec.ts` can keep exercising the real
- * `app/api/chat/route.ts` handler and its real Supabase persistence in CI —
- * request parsing, the `streamText` call, and the `onEnd` callback that
- * writes conversation/message rows all still run for real — without CI ever
- * making a real, quota-consuming call to Groq's API.
- *
- * Built on the `ai` package's own first-party test tooling
- * (`MockLanguageModelV4` from `ai/test`, `simulateReadableStream` from
- * `ai`) rather than a hand-rolled fake or an HTTP-level double, so it
- * genuinely implements the same `LanguageModelV4` interface
- * `@ai-sdk/groq`'s real models do — `streamText` can't tell the difference
- * except that no network call happens.
+ * `LUMORA_E2E_MOCK_AI=true`. Lets E2E tests exercise the real chat route and
+ * Supabase persistence without a real, quota-consuming Groq call. Built on
+ * the `ai` package's own test tooling so it genuinely implements
+ * `LanguageModelV4` — `streamText` can't tell the difference.
  */
 
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 
-// Deliberately not the generic `CI` flag (already used elsewhere, e.g. by
-// Playwright itself, for unrelated purposes) — a dedicated flag makes
-// mocking the model an explicit, single-purpose opt-in rather than
-// something that silently piggybacks on a broader "is this CI" signal.
+// Not the generic `CI` flag (used elsewhere for unrelated purposes) — a
+// dedicated flag keeps mocking an explicit, single-purpose opt-in.
 const MOCK_AI_ENV_VAR = "LUMORA_E2E_MOCK_AI";
 
 export function isE2eMockAiEnabled(): boolean {
   return process.env[MOCK_AI_ENV_VAR] === "true";
 }
 
-// Fixed text, not derived from the request: the only thing that exercises
-// this (generate-persistence.spec.ts) asserts on conversation/message row
-// counts and timestamps, never on the assistant's actual reply content — so
-// there's nothing to gain from echoing the prompt back, and a fixed string
-// keeps this trivially deterministic.
+// Fixed, not derived from the request — tests assert on persistence, never
+// on reply content.
 const MOCK_RESPONSE_TEXT = "Acknowledged.";
 
-/**
- * A fresh mock model per call. `resolveModel()` in `lib/ai/config.ts` calls
- * this once per request, so the initial message and the follow-up message
- * in a multi-turn test each get their own independent instance — no shared
- * mutable state to reset between them, and each one deterministically
- * completes with the same short response.
- */
+/** A fresh instance per call, so concurrent/multi-turn requests never share
+ * mutable state. */
 export function createE2eMockLanguageModel(modelId: string): MockLanguageModelV4 {
   const textId = "e2e-mock-text";
   return new MockLanguageModelV4({

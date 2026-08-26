@@ -21,14 +21,10 @@ function createTestAdminClient() {
   });
 }
 
-// Its own dedicated account (see global-setup.ts) — sharing
-// generate-persistence.spec.ts's account was the first attempt, but that
-// test asserts an *exact* conversation count for its account, and this
-// test running concurrently and inserting its own conversation into the
-// same account raced with that count. Every assertion below is still
-// scoped to a uniquely-titled conversation this test creates itself, so
-// it's also safe regardless of whatever else this account accumulates
-// across this test's own prior runs.
+// Its own dedicated account: sharing generate-persistence.spec.ts's
+// account raced with that test's exact conversation-count assertion.
+// Every assertion below is scoped to a uniquely-titled conversation this
+// test creates itself.
 test.use({ storageState: { cookies: [], origins: [] } });
 
 test("History lists a real conversation and resumes it with its past messages", async ({
@@ -54,10 +50,8 @@ test("History lists a real conversation and resumes it with its past messages", 
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page).toHaveURL(/\/generate$/, { timeout: 15_000 });
 
-  // Seeded directly via the admin client rather than through a real model
-  // round trip: History only needs to read and navigate what's already in
-  // the table, which generate-persistence.spec.ts already proves gets
-  // written correctly — no need to pay for a second real model call here.
+  // Seeded directly via the admin client rather than a real model round
+  // trip — History only needs to read what's already in the table.
   const title = `E2E history check ${randomUUID().slice(0, 8)}`;
   const userText = "What causes the seasons?";
   const assistantText = "Earth's axial tilt changes how directly sunlight hits each hemisphere.";
@@ -101,13 +95,6 @@ test("History lists a real conversation and resumes it with its past messages", 
   await expect(page.getByText(assistantText)).toBeVisible();
 });
 
-// The empty state ("No study sessions yet") isn't covered here — it would
-// need a guaranteed-empty account, and every account this suite has either
-// already has conversations by design (this file's own account) or would
-// have to be created fresh per run to guarantee emptiness, piling up
-// throwaway auth.users rows on every single run. That render path is
-// already covered at the unit level (HistoryClient.test.tsx), including
-// against listConversations() genuinely returning an empty array
-// (conversations.test.ts) — an E2E pass would only additionally prove the
-// real query returns empty for an empty account, which isn't worth a new
-// permanent account to demonstrate.
+// The empty state isn't covered here — it would need a guaranteed-empty
+// account. Already covered at the unit level (HistoryClient.test.tsx,
+// conversations.test.ts).

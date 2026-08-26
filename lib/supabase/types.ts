@@ -1,18 +1,11 @@
 /**
- * Hand-written `Database` type matching `supabase/schema.sql`.
+ * Hand-written `Database` type matching `supabase/schema.sql`. Nothing
+ * checks this against the live database yet — keep it in sync by hand, or
+ * replace with `supabase gen types typescript` once the project is linked.
  *
- * Nothing generates or checks this against the live database yet — once the
- * project is linked to the Supabase CLI, `supabase gen types typescript`
- * should replace this file with a generated one so it can't drift from the
- * real schema. Until then, keep this in sync by hand whenever
- * `supabase/schema.sql` changes.
- *
- * Every table includes `Relationships: []` and the schema includes empty
- * `Views`/`Functions` — required to satisfy `@supabase/postgrest-js`'s
- * `GenericTable`/`GenericSchema` constraints (a table type missing
- * `Relationships`, or a schema missing `Views`/`Functions`, silently falls
- * back to untyped/`never` query results instead of a compile error, which
- * is exactly the trap this comment exists to flag).
+ * Every table needs `Relationships: []`, and the schema needs empty
+ * `Views`/`Functions` — omitting them silently falls back to untyped/
+ * `never` query results instead of a compile error.
  */
 
 import type { LumoraUIMessage } from "@/lib/ai/tools";
@@ -167,6 +160,33 @@ export interface Database {
           flashcard_count?: number;
           created_at?: string;
           last_studied_at?: string;
+        };
+        Relationships: [];
+      };
+      knowledge_node_positions: {
+        Row: {
+          node_id: string;
+          user_id: string;
+          position_x: number;
+          position_y: number;
+          position_z: number;
+          updated_at: string;
+        };
+        Insert: {
+          node_id: string;
+          user_id: string;
+          position_x: number;
+          position_y: number;
+          position_z: number;
+          updated_at?: string;
+        };
+        Update: {
+          node_id?: string;
+          user_id?: string;
+          position_x?: number;
+          position_y?: number;
+          position_z?: number;
+          updated_at?: string;
         };
         Relationships: [];
       };

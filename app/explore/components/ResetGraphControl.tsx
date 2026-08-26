@@ -6,23 +6,15 @@ import { RotateCcwIcon } from "lucide-react";
 import ConfirmDialog from "./ConfirmDialog";
 import { resetKnowledgeGraph } from "@/lib/supabase/knowledge-graph-actions";
 
-// Deliberately quiet — a small inline text control, not a prominent primary
-// button. No layout opinion of its own (no wrapping/centering div) so it can
-// sit inline in whatever row the caller places it in — currently the
-// level/topic-count line at the top of the page.
+// A small inline text control, not a primary button — no layout opinion of
+// its own, so it sits inline in whatever row the caller places it in.
 export default function ResetGraphControl() {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
-  // Set only when a confirmed reset's Server Action reports failure
-  // (`{ ok: false }`) — resetKnowledgeGraph already catches its own
-  // Supabase errors rather than throwing, so this can't be caught with a
-  // try/catch; it has to be read from the result. Cleared on the next
-  // reset attempt.
+  // resetKnowledgeGraph never throws, so failure has to be read from its result.
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
-  // See ExploreClient.tsx's `isDeletingRef` for why `isPending` alone can't
-  // close this window — same pattern, same reason, applied to this
-  // component's own separate reset mutation.
+  // Closes the same double-confirm window as ExploreClient's isDeletingRef.
   const isResettingRef = useRef(false);
 
   function handleConfirm() {
@@ -32,9 +24,6 @@ export default function ResetGraphControl() {
       try {
         const result = await resetKnowledgeGraph();
         if (!result.ok) {
-          // Reset failed server-side — leave the graph untouched instead of
-          // refreshing as if it had been cleared. Retry path is just
-          // clicking Reset Knowledge Graph again.
           setError("Couldn't reset your knowledge graph. Please try again.");
           return;
         }
@@ -68,13 +57,7 @@ export default function ResetGraphControl() {
         onConfirm={handleConfirm}
         confirmDisabled={isPending}
       />
-      {/*
-        `role="alert"` is an implicit assertive live region — announced to
-        screen readers the moment it appears, and (unlike a purely sr-only
-        span) visible so sighted users see it too. This component has no
-        layout opinion of its own (see the module comment), so this renders
-        inline in whatever row the caller places it in, same as the button.
-      */}
+      {/* role="alert" announces this immediately and stays visible for sighted users. */}
       {error && (
         <span role="alert" className="text-xs text-destructive">
           {error}

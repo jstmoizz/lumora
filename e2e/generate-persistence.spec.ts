@@ -5,19 +5,14 @@ import {
   E2E_PERSISTENCE_TEST_PASSWORD,
 } from "./global-setup";
 
-// Signed out, unlike every other test's default: this test logs in as its
-// own dedicated account (see global-setup.ts) rather than reusing the
-// shared session, since auth.spec.ts's "log out" test can revoke that
-// shared session (Supabase's signOut() defaults to all-sessions scope) at
+// Logs in as its own dedicated account rather than reusing the shared
+// session, since auth.spec.ts's "log out" test can revoke that session at
 // any point while this test's real, non-mocked requests are in flight.
 test.use({ storageState: { cookies: [], origins: [] } });
 
 // Mirrors the inline admin client in global-setup.ts rather than importing
-// lib/supabase/admin.ts: that module's `Database` generic pulls in
-// lib/ai/tools.ts (and, through it, the `ai` package) purely for typing,
-// and Playwright's TS transform only reliably covers files statically
-// reachable from playwright.config.ts/spec files. This test only needs a
-// few untyped table reads, so the app's typed client isn't worth the risk.
+// lib/supabase/admin.ts, whose Database generic pulls in the `ai` package
+// purely for typing.
 function createTestAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -31,21 +26,14 @@ function createTestAdminClient() {
   });
 }
 
-// This test deliberately does NOT mock /api/chat (unlike generate.spec.ts)
-// — it exercises the real route against the real, configured Supabase
-// project and the real model, to verify Phase 3.1's persistence actually
-// works end to end, not just that the UI renders correctly against a
-// canned response. It creates one new conversation and its messages under
-// its own dedicated E2E account (see global-setup.ts); nothing is cleaned
-// up afterward, same as that account's own auth.users row.
+// Deliberately does NOT mock /api/chat (unlike generate.spec.ts) — it
+// exercises the real route against the real Supabase project and model, to
+// verify persistence works end to end. Nothing is cleaned up afterward.
 test("a real authenticated turn is persisted, and a follow-up reuses the same conversation", async ({
   page,
 }) => {
   // Two full, non-mocked model round trips plus several polled Supabase
-  // lookups. Generous on top of that: under the full suite's parallel
-  // workers, this test's requests share one dev server with everything
-  // else, so it can queue behind other workers' first-time route
-  // compilation rather than reflecting anything slow in the feature itself.
+  // lookups, generous since this can queue behind other workers.
   test.setTimeout(180_000);
 
   const admin = createTestAdminClient();
@@ -87,16 +75,9 @@ test("a real authenticated turn is persisted, and a follow-up reuses the same co
     };
   }
 
-  // The client's own "generation finished" signal (the composer switching
-  // back from "Stop" to "Send") fires once the AI SDK processes the
-  // stream's `finish` chunk — which the server enqueues *before* running
-  // `onEnd` (where api/chat/route.ts's persistence happens; `onEnd` is the
-  // TransformStream's `flush()`, which only runs once every chunk,
-  // including `finish`, has already been sent). So there's an inherent gap
-  // between "the UI looks done" and "the database write has landed" for
-  // each individual write — every assertion below that depends on
-  // server-side persistence polls for it rather than reading once
-  // immediately after a UI wait.
+  // The UI's "done" signal fires before the server's onEnd persistence
+  // runs, so every assertion below that depends on it polls rather than
+  // reading once immediately after a UI wait.
   await page.goto("/login");
   await page.getByLabel("Email").fill(E2E_PERSISTENCE_TEST_EMAIL);
   await page.getByLabel("Password").fill(E2E_PERSISTENCE_TEST_PASSWORD);
@@ -108,9 +89,8 @@ test("a real authenticated turn is persisted, and a follow-up reuses the same co
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByText("Thinking…")).toBeVisible();
 
-  // The conversation row itself is created up front, before generation
-  // starts, so this poll resolves quickly — it isn't a proxy for "the turn
-  // finished", just for "a conversation now exists".
+  // The conversation row is created before generation starts, so this
+  // resolves quickly — it's a proxy for "exists," not "the turn finished".
   await expect
     .poll(conversationCountForUser, { timeout: 40_000 })
     .toBe(countBefore + 1);
@@ -124,15 +104,13 @@ test("a real authenticated turn is persisted, and a follow-up reuses the same co
   const conversationId = created![0].id as string;
   const createdAt = created![0].created_at as string;
 
-  // Only becomes true once `onEnd` has run, since the assistant message is
-  // inserted there and nowhere else.
+  // Only true once onEnd has run — the assistant message is inserted there.
   await expect
     .poll(() => messageRoleCounts(conversationId), { timeout: 40_000 })
     .toEqual({ user: 1, assistant: 1 });
 
-  // The timestamp bump is the last thing `onEnd` does, right after the
-  // assistant insert above — poll it separately rather than assuming it
-  // landed by the time the message poll above resolved.
+  // The timestamp bump is the last thing onEnd does — poll it separately
+  // rather than assuming it landed already.
   await expect
     .poll(
       async () => {

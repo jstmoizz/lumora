@@ -1,15 +1,10 @@
 "use client";
 
 /**
- * Browser-side Supabase client. Safe to import from client components —
- * only reads the two `NEXT_PUBLIC_*` env vars, which are meant to be
- * public (the anon key is designed to be exposed; Row Level Security is
- * what actually restricts what it can read/write).
- *
- * Wrapped in a function rather than constructed at module scope, so
- * merely importing this file never throws even before
- * `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY` are configured
- * — nothing calls `createClient()` yet.
+ * Browser-side Supabase client. Safe for client components — the anon key
+ * is designed to be public; RLS is what actually restricts access.
+ * Wrapped in a function so importing this file never throws before the env
+ * vars are configured.
  */
 
 import { createBrowserClient } from "@supabase/ssr";

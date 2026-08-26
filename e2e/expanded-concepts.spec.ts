@@ -20,34 +20,23 @@ function createTestAdminClient() {
   });
 }
 
-// Mirrors lib/knowledge-graph/topics.ts's normalizeTopicKey exactly (a
-// two-line pure function: trim, collapse whitespace, lowercase) — not
-// imported directly, since e2e specs deliberately avoid reaching into app
-// modules (see global-setup.ts's own comment on why the admin client there
-// is inlined rather than imported).
+// Mirrors lib/knowledge-graph/topics.ts's normalizeTopicKey — not imported,
+// since e2e specs avoid reaching into app modules.
 function normalizeTopicKey(label: string): string {
   return label.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-// Uses the dedicated persistence-test account (also used by
-// settings.spec.ts and generate-persistence.spec.ts) rather than the
-// default shared account: auth.spec.ts's "log out" test calls Supabase's
-// signOut() with its default global scope against the default account,
-// which revokes every session for that account — including this spec's, if
-// it happened to be mid-test on a concurrent worker.
+// Uses the dedicated persistence-test account rather than the default
+// shared one — auth.spec.ts's "log out" test signs that account out
+// globally, which would revoke this spec's session mid-test on a
+// concurrent worker.
 test.use({ storageState: { cookies: [], origins: [] } });
 
-// This file's three tests all upsert/delete the SAME set of knowledge_nodes
-// rows under the shared persistence account (settings.spec.ts never
-// touches knowledge_nodes, so there's no cross-file collision — but the
-// tests *within this file* would race each other under
-// Playwright's default fullyParallel scheduling, since one test's afterEach
-// cleanup would delete rows a concurrently-running sibling test still needs).
-// Serializing just this file's own tests relative to each other avoids that,
-// without opting the rest of the suite out of parallelism — each test is
-// still fully self-contained (seeds its own fixture in beforeEach, cleans
-// it up in afterEach), so nothing here depends on *which* test runs first,
-// only that they don't overlap in time.
+// This file's three tests all upsert/delete the same knowledge_nodes rows,
+// which would race each other under fullyParallel scheduling (one test's
+// afterEach cleanup deleting rows a sibling still needs). Serializing just
+// this file avoids that without opting the rest of the suite out of
+// parallelism.
 test.describe.configure({ mode: "serial" });
 
 const DATA_STRUCTURES_LABEL = "Data Structures";
@@ -55,13 +44,10 @@ const NETWORKS_LABEL = "Networks";
 const ALGORITHMS_LABEL = "Algorithms";
 const SORTING_LABEL = "Sorting";
 const GRAPH_ALGORITHMS_LABEL = "Graph Algorithms";
-// Deliberately left with no matching knowledge_nodes row of its own — this
-// is what exercises TopicPanel's "preview" (not-yet-studied) branch rather
-// than a real node's.
+// No matching knowledge_nodes row of its own — exercises TopicPanel's
+// "preview" (not-yet-studied) branch.
 const TCP_IP_LABEL = "TCP/IP";
 
-// Every top-level topic_key this file owns exclusively under the shared
-// account.
 const OWNED_TOP_LEVEL_LABELS = [DATA_STRUCTURES_LABEL, NETWORKS_LABEL, ALGORITHMS_LABEL];
 
 async function login(page: Page) {
@@ -111,12 +97,8 @@ async function upsertNode(
   return data.id as string;
 }
 
-// Creates the real knowledge_nodes rows this spec's UI assertions depend
-// on — the actual root cause of the original "0 topics" failure was that
-// no such rows existed at all (only topic_progress rows, a table nothing
-// in the app reads). Upserts rather than plain inserts so a re-run after an
-// interrupted previous cleanup never collides on knowledge_nodes' `unique
-// (user_id, topic_key)` constraint.
+// Upserts rather than plain inserts so a re-run after an interrupted
+// previous cleanup never collides on the unique (user_id, topic_key) constraint.
 async function seedKnowledgeNodes(admin: SupabaseClient, userId: string) {
   await upsertNode(admin, userId, DATA_STRUCTURES_LABEL, [], null);
   await upsertNode(admin, userId, NETWORKS_LABEL, [TCP_IP_LABEL], null);
@@ -131,10 +113,8 @@ async function seedKnowledgeNodes(admin: SupabaseClient, userId: string) {
   await upsertNode(admin, userId, GRAPH_ALGORITHMS_LABEL, [], algorithmsId);
 }
 
-// `parent_id ... on delete cascade` (see supabase/schema.sql) removes
-// Sorting/Graph Algorithms automatically once Algorithms is deleted —
-// deleting the three parent-less topics this file owns is enough to clean
-// up the whole set it created.
+// on delete cascade removes Sorting/Graph Algorithms automatically once
+// Algorithms is deleted.
 async function cleanupKnowledgeNodes(admin: SupabaseClient, userId: string) {
   await admin
     .from("knowledge_nodes")
@@ -161,20 +141,11 @@ test("a node's related labels render as real controls when a matching node exist
   await login(page);
   await page.goto("/explore");
 
-  // The top-level topic list is OptionWheel's roving-focus listbox (an
-  // `<aside aria-label="Topics">` wrapping a `role="listbox"`, `role="option"`
-  // structure) — not a `<nav>`/`<button>` list. Related concepts inside a
-  // selected node's own panel (below) are real buttons, a different, plain
-  // control.
   const topics = page.getByRole("listbox", { name: "Topics" });
 
-  // OptionWheel starts with *some* item already selected internally
-  // (index 0 of `items` — node order from the DB query isn't guaranteed,
-  // so it's never safe to assume which label that is) and only fires its
-  // onChange when a click actually *changes* that index. A throwaway click
-  // on a different item first guarantees the real first selection below
-  // always registers as a change, regardless of which item happened to
-  // start selected.
+  // OptionWheel starts with some item already selected and only fires
+  // onChange on an actual index change — a throwaway click first guarantees
+  // the real selection below registers, regardless of which item started selected.
   await topics.getByRole("option", { name: GRAPH_ALGORITHMS_LABEL }).click();
 
   // No related_labels at all: no "Related" section appears.
@@ -185,9 +156,7 @@ test("a node's related labels render as real controls when a matching node exist
   await expect(dataStructuresPanel).toBeVisible();
   await expect(dataStructuresPanel.getByText("Related", { exact: true })).not.toBeVisible();
 
-  // A related label with no matching node yet: shown as a real button, but
-  // selecting it opens the "not studied yet" preview state, not a real
-  // node's data.
+  // A related label with no matching node yet opens the preview state.
   await topics.getByRole("option", { name: NETWORKS_LABEL }).click();
   const networksPanel = page.getByRole("region", { name: `${NETWORKS_LABEL} details` });
   await expect(networksPanel).toBeVisible();
@@ -201,11 +170,8 @@ test("a node's related labels render as real controls when a matching node exist
     tcpIpPanel.getByText("Not studied yet — an unlocked suggestion based on what you already know."),
   ).toBeVisible();
 
-  // A related label that DOES match a real node: selecting it opens that
-  // node's own full panel (Delete Topic control included), not the preview
-  // state above.
-  // `exact: true` — Playwright's role-name matching is substring-based by
-  // default, and "Algorithms" would otherwise also match "Graph Algorithms".
+  // A related label that matches a real node opens its full panel instead.
+  // exact: true, since "Algorithms" would otherwise also match "Graph Algorithms".
   await topics.getByRole("option", { name: ALGORITHMS_LABEL, exact: true }).click();
   const algorithmsPanel = page.getByRole("region", { name: `${ALGORITHMS_LABEL} details` });
   await expect(algorithmsPanel).toBeVisible();
@@ -226,12 +192,9 @@ test("selecting a revealed concept via keyboard opens its own accessible panel",
   await page.goto("/explore");
 
   const topics = page.getByRole("listbox", { name: "Topics" });
-  // See the first test's own comment: a throwaway click on a different
-  // item first guarantees the real selection below registers as a change,
-  // regardless of which item the wheel started on.
+  // A throwaway click first guarantees the real selection registers.
   await topics.getByRole("option", { name: DATA_STRUCTURES_LABEL }).click();
-  // `exact: true` — Playwright's role-name matching is substring-based by
-  // default, and "Algorithms" would otherwise also match "Graph Algorithms".
+  // exact: true, since "Algorithms" would otherwise also match "Graph Algorithms".
   await topics.getByRole("option", { name: ALGORITHMS_LABEL, exact: true }).click();
 
   const sortingButton = page.getByRole("button", { name: SORTING_LABEL });
@@ -257,12 +220,9 @@ test("reduced motion: expanded concepts remain discoverable and selectable throu
   await page.goto("/explore");
 
   const topics = page.getByRole("listbox", { name: "Topics" });
-  // See the first test's own comment: a throwaway click on a different
-  // item first guarantees the real selection below registers as a change,
-  // regardless of which item the wheel started on.
+  // A throwaway click first guarantees the real selection registers.
   await topics.getByRole("option", { name: DATA_STRUCTURES_LABEL }).click();
-  // `exact: true` — Playwright's role-name matching is substring-based by
-  // default, and "Algorithms" would otherwise also match "Graph Algorithms".
+  // exact: true, since "Algorithms" would otherwise also match "Graph Algorithms".
   await topics.getByRole("option", { name: ALGORITHMS_LABEL, exact: true }).click();
 
   const sortingButton = page.getByRole("button", { name: SORTING_LABEL });

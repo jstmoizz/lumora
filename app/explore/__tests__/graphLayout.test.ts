@@ -36,9 +36,8 @@ function byId(layout: LayoutEntry[]): Map<string, LayoutEntry> {
   return new Map(layout.map((entry) => [entry.id, entry]));
 }
 
-// A wide, several-generations-deep graph — enough nodes at enough depths to
-// make determinism/3D/collision assertions meaningful, not just true by
-// coincidence on a 2-node graph.
+// Wide and several generations deep, so determinism/3D/collision assertions
+// aren't just true by coincidence on a 2-node graph.
 function bigGraph(): KnowledgeGraphNode[] {
   const nodes: KnowledgeGraphNode[] = [];
   const topics = ["Mathematics", "Computer Science", "Physics", "Biology", "History"];
@@ -128,9 +127,8 @@ describe("computeGraphLayout", () => {
   });
 
   describe("collision avoidance", () => {
-    // Minimum separation used internally by graphLayout.ts — re-derived here
-    // (not imported) so this test is checking the algorithm's actual
-    // observable guarantee, not just agreeing with its own constant.
+    // Re-derived rather than imported, so this checks the algorithm's
+    // observable guarantee rather than agreeing with its own constant.
     const MIN_SEPARATION = 0.85;
 
     test("no two nodes in a dense multi-branch graph sit closer than the minimum separation", () => {
@@ -186,15 +184,12 @@ describe("computeGraphLayout", () => {
       const layout = byId(computeGraphLayout(nodes));
       const parent = layout.get("top-0")!;
       const children = [0, 1, 2, 3].map((c) => layout.get(`top-0-child-${c}`)!);
-      // Every pair of children under the same parent is meaningfully
-      // separated from each other, not just individually far from Core.
       for (let i = 0; i < children.length; i++) {
         for (let j = i + 1; j < children.length; j++) {
           expect(distance(children[i].position, children[j].position)).toBeGreaterThan(0.1);
         }
       }
-      // And each child is still nearer its parent than a sibling's full
-      // distance away would suggest a random scatter.
+      // Still close enough to the parent to rule out a random scatter.
       for (const child of children) {
         expect(distance(child.position, parent.position)).toBeLessThan(3);
       }
@@ -245,23 +240,15 @@ describe("computeGraphLayout", () => {
         const id = `top-0-child-${c}`;
         expect(afterLayout.get(id)?.position).toEqual(beforeLayout.get(id)?.position);
       }
-      // Core and every other branch are untouched too.
       for (const [id, entry] of beforeLayout) {
         expect(afterLayout.get(id)?.position).toEqual(entry.position);
       }
     });
 
-    // Deletion is deliberately out of scope here: the spec's stability
-    // requirement (Step 5) is specifically about *adding* a node not
-    // reshuffling the graph. A sibling's position is derived from its rank
-    // among still-existing siblings (by createdAt) — cheap, and exactly
-    // what gives append-only stability its guarantee — but it does mean a
-    // later sibling can shift if an *earlier* one is deleted. In practice
-    // this is a non-regression: the previous angle/radius algorithm
-    // reshuffled on every graph change (add or delete) with no stability at
-    // all, and `deleteKnowledgeNode` already triggers a full
-    // `router.refresh()` (a fresh nodes array, and therefore a fresh
-    // layout) regardless of this algorithm's own guarantees.
+    // Deletion is out of scope: stability only covers appending a node, not
+    // deleting one. A sibling's position is derived from its rank among
+    // still-existing siblings, so deleting an earlier one can shift a later
+    // one — an accepted tradeoff, not a regression.
   });
 });
 

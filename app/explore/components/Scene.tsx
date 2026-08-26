@@ -8,6 +8,7 @@ import CameraRig from "./CameraRig";
 import KnowledgeGraph from "./KnowledgeGraph";
 import { applyManualOverrides, computeGraphLayout, maxLayoutRadius, toVector3 } from "../graphLayout";
 import type { KnowledgeGraphNode } from "../data";
+import { saveKnowledgeNodePosition } from "@/lib/supabase/knowledge-graph-actions";
 
 const FOV = 42;
 // The direction the overview camera looks from — only its distance changes
@@ -38,6 +39,11 @@ function computeOverviewPosition(maxRadius: number): [number, number, number] {
 
 interface SceneProps {
   nodes: KnowledgeGraphNode[];
+  // The signed-in user's persisted manual positions, hydrated server-side
+  // (see ExploreClient.tsx). Only ever read as `manualPositions`' initial
+  // value — a drag committed this session always wins over a stale server
+  // snapshot.
+  initialPositions: Record<string, [number, number, number]>;
   selectedNodeId: string | null;
   onSelect: (id: string, trigger?: HTMLElement | null) => void;
 }
@@ -65,20 +71,19 @@ function getStarCount(): number {
 // reduced motion is off. Restrained lighting, no shadows, no
 // postprocessing — orbit/zoom is supplemental, click-to-focus (CameraRig) is
 // the primary interaction.
-export default function Scene({ nodes, selectedNodeId, onSelect }: SceneProps) {
+export default function Scene({ nodes, initialPositions, selectedNodeId, onSelect }: SceneProps) {
   const baseLayout = useMemo(() => computeGraphLayout(nodes), [nodes]);
 
-  // Session-only manual positions (Step 7: no persistence layer exists for
-  // this yet — see graphLayout.ts's own comment on applyManualOverrides).
-  // Lives here, not in ExploreClient, since Scene is the one component that
-  // actually stays mounted across a `nodes` prop change (a new topic
-  // studied elsewhere, a delete's `router.refresh()`) — keeping this state
-  // local, rather than lifted, is what lets a dragged position survive
-  // those updates without the automatic placement system ever needing to
-  // know a node was moved.
-  const [manualPositions, setManualPositions] = useState<Record<string, [number, number, number]>>({});
+  // Seeded once from `initialPositions`, then updated locally as the user
+  // drags — never re-synced via an effect, so a stale server snapshot can't
+  // overwrite a drag already committed this session. Lives here (not
+  // ExploreClient) because Scene stays mounted across a `nodes` prop change.
+  const [manualPositions, setManualPositions] =
+    useState<Record<string, [number, number, number]>>(initialPositions);
   const handleNodeDragEnd = useCallback((id: string, dragged: [number, number, number]) => {
     setManualPositions((prev) => ({ ...prev, [id]: dragged }));
+    // Fire-and-forget — the local update above is what the scene reacts to.
+    void saveKnowledgeNodePosition(id, dragged);
   }, []);
 
   const layout = useMemo(
@@ -86,19 +91,11 @@ export default function Scene({ nodes, selectedNodeId, onSelect }: SceneProps) {
     [baseLayout, manualPositions],
   );
 
-  // Two different radii for two different jobs — see cameraTransition.ts.
-  //
-  // `structuralMaxRadius` comes from `baseLayout` alone, which only changes
-  // when `nodes` itself changes (a topic studied or deleted elsewhere) —
-  // never from a drag, which only ever touches `manualPositions`/`layout`.
-  // CameraRig uses this purely as the signal for "should the camera's
-  // fly-to re-arm," so repositioning an existing node — however far, even
-  // past the graph's current outermost node — can never trigger it.
-  //
-  // `visualMaxRadius` (and the `overviewPosition` framing derived from it)
-  // includes manual overrides, since *when a transition is actually
-  // warranted* (a real selection or structural change), it should still
-  // frame the graph as the user currently sees it, dragged nodes included.
+  // Two radii for two jobs (see cameraTransition.ts): `structuralMaxRadius`
+  // comes from `baseLayout` alone, so a drag can never re-arm CameraRig's
+  // fly-to. `visualMaxRadius`/`overviewPosition` include manual overrides,
+  // since framing should reflect what the user actually sees once a
+  // transition is warranted.
   const structuralMaxRadius = useMemo(() => maxLayoutRadius(baseLayout), [baseLayout]);
   const visualMaxRadius = useMemo(() => maxLayoutRadius(layout), [layout]);
   const overviewPosition = useMemo(() => computeOverviewPosition(visualMaxRadius), [visualMaxRadius]);
@@ -119,31 +116,20 @@ export default function Scene({ nodes, selectedNodeId, onSelect }: SceneProps) {
       gl={{ antialias: true, alpha: false }}
       onCreated={({ gl }) => gl.setClearColor("#08070c")}
     >
-      {/*
-        Matches the clear color exactly, so it reads as the far end of the
-        scene fading toward its own background rather than a visible haze —
-        the only depth cue here besides geometry size/perspective, since the
-        scene has nothing else to anchor "near" vs. "far" against. Far
-        distance tracks MAX_OVERVIEW_DISTANCE so a big, pulled-back graph
-        doesn't start fading into the background before it's fully visible.
-      */}
+      {/* Matches the clear color so distance reads as fading into the
+          background rather than a visible haze. Far distance tracks
+          MAX_OVERVIEW_DISTANCE so a pulled-back graph doesn't fade early. */}
       <fog attach="fog" args={["#08070c", 10, MAX_OVERVIEW_DISTANCE + 8]} />
       <ambientLight intensity={0.5} />
       <directionalLight position={[4, 5, 3]} intensity={0.8} color="#c4b5fd" />
-      {/* Short-range, low-intensity: only gives Lumora Core and its nearest
-          neighbors a faint extra lift, not a visible light source. Pink-
-          leaning (the brand gradient's hot end) rather than flat indigo, so
-          Core casts a faint warm-brand tint. */}
+      {/* Faint warm lift on Core and its nearest neighbors, not a visible light source. */}
       <pointLight
         position={[0, 0.3, 2]}
         intensity={0.45}
         distance={5}
         color="#e08fc4"
       />
-      {/* Fine background star-dust, well outside the graph's own radius —
-          purely decorative depth cue, distinct from AmbientField's larger
-          drifting shard/ring shapes. Default saturation=0 renders white/pale
-          points, which needs no brand-color tuning of its own. */}
+      {/* Decorative background star-dust, distinct from AmbientField's drifting shapes. */}
       <Stars radius={20} depth={25} count={getStarCount()} factor={1.4} fade speed={0.3} />
       <AmbientField count={getAmbientCount()} />
       <Suspense fallback={null}>
@@ -167,13 +153,10 @@ export default function Scene({ nodes, selectedNodeId, onSelect }: SceneProps) {
         enableDamping
         dampingFactor={0.08}
         minDistance={4}
-        // +1.8x margin matches CameraRig's own portrait aspect-fit cap, so a
-        // tall/narrow window's pulled-back overview never bumps this ceiling.
+        // +1.8x margin matches CameraRig's portrait aspect-fit cap.
         maxDistance={MAX_OVERVIEW_DISTANCE * 1.8 + 6}
-        // Free look: nearly the full vertical range, so orbiting can look
-        // down over the top of the graph or up from underneath it. Kept
-        // just short of the exact poles (0/π) — OrbitControls' own
-        // up-vector handling degenerates there.
+        // Nearly full vertical range; kept short of the poles, where
+        // OrbitControls' up-vector handling degenerates.
         minPolarAngle={0.05}
         maxPolarAngle={Math.PI - 0.05}
       />

@@ -90,11 +90,8 @@ async function seedConversation(
   return { conversationId, userText, assistantText };
 }
 
-// Serial, not parallel: all three tests share the one dedicated workspace
-// account (see global-setup.ts), and logging into the same account from
-// several parallel workers at once raced against Supabase's own session/rate
-// handling (observed as a login that silently stayed on /login). Nothing
-// here is slow enough on its own to need the parallelism.
+// Serial, not parallel: logging into the same shared account from several
+// parallel workers raced against Supabase's own session/rate handling.
 test.describe.configure({ mode: "serial" });
 
 test.describe("Generate workspace — Resources rename and Recent Chats", () => {

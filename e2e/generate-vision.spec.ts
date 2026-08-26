@@ -1,8 +1,7 @@
 import { test, expect, type Route } from "@playwright/test";
 
-// Same SSE encoding as generate.spec.ts (see its own comment for the
-// exact protocol reference) — duplicated locally since each e2e spec file
-// in this repo is self-contained with no shared helper module.
+// Same SSE encoding as generate.spec.ts — duplicated since each e2e spec
+// file here is self-contained.
 function sseBody(chunks: object[]): string {
   return (
     chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") +
@@ -124,19 +123,15 @@ function flashcardsToolChunks(): object[] {
   ];
 }
 
-// Mirrors what app/api/chat/route.ts's onError callbacks actually put on
-// the wire (see lib/ai/errors.ts) — only ever one of the three safe
-// `AIErrorCode` strings, never the raw provider error. No `finish` chunk
-// follows an `error` chunk (confirmed directly against
-// node_modules/ai/dist/index.js) — a real failure never completes a turn.
+// Mirrors what app/api/chat/route.ts's onError callbacks put on the wire —
+// only ever a safe AIErrorCode string. No `finish` chunk follows an `error`
+// chunk, since a real failure never completes a turn.
 function errorChunks(code: "RATE_LIMITED" | "PROVIDER_UNAVAILABLE" | "GENERATION_FAILED"): object[] {
   return [{ type: "start" }, { type: "start-step" }, { type: "error", errorText: code }];
 }
 
 // A syntactically valid 2x2 red PNG — enough for client-side attach/preview
-// behavior and for a mocked /api/chat route, neither of which decode the
-// image. Real end-to-end model image understanding was verified separately,
-// directly against the live Groq API (see the implementation notes).
+// and a mocked route, neither of which decode the image.
 const VALID_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFUlEQVR42mP8z8BQz0AEYBxVSF+FABJADveWkH6oAAAAAElFTkSuQmCC";
 const VALID_PNG_BUFFER = Buffer.from(VALID_PNG_BASE64, "base64");
@@ -331,9 +326,8 @@ test("image -> extraction card -> Create Quiz hands off to GPT-OSS, not Qwen, wi
   const quizButton = page.getByRole("button", { name: "Create Quiz" });
   await quizButton.click();
 
-  // The generation state is shown using the existing chat/loading
-  // infrastructure — the conversation (including the card above) stays
-  // visible the whole time, no second loading screen appears.
+  // The conversation, including the card above, stays visible the whole
+  // time — no second loading screen appears.
   await expect(page.getByText("Creating your quiz…")).toBeVisible();
   await expect(page.getByText("I found this in your image")).toBeVisible();
   await expect(quizButton).toBeDisabled();
@@ -341,8 +335,7 @@ test("image -> extraction card -> Create Quiz hands off to GPT-OSS, not Qwen, wi
   await expect(page.getByText(/Quiz ready/)).toBeVisible();
   await expect(page.getByText("Creating your quiz…")).not.toBeVisible();
   expect(requestCount).toBe(2);
-  // Mode is forced to "auto" (GPT-OSS) for this handoff request regardless
-  // of the composer's own mode, and no image ever rides along with it.
+  // Forced to "auto" regardless of the composer's own mode, no image attached.
   expect(secondRequestBody?.mode).toBe("auto");
   const lastMessage = secondRequestBody?.messages?.at(-1);
   expect(lastMessage?.parts?.some((part) => part.type === "file")).toBe(false);
@@ -364,8 +357,7 @@ test("image extraction rate-limit failure shows the image-analysis-specific copy
     page.getByText("Image analysis is temporarily unavailable."),
   ).toBeVisible();
   await expect(page.getByText("Understanding your image…")).not.toBeVisible();
-  // Never the generic normal-chat copy, and never a mode-switch hint —
-  // Fast/Auto can't process the image any better than Vision could.
+  // Never the generic copy or a mode-switch hint — no mode processes the image better.
   await expect(page.getByText("AI usage is temporarily limited.")).not.toBeVisible();
   await expect(page.getByText(/different mode/)).not.toBeVisible();
 
@@ -445,8 +437,7 @@ test("quiz generation rate-limit failure after an image extraction shows the usa
 
   await expect(page.getByText("AI usage is temporarily limited.")).toBeVisible();
   await expect(page.getByText("Creating your quiz…")).not.toBeVisible();
-  // The card above is still there — the failure doesn't wipe the
-  // conversation, and Retry is still available for this new turn.
+  // The failure doesn't wipe the conversation.
   await expect(page.getByText("I found this in your image")).toBeVisible();
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
 });
@@ -454,10 +445,8 @@ test("quiz generation rate-limit failure after an image extraction shows the usa
 test("retrying a failed quiz handoff while the composer is on Vision mode still forces GPT-OSS, not Qwen, on retry", async ({
   page,
 }) => {
-  // Regression coverage for a real bug found during Step 5's audit:
-  // Retry used to resend the composer's raw selected mode, so a handoff
-  // retry while still on "Vision" (exactly what's set up below) silently
-  // routed the retry back to Qwen instead of GPT-OSS.
+  // Regression coverage: Retry used to resend the composer's raw selected
+  // mode, silently routing a handoff retry back to Qwen instead of GPT-OSS.
   let requestCount = 0;
   const requestModes: Array<string | undefined> = [];
   await page.route("**/api/chat", async (route) => {
@@ -477,9 +466,8 @@ test("retrying a failed quiz handoff while the composer is on Vision mode still 
 
   await page.goto("/generate");
 
-  // Explicitly select Vision mode before sending the image — the
-  // composer's own mode state stays "vision" from here on, since nothing
-  // in the app resets it after the image turn completes.
+  // Vision stays selected from here on — nothing resets it after the image
+  // turn completes.
   await page.getByRole("button", { name: /^Mode:/ }).click();
   await page.getByRole("menuitemradio", { name: /Vision/ }).click();
 
@@ -495,10 +483,8 @@ test("retrying a failed quiz handoff while the composer is on Vision mode still 
   await expect(page.getByText(/Quiz ready/)).toBeVisible();
 
   expect(requestCount).toBe(3);
-  // Request 1 is the real image extraction (mode is whatever routes an
-  // image to Qwen — "vision" here, since that's what's selected). Requests
-  // 2 and 3 are the quiz handoff and its retry — both must be "auto",
-  // regardless of the composer still showing Vision.
+  // Request 1 is the real image extraction ("vision"). Requests 2 and 3
+  // are the quiz handoff and its retry — both must be "auto".
   expect(requestModes[1]).toBe("auto");
   expect(requestModes[2]).toBe("auto");
 });
@@ -528,7 +514,7 @@ test("flashcard generation rate-limit failure after an image extraction shows th
   await expect(page.getByText("Creating your flashcards…")).not.toBeVisible();
 });
 
-test("a flashcards handoff still succeeds normally after Step 4's changes (regression check)", async ({
+test("a flashcards handoff still succeeds normally (regression check)", async ({
   page,
 }) => {
   let requestCount = 0;
@@ -555,10 +541,8 @@ test("a flashcards handoff still succeeds normally after Step 4's changes (regre
 test("fast mode with an image is rejected by the server with a specific message", async ({
   page,
 }) => {
-  // The composer structurally prevents this combination (Fast disables
-  // attach, an attachment disables Fast) — this hits the API directly to
-  // verify the server-side backstop still rejects it clearly on its own,
-  // reusing the browser's already-authenticated session/cookies.
+  // The composer structurally prevents this combination — hits the API
+  // directly to verify the server-side backstop rejects it too.
   await page.goto("/generate");
 
   const response = await page.request.post("/api/chat", {

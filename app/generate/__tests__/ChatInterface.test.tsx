@@ -17,10 +17,8 @@ vi.mock("@ai-sdk/react", () => ({
   useChat: vi.fn(),
 }));
 
-// `useChat` is generic (`useChat<UI_MESSAGE>`); `vi.mocked` picks its
-// untyped default instantiation, which doesn't structurally match
-// `LumoraUIMessage`'s narrower `tool-createQuiz` part. This is the one spot
-// that bridges back to the concrete type the component actually uses.
+// vi.mocked picks useChat's untyped default instantiation, which doesn't
+// structurally match LumoraUIMessage — bridges back to the concrete type.
 const mockUseChat = vi.mocked(useChat) as unknown as Mock<
   (options?: unknown) => MockUseChatReturn
 >;
@@ -77,17 +75,10 @@ describe("composer send gating", () => {
     expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 
-  // `status` (and therefore `canSend`) is React state — it only reflects
-  // "no longer ready" once a render has happened. Two clicks dispatched
-  // inside a single `act()` block deliberately deny React that render
-  // between them (its DOM commit — the Send button becoming disabled, the
-  // textarea clearing — is deferred until the outer `act()` returns), so
-  // both clicks see the exact same pre-submit DOM. Two separate
-  // `fireEvent.click` calls would each flush on their own, and the second
-  // one would simply land on an already-disabled button — proving nothing
-  // about the ref. `sendMessage` is made to return a pending promise so the
-  // first click's `isSubmittingRef` guard is still set (not yet reset by
-  // `finally`) at the moment the second click's handler runs.
+  // Both clicks share one act() block so React can't re-render between
+  // them — two separate fireEvent.click calls would each flush on their
+  // own, and the second would just land on an already-disabled button,
+  // proving nothing about the ref.
   test("a rapid double-submit (before React can re-render) calls sendMessage exactly once", () => {
     let resolveSend!: () => void;
     const sendMessage = vi.fn(
@@ -202,12 +193,9 @@ describe("empty-state example prompts", () => {
     );
   });
 
-  // M3: `handleExampleClick` shares the composer's own `isSubmittingRef`
-  // (see the composer's "rapid double-submit" test above for the full
-  // rationale on why this needs an `act()`-batched double click rather than
-  // two separate `fireEvent.click` calls — `status`/`canSend`-derived
-  // disabling only reflects a render that hasn't happened yet by the time
-  // the second click would land here).
+  // handleExampleClick shares the composer's own isSubmittingRef — see the
+  // composer's "rapid double-submit" test above for why this needs an
+  // act()-batched double click.
   test("a rapid double-click on the same example prompt calls sendMessage exactly once", () => {
     let resolveSend!: () => void;
     const sendMessage = vi.fn(
@@ -385,12 +373,9 @@ describe("pending status copy — reflecting what the current turn is doing", ()
     );
     const { rerender } = render(<ChatInterface />);
 
-    // First turn: a quiz handoff. `sendMessage` here is a synchronous
-    // `vi.fn()`, so `await act(async () => {})` is enough to flush
-    // handleExtractionAction's own `await` and let its `finally` release
-    // `isSubmittingRef` — without this, the second send below would be
-    // silently dropped by that same guard (it's shared across every send
-    // path on purpose — see isSubmittingRef's own comment).
+    // First turn: a quiz handoff. await act(async () => {}) flushes
+    // handleExtractionAction's own await so isSubmittingRef releases before
+    // the second send below.
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Create Quiz" }));
     });
@@ -435,13 +420,8 @@ describe("pending status copy — reflecting what the current turn is doing", ()
     expect(screen.queryByText("Creating your quiz…")).not.toBeInTheDocument();
   });
 
-  // Same guarantee as the test above, but reached via Retry recovering from
-  // a failure rather than a first-try success — once a failed quiz handoff
-  // is retried successfully, a later *unrelated* message must not still
-  // show "Creating your quiz…" (the composer only allows sending once
-  // `status` is back to "ready", which here only happens by retrying the
-  // failed turn — there's no way to send a fresh message straight out of
-  // the error state itself).
+  // Same guarantee as the test above, reached via Retry recovering from a
+  // failure instead of a first-try success.
   test("a stale intent from a *failed-then-retried* turn never leaks into the next, unrelated turn", async () => {
     const sendMessage = vi.fn();
     const regenerate = vi.fn(() => Promise.resolve());
@@ -685,16 +665,9 @@ describe("error state", () => {
     resolveRegenerate();
   });
 
-  // Mirrors the exact scenario /api/chat's own "regenerate-message with no
-  // conversationId" fix relies on: the very first message of a session
-  // failed before the server's `start` metadata (the only way the client
-  // learns a conversationId) ever streamed back, so no message here carries
-  // `metadata.conversationId` and no `initialConversationId` prop is
-  // passed. The client's own behavior for this case must keep calling
-  // `regenerate()` with no `conversationId` — it's the server's job (not
-  // this component's) to treat that as an initial submission rather than a
-  // retry of an established conversation. `mode` still goes along, same as
-  // every other send path.
+  // The very first message of a session failed before the server's start
+  // metadata ever streamed back, so no conversationId is known anywhere —
+  // regenerate() must still be called, just with no conversationId.
   test("Retry with no known conversationId calls regenerate with no conversationId", () => {
     const regenerate = vi.fn(() => Promise.resolve());
     mockUseChat.mockReturnValue(
@@ -1198,11 +1171,8 @@ describe("ExtractionCard — reviewing an image's extracted content", () => {
     expect(options.body.mode).toBe("auto");
   });
 
-  // The whole point of forcing mode "auto" here (see sendChatMessage's own
-  // comment in ChatInterface.tsx) is that it must NOT matter which mode the
-  // composer happens to be showing — even "vision" (which the user could
-  // still be on, having just sent the image) must not route this follow-up
-  // back to Qwen.
+  // Must not matter which mode the composer shows — even "vision" must not
+  // route this follow-up back to Qwen.
   test("Create Quiz still forces GPT-OSS even if the composer is still set to Vision mode", async () => {
     const sendMessage = vi.fn();
     mockUseChat.mockReturnValue(
@@ -1315,13 +1285,8 @@ describe("ExtractionCard — reviewing an image's extracted content", () => {
     expect(screen.getByRole("button", { name: "Create Flashcards" })).toBeEnabled();
   });
 
-  // Renders extraction/handoff messages the same way a resumed conversation
-  // would arrive (via `initialMessages`, not a live stream) — see
-  // lib/supabase/conversations.ts's getConversationMessages, which loads
-  // `parts` straight from Supabase's jsonb column with no transformation,
-  // so a persisted `data-extraction` part comes back byte-for-byte
-  // identical to how it streamed in originally. ChatInterface doesn't (and
-  // shouldn't need to) distinguish the two sources.
+  // Renders extraction/handoff messages the way a resumed conversation
+  // arrives (via initialMessages, not a live stream).
   test("a reloaded conversation renders the extraction card from persisted data and its actions still work", () => {
     const sendMessage = vi.fn();
     const initialMessages = [
@@ -1342,10 +1307,8 @@ describe("ExtractionCard — reviewing an image's extracted content", () => {
     expect(options.body).toEqual({ conversationId: "conv-1", mode: "auto" });
   });
 
-  // Mirrors the documented Groq quirk already noted in lib/ai/tools.ts
-  // (a blank string in place of an omitted optional value) — title being
-  // `""` rather than `null` must be treated identically by every place that
-  // reads it: the card itself, and the handoff's own subject line.
+  // Mirrors the Groq quirk noted in lib/ai/tools.ts — title "" must be
+  // treated identically to null everywhere it's read.
   test("a blank-string title (not null) is treated as 'no title', same as null", () => {
     const sendMessage = vi.fn();
     mockUseChat.mockReturnValue(
@@ -1383,15 +1346,9 @@ describe("ExtractionCard — reviewing an image's extracted content", () => {
 });
 
 describe("quiz/flashcard handoff retry — must never fall back to Qwen", () => {
-  // This is the core regression this describe block exists for: before this
-  // fix, `handleRetry` sent the composer's raw `mode` state on every retry.
-  // If the user was still on "Vision" (e.g. from having just sent the
-  // image), retrying a failed quiz/flashcards handoff would resend that
-  // text-only follow-up with `mode: "vision"` — routing it straight back to
-  // Qwen (with the full tool registry, since it carries no image) instead
-  // of GPT-OSS, and silently spending a Qwen call that was never supposed
-  // to happen. `pendingIntent` (already tracked for the loading-copy work)
-  // is what lets Retry tell a handoff apart from every other kind of turn.
+  // The core regression this block guards: handleRetry used to send the
+  // composer's raw mode on every retry, so a Vision-mode handoff retry
+  // would silently resend to Qwen instead of GPT-OSS.
   test("retrying a failed Create Quiz handoff forces mode auto even if the composer is still set to Vision", async () => {
     const sendMessage = vi.fn();
     const regenerate = vi.fn(() => Promise.resolve());
@@ -1476,11 +1433,8 @@ describe("quiz/flashcard handoff retry — must never fall back to Qwen", () => 
     expect(regenerate).toHaveBeenCalledWith({ body: { mode: "auto" } });
   });
 
-  // The counterpart case: an *image extraction* retry must keep whichever
-  // mode is currently selected (both Auto and Vision correctly route an
-  // image back to Qwen's extraction path) — forcing "auto" here would be
-  // harmless in practice (Auto also routes an image to Qwen) but the point
-  // is that `handleRetry` makes this decision based on what actually
+  // The counterpart case: an image extraction retry must keep whichever
+  // mode is selected, since handleRetry decides based on what actually
   // failed, not a blanket override.
   test("retrying a failed image extraction keeps the currently selected mode, unlike a handoff retry", async () => {
     const sendMessage = vi.fn();

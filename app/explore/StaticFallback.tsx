@@ -9,11 +9,8 @@ interface StaticFallbackProps {
   onSelect: (id: string, trigger?: HTMLElement | null) => void;
 }
 
-// A real, usable representation of the knowledge graph when the 3D scene
-// isn't shown (reduced motion or no WebGL) — not an error message.
-// Selecting a topic here drives the same state as the 3D scene and the
-// Topics list. Positions come from the same computeGraphLayout() the 3D
-// Scene uses, since node ids/counts are per-user and arbitrary.
+// A real, usable graph for reduced motion / no WebGL, not an error message —
+// selecting here drives the same state as the 3D scene and the Topics list.
 export default function StaticFallback({ nodes, selectedNodeId, onSelect }: StaticFallbackProps) {
   const layout = computeGraphLayout(nodes);
   const maxRadius = maxLayoutRadius(layout);
@@ -65,11 +62,7 @@ export default function StaticFallback({ nodes, selectedNodeId, onSelect }: Stat
           })}
       </svg>
 
-      {/*
-        Fixed light text, not `text-foreground`: this map's background is
-        always dark regardless of site theme, so its labels must stay
-        fixed-light rather than flipping to near-black in light mode.
-      */}
+      {/* Fixed light text: this map's background is always dark regardless of site theme. */}
       <div
         aria-hidden="true"
         className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-indigo-400/40 bg-indigo-500/10 px-4 py-2 text-xs font-medium text-zinc-100"
@@ -77,12 +70,7 @@ export default function StaticFallback({ nodes, selectedNodeId, onSelect }: Stat
         {CENTRAL_NODE.label}
       </div>
 
-      {/*
-        Pointer-operable only: the Topics list already renders this same
-        set as real, accessible controls, so these would otherwise be
-        redundant tab stops. `tabIndex={-1}` + `aria-hidden` keep them
-        clickable for mouse/touch while removing that duplication.
-      */}
+      {/* Pointer-operable only — the Topics list already exposes these as accessible controls. */}
       {nodes.map((node) => {
         const pos = positions.get(node.id);
         if (!pos) return null;

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import ExploreClient from "./ExploreClient";
-import { getKnowledgeGraph } from "@/lib/supabase/knowledge-graph";
+import { getKnowledgeGraph, getKnowledgeNodePositions } from "@/lib/supabase/knowledge-graph";
 
 export const metadata: Metadata = {
   title: "Explore — Lumora",
@@ -9,15 +9,14 @@ export const metadata: Metadata = {
 };
 
 export default async function ExplorePage() {
-  const nodes = await getKnowledgeGraph();
+  const [nodes, positions] = await Promise.all([
+    getKnowledgeGraph(),
+    getKnowledgeNodePositions(),
+  ]);
 
   return (
-    // A fixed-height workspace, not a normally-scrolling page — same
-    // convention as `/generate` (see AppFooter's own note on why it hides
-    // there too): `min-h-0 flex-1` lets this fill exactly what's left under
-    // the header, with no page-level scroll. The graph and topic list fill
-    // that space themselves; the topic list is the only part of the page
-    // that scrolls/pans on its own (via OptionWheel's wheel/drag handling).
+    // A fixed-height workspace, not a scrolling page — same convention as
+    // /generate. Only the Topics list scrolls on its own.
     <main className="flex min-h-0 flex-1 flex-col gap-3 px-4 py-4 pb-24 sm:px-6">
       <div className="flex shrink-0 flex-col items-center gap-1 text-center">
         <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
@@ -28,7 +27,7 @@ export default async function ExplorePage() {
           to see how it fits, or study something new to keep it growing.
         </p>
       </div>
-      <ExploreClient nodes={nodes} />
+      <ExploreClient nodes={nodes} positions={positions} />
     </main>
   );
 }

@@ -25,9 +25,13 @@ const Scene = dynamic(() => import("./components/Scene"), {
 
 interface ExploreClientProps {
   nodes: KnowledgeGraphNode[];
+  // The signed-in user's persisted manual node positions, keyed by node id.
+  // Optional/defaulted so existing call sites that only pass `nodes` keep
+  // working.
+  positions?: Record<string, [number, number, number]>;
 }
 
-export default function ExploreClient({ nodes }: ExploreClientProps) {
+export default function ExploreClient({ nodes, positions = {} }: ExploreClientProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -42,24 +46,18 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
   // a related pill) — mutually exclusive with selectedNodeId.
   const [previewLabel, setPreviewLabel] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<KnowledgeGraphNode | null>(null);
-  // Set only when a confirmed delete's Server Action reports failure
-  // (`{ ok: false }`) — deleteKnowledgeNode already catches its own Supabase
-  // errors rather than throwing, so this can't be caught with a try/catch;
-  // it has to be read from the result. Cleared on the next delete attempt.
+  // deleteKnowledgeNode never throws, so failure has to be read from its
+  // result instead of a catch block.
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // Remembers whichever HTML control triggered a selection (a 3D-node click
-  // has none) so "Back to overview" can return focus to it.
+  // Whichever HTML control triggered a selection, so "Back to overview" can
+  // refocus it.
   const lastTriggerRef = useRef<HTMLElement | null>(null);
-  // Fallback focus target for the one case lastTriggerRef can't serve:
-  // deleting the currently selected node, whose trigger disappears from the
-  // DOM once `router.refresh()` commits. Always rendered regardless of node
-  // count or topic-list layout.
+  // Fallback focus target when deleting the selected node removes its own
+  // trigger from the DOM.
   const graphRegionRef = useRef<HTMLDivElement>(null);
-  // `isPending` doesn't update synchronously within the same event-handling
-  // pass, so two Confirm clicks before React commits a render can both
-  // start a delete. This ref closes that window — same pattern as
-  // `isSubmittingRef` in ChatInterface.tsx.
+  // Closes the window where two Confirm clicks land before `isPending`
+  // updates and both start a delete.
   const isDeletingRef = useRef(false);
 
   const handleSelect = useCallback((id: string, trigger?: HTMLElement | null) => {
@@ -93,11 +91,8 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
     }));
   }, [selectedNode, nodesByTopicKey]);
 
-  // The Topics list shows exactly the nodes that exist in the graph —
-  // nothing inferred or not-yet-studied. Suggestions the model named but the
-  // user hasn't studied yet still surface, just inside a selected node's own
-  // "Related" list below (see `relatedItems` above), not mixed into this
-  // one, which is meant to answer "what's actually in my graph."
+  // Exactly the nodes that exist in the graph — not-yet-studied suggestions
+  // surface instead in a selected node's Related list.
   const allTopicLabels = useMemo(() => {
     const seen = new Set<string>();
     const result: string[] = [];
@@ -132,16 +127,12 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
       try {
         const result = await deleteKnowledgeNode(id);
         if (!result.ok) {
-          // Deletion failed server-side — leave the node and graph
-          // untouched and surface why, instead of refreshing as if it had
-          // succeeded. Retry path is just clicking Delete Topic again.
           setDeleteError("Couldn't delete this topic. Please try again.");
           return;
         }
         if (selectedNodeId === id) {
-          // Not `handleBack()`: its trigger is the node that just got
-          // deleted and won't survive `router.refresh()` below — send
-          // focus to the stable graph region instead.
+          // Not handleBack(): its trigger is the node being deleted, so
+          // focus the stable graph region instead.
           setSelectedNodeId(null);
           setPreviewLabel(null);
           lastTriggerRef.current = null;
@@ -159,15 +150,10 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
   const showPanel = selectedNode !== null || previewLabel !== null;
 
   return (
-    // `min-h-0 flex-1` (not a fixed/vh height) so this exactly fills
-    // whatever page.tsx's own fixed-height <main> leaves it — the whole
-    // point of the fixed-page layout is that nothing here forces the page
-    // itself to scroll; only OptionWheel's own wheel/drag handling "scrolls"
-    // within its column.
+    // Fills whatever fixed-height <main> page.tsx leaves it, so nothing
+    // here forces a page-level scroll.
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      {/* Mirrors the graph(flex-1)/list(w-72) split below it, so "Topics"
-          sits directly above the list it labels instead of floating as a
-          page-wide banner disconnected from either column. */}
+      {/* Mirrors the graph/list split below so "Topics" sits above the list it labels. */}
       <div className="flex shrink-0 items-center gap-4">
         <div className="flex flex-1 flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-xs text-muted-foreground">
           <span className="font-medium text-foreground">
@@ -189,15 +175,10 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
         </p>
       </div>
 
-      {/* Fixed-height row, vertically centered — the graph/list used to
-          stretch to the viewport bottom, where the floating dock sits,
-          hiding the list's lower items on short windows. min(560px,100%)
-          caps that height while still shrinking to fit. */}
+      {/* min(560px,100%) caps the row's height so it doesn't stretch
+          under the floating dock on short windows. */}
       <div className="flex min-h-0 flex-1 items-center justify-center">
         <div className="flex h-[min(560px,100%)] w-full gap-4">
-          {/* flex-1 + min-w-0: stretches to fill essentially the whole width
-              next to the topic list, instead of sitting in a narrow centered
-              column with empty space on both sides. */}
           <div
             ref={graphRegionRef}
             tabIndex={-1}
@@ -205,7 +186,12 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
             className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl border border-zinc-800 bg-[#08070c] outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/80"
           >
             {showScene ? (
-              <Scene nodes={nodes} selectedNodeId={selectedNodeId} onSelect={handleSelect} />
+              <Scene
+                nodes={nodes}
+                initialPositions={positions}
+                selectedNodeId={selectedNodeId}
+                onSelect={handleSelect}
+              />
             ) : (
               <StaticFallback nodes={nodes} selectedNodeId={selectedNodeId} onSelect={handleSelect} />
             )}
@@ -232,19 +218,10 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
             )}
           </div>
 
-          {/* Docked at the right edge on anything wider than a phone (md:+) —
-              true small-screen widths fall back to the bottom chip row below,
-              since the wheel needs real vertical room to read as a list
-              rather than a cramped column. Shows exactly the nodes in the
-              graph — see `allTopicLabels`'s own comment for why unlocked
-              suggestions live in a selected node's Related list instead. */}
+          {/* md:+ only — small screens use the bottom chip row instead, since
+              the wheel needs real vertical room to read as a list. */}
           <aside aria-label="Topics" className="hidden min-h-0 w-72 shrink-0 md:flex md:flex-col">
-            {/*
-              OptionWheel's own defaults (fontSize 3rem, inset 80px) are
-              sized for a full-bleed demo, not this ~288px sidebar. Passing
-              CSS variables for textColor/activeColor gets automatic
-              light/dark support with no changes inside the component.
-            */}
+            {/* OptionWheel's defaults are sized for a full-bleed demo, not this ~288px sidebar. */}
             <OptionWheel
               items={allTopicLabels}
               side="right"
@@ -265,8 +242,7 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
         </div>
       </div>
 
-      {/* Mobile: a compact chip row instead of squeezing the wheel into a
-          tiny sidebar — same topic list as the wheel above. */}
+      {/* Mobile: a compact chip row, same topic list as the wheel above. */}
       {allTopicLabels.length > 0 && (
         <div className="shrink-0 md:hidden">
           <p className="text-center text-xs font-medium tracking-wide text-muted-foreground uppercase">
@@ -305,12 +281,7 @@ export default function ExploreClient({ nodes }: ExploreClientProps) {
         onConfirm={handleConfirmDelete}
         confirmDisabled={isPending}
       />
-      {/*
-        `role="alert"` is an implicit assertive live region — announced to
-        screen readers the moment it appears, same as ChatErrorCard/
-        SettingsClient's error rows elsewhere in the app, and (unlike the
-        sr-only status span below) visible so sighted users see it too.
-      */}
+      {/* role="alert" announces this to screen readers immediately, and stays visible for sighted users too. */}
       {deleteError && (
         <p role="alert" className="shrink-0 text-center text-xs text-destructive">
           {deleteError}

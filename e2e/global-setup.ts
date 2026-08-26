@@ -3,67 +3,45 @@ import { resolve } from "node:path";
 import { chromium, type FullConfig } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 
-// Seeded once (idempotently — `email_exists` from a prior run is fine) via
-// Supabase's Admin API with `email_confirm: true`, so it's pre-verified and
-// E2E tests never need a real inbox. Not a real secret — it exists only to
-// exercise the login flow for tests against protected routes. This is the
-// account behind the default `storageState` every test starts with.
+// Seeded once, idempotently, pre-verified so tests never need a real inbox.
+// Not a real secret. The account behind the default storageState every
+// test starts with.
 export const E2E_TEST_EMAIL = "lumora-e2e-test@example.com";
 export const E2E_TEST_PASSWORD = "Lumora-E2E-Test-Password-1!";
 
-// A second, separate account used only by
-// generate-persistence.spec.ts. That test makes real, authenticated
-// requests to /api/chat and checks the database via Supabase Auth session
-// state — it needs a session no *other* concurrently-running test can
-// invalidate. Supabase's `signOut()` defaults to scope "global" (all
-// sessions for that user, everywhere), and auth.spec.ts's "log out" test
-// does call it on the shared account above; under Playwright's parallel
-// workers, that can race with and revoke a persistence-test session using
-// the same account. A dedicated account sidesteps that entirely rather
-// than depending on test execution order.
+// Dedicated account for generate-persistence.spec.ts: auth.spec.ts's "log
+// out" test calls Supabase's signOut() with global scope on the shared
+// account above, which would revoke a concurrently-running persistence
+// test's session under Playwright's parallel workers.
 export const E2E_PERSISTENCE_TEST_EMAIL =
   "lumora-e2e-persistence-test@example.com";
 export const E2E_PERSISTENCE_TEST_PASSWORD =
   "Lumora-E2E-Persistence-Test-Password-1!";
 
-// A third account, used only by history.spec.ts. It was originally going
-// to reuse the persistence account above, but that test asserts on an
-// *exact* conversation count for its account (`countBefore + 1`) — since
-// history.spec.ts also writes a conversation for whichever account it
-// uses, and Playwright runs both spec files' tests concurrently, sharing
-// an account made the two tests race on that count. Same lesson as the
-// persistence account's own split from the shared one above: a real-write
-// test needs an account nothing else concurrently writes to.
+// Dedicated account for history.spec.ts: it asserts on an exact
+// conversation count for its account, which would race with any other
+// concurrently-running spec writing to the same one.
 export const E2E_HISTORY_TEST_EMAIL = "lumora-e2e-history-test@example.com";
 export const E2E_HISTORY_TEST_PASSWORD = "Lumora-E2E-History-Test-Password-1!";
 
-// A fourth account, used only by generate-workspace.spec.ts — same reasoning
-// as the history account's own split above: that spec seeds a conversation
-// via the admin client and asserts on Recent Chats' exact contents, which
-// would race with anything else concurrently writing to the same account.
+// Dedicated account for generate-workspace.spec.ts — same reasoning as the
+// history account: it asserts on Recent Chats' exact contents.
 export const E2E_WORKSPACE_TEST_EMAIL =
   "lumora-e2e-workspace-test@example.com";
 export const E2E_WORKSPACE_TEST_PASSWORD =
   "Lumora-E2E-Workspace-Test-Password-1!";
 
-// A fifth account, used only by auth.spec.ts's "log out" test. Supabase's
-// `signOut()` defaults to scope "global" — every session for that user,
-// everywhere — and that test calls it deliberately, to prove logout works.
-// Running it against the shared default account above (the one nearly
-// every other spec's `storageState` is built from) would revoke those
-// specs' sessions too, regardless of Playwright worker/ordering, since the
-// revocation is real and server-side. Same isolation reasoning as the three
-// accounts above, applied to the one spec that's inherently destructive to
-// whatever session it's signed in with.
+// Dedicated account for auth.spec.ts's "log out" test, which calls
+// Supabase's signOut() with global scope — running that against the shared
+// default account would revoke every other spec's session too.
 export const E2E_LOGOUT_TEST_EMAIL = "lumora-e2e-logout-test@example.com";
 export const E2E_LOGOUT_TEST_PASSWORD = "Lumora-E2E-Logout-Test-Password-1!";
 
 export const AUTH_STATE_PATH = resolve(__dirname, ".auth", "user.json");
 
-// Playwright's own process (unlike the `webServer` child process, which runs
-// `next dev` and loads `.env.local` itself) doesn't inherit `.env.local` —
-// load it the same minimal, dependency-free way used elsewhere in this
-// project rather than adding `dotenv` just for this one script.
+// Playwright's own process doesn't inherit `.env.local` the way the
+// `webServer` child (next dev) does — load it by hand rather than adding
+// `dotenv` for one script.
 function loadEnvLocal() {
   const path = resolve(__dirname, "..", ".env.local");
   if (!existsSync(path)) return;
@@ -88,13 +66,9 @@ function loadEnvLocal() {
   }
 }
 
-// Builds the admin client inline rather than importing
-// `lib/supabase/admin.ts`: that module's `Database` generic pulls in
-// `lib/ai/tools.ts` (and, through it, the `ai` package) purely for typing —
-// irrelevant to the one untyped `auth.admin.*` call this script makes — and
-// Playwright's TS loader only reliably transforms files it discovers
-// statically from `playwright.config.ts`, not an arbitrarily deep app
-// import graph reached via dynamic `import()` at runtime.
+// Built inline rather than importing lib/supabase/admin.ts, whose Database
+// generic pulls in the `ai` package purely for typing — irrelevant to the
+// one untyped auth.admin.* call this script makes.
 function createAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

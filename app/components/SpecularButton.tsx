@@ -14,18 +14,11 @@ import { useIsDarkTheme } from "./useIsDarkTheme";
 import { useReducedMotion } from "./useReducedMotion";
 import "./SpecularButton.css";
 
-// A faithful port of React Bits' SpecularButton component
-// (https://reactbits.dev/components/specular-button). Shader (a
-// rounded-rect SDF with a pointer-steered specular rim) reproduced as-is.
-// What changed for Lumora:
-//
-// - `lineColor`/`baseColor` resolve from the live theme via
-//   useIsDarkTheme() when unset — ogl's `Color` needs a literal CSS color
-//   string, not a custom property, unlike upstream's hardcoded pair.
-// - `href` renders through next/link instead of a plain `<button>`, for
-//   real link semantics (ctrl/cmd-click, open in new tab, prefetch).
-// - The render loop pauses via IntersectionObserver + document visibility
-//   (same technique as WarpText.tsx) instead of running unconditionally.
+// A port of React Bits' SpecularButton (rounded-rect SDF with a
+// pointer-steered specular rim). Changed for Lumora: colors resolve from
+// the live theme (ogl's Color needs a literal string, not a CSS var);
+// `href` renders through next/link for real link semantics; the render
+// loop pauses via IntersectionObserver + document visibility.
 type ButtonSize = "sm" | "md" | "lg";
 
 export interface SpecularButtonProps {
@@ -156,10 +149,8 @@ const SpecularButton = ({
   className = "",
   type = "button",
 }: SpecularButtonProps) => {
-  // Typed as the plain element rather than button|anchor union: the setup
-  // effect below only ever calls generic DOM methods (getBoundingClientRect,
-  // ResizeObserver.observe) on it, and the two render branches below cast
-  // it to whichever concrete ref type each host element actually expects.
+  // Typed as the plain element since the setup effect only calls generic
+  // DOM methods; the render branches below cast to the concrete ref type.
   const btnRef = useRef<HTMLElement>(null);
   const fxRef = useRef<HTMLSpanElement>(null);
   const propsRef = useRef<ShaderProps>({} as ShaderProps);
@@ -167,16 +158,12 @@ const SpecularButton = ({
   const isDark = useIsDarkTheme();
   const reducedMotion = useReducedMotion();
 
-  // ogl's Color needs a literal CSS string, not a custom property — unset
-  // colors resolve from the live theme instead of upstream's hardcoded
-  // white, which would be invisible against a light page.
+  // ogl's Color needs a literal CSS string, not a custom property.
   const resolvedLineColor = lineColor ?? (isDark ? "#c7d2fe" : "#4f46e5");
   const resolvedBaseColor = baseColor ?? (isDark ? "#3f3f46" : "#a1a1aa");
 
-  // Written in an effect, not the render body — refs are for imperative
-  // reads (the rAF loop below), and mutating one during render trips this
-  // project's react-hooks/refs lint rule (upstream did this inline; that
-  // rule isn't part of its own lint config).
+  // Written in an effect, not render — mutating a ref during render trips
+  // react-hooks/refs.
   useEffect(() => {
     propsRef.current = {
       radius,
@@ -212,18 +199,14 @@ const SpecularButton = ({
     const fx = fxRef.current;
     if (!btn || !fx) return;
 
-    // Cap at 2 — a decorative rim glow doesn't need to shade a 3x
-    // framebuffer on high-DPI displays, and it's one more GPU context the
-    // page is paying for on top of the Home hero's own shader.
+    // Cap at 2 — a decorative rim glow doesn't need a 3x framebuffer.
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     let renderer: Renderer;
     try {
       renderer = new Renderer({ alpha: true, premultipliedAlpha: true, antialias: true, dpr });
     } catch (error) {
-      // No WebGL (unsupported browser/flag, jsdom in tests, too many live
-      // contexts) — same graceful bail as WarpText.tsx. The button itself
-      // is plain DOM (label + link/button semantics), so it stays fully
-      // usable without the shine.
+      // No WebGL — the button is plain DOM underneath, so it stays usable
+      // without the shine.
       console.warn("SpecularButton: WebGL could not be initialized.", error);
       return;
     }
@@ -261,7 +244,7 @@ const SpecularButton = ({
     const sizeRef = { w: 1, h: 1 };
     const resize = () => {
       // Fractional size + explicit center keep the SDF pinned to the exact
-      // CSS border, instead of drifting up to a pixel from offsetWidth rounding.
+      // CSS border instead of drifting from offsetWidth rounding.
       const rect = btn.getBoundingClientRect();
       const w = rect.width;
       const h = rect.height;
@@ -318,14 +301,9 @@ const SpecularButton = ({
       last = now;
       const p = propsRef.current;
 
-      // Reduced motion: freeze the idle auto-sweep (a real, continuous,
-      // autoplaying animation) but keep the pointer-follow shine intact —
-      // it only moves in direct response to the user's own cursor, the
-      // same carve-out BorderGlow.tsx already makes.
+      // Reduced motion freezes the idle auto-sweep but keeps the
+      // pointer-follow shine, since that only moves with the user's cursor.
       if (!p.reducedMotion) idleAngle += p.speed * dt;
-      // Narrowed directly in the ternary's condition (rather than through a
-      // separate boolean) so TypeScript can see `pointerAngle` is non-null
-      // in the branch that uses it.
       const target =
         p.followMouse && pointerAngle !== null && (!p.autoAnimate || proximityT > 0) ? pointerAngle : idleAngle;
       const diff = ((target - angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
@@ -360,9 +338,7 @@ const SpecularButton = ({
       raf = 0;
     };
 
-    // Don't keep shading a button that's scrolled away or hidden behind a
-    // backgrounded tab — mirrors WarpText.tsx's IntersectionObserver +
-    // visibilitychange pairing exactly.
+    // Don't keep shading a button that's scrolled away or tab-backgrounded.
     const io = new IntersectionObserver(
       ([entry]) => {
         elementVisible = entry.isIntersecting;

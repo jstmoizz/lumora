@@ -17,11 +17,9 @@ function renderDialog(confirmDisabled?: boolean, onConfirm = vi.fn()) {
   return onConfirm;
 }
 
-// M7: the shared confirmation step for Explore's two destructive flows
-// (delete a topic, reset the graph) — both now thread their own `isPending`
-// through as `confirmDisabled` so the same Confirm button this dialog
-// renders can't fire a second mutation while the first is still in flight.
-describe("ConfirmDialog — confirmDisabled (M7)", () => {
+// Both delete and reset thread their own `isPending` through as
+// `confirmDisabled`, so Confirm can't fire a second mutation mid-flight.
+describe("ConfirmDialog — confirmDisabled", () => {
   test("the Confirm button is enabled by default", () => {
     renderDialog();
     expect(screen.getByRole("button", { name: "Delete" })).not.toBeDisabled();

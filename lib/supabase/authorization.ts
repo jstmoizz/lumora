@@ -1,12 +1,8 @@
 /**
- * Server-side authorization building blocks. Nothing in the app calls
- * `requireAdmin()` yet — there's no admin functionality to protect — this
- * is deliberately just the foundation, ready for whichever future
- * route/action needs it.
- *
- * All three read identity from the authenticated Supabase session (via
- * `getServerUser()`, which re-validates against Supabase rather than
- * trusting a cookie) — never from a client-supplied user id.
+ * Server-side authorization building blocks. `requireAdmin()` has no
+ * caller yet — there's no admin functionality to protect, just the
+ * foundation for whenever one exists. All three read identity from the
+ * authenticated Supabase session, never a client-supplied user id.
  */
 
 import { createClient, getServerUser } from "./server";
@@ -17,13 +13,8 @@ export interface CurrentProfile {
   role: "user" | "admin";
 }
 
-/**
- * The signed-in user's own `public.users` row, or `null` if no one's
- * signed in. Uses the RLS-scoped server client (not the service-role
- * client) — a user reading their own profile is exactly what the
- * "Users can view own profile" policy in `supabase/schema.sql` allows, so
- * there's no reason to reach for the privileged client here.
- */
+// Uses the RLS-scoped client, not the service-role client — reading your
+// own profile is exactly what the "view own profile" policy allows.
 export async function getCurrentProfile(): Promise<CurrentProfile | null> {
   const user = await getServerUser();
   if (!user || !user.email) return null;

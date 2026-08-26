@@ -43,8 +43,6 @@ describe("imageExtractionSchema", () => {
   });
 
   test("title may be null and keyConcepts may be empty, but every key must be present", () => {
-    // `title` is nullable rather than `.optional()` — see extraction.ts's
-    // own comment on why every property stays required in the schema.
     expect(
       imageExtractionSchema.safeParse({
         title: null,
@@ -75,18 +73,13 @@ describe("extractImageContent", () => {
     const [callArgs] = generateTextMock.mock.calls[0];
     expect(callArgs.model).toBe("mock-vision-model");
 
-    // The critical requirement: no application tool (createQuiz,
-    // createFlashcards, addKnowledgeTopic, or anything else) reaches this
-    // call — verified directly on the outgoing request, not inferred from
-    // the response. Exactly one tool is registered, and it isn't one of
-    // the application's.
     const toolNames = Object.keys(callArgs.tools);
     expect(toolNames).toEqual(["recordExtraction"]);
     expect(toolNames).not.toContain("createQuiz");
     expect(toolNames).not.toContain("createFlashcards");
     expect(toolNames).not.toContain("addKnowledgeTopic");
 
-    // The model is forced to call it, not merely offered it as an option.
+    // Forced, not merely offered as an option.
     expect(callArgs.toolChoice).toEqual({ type: "tool", toolName: "recordExtraction" });
   });
 

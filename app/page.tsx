@@ -24,20 +24,10 @@ import HeroShaderBackground from "./components/home/HeroShaderBackground";
 import type { WarpTextRun } from "./components/home/WarpText";
 import "./components/home/HeroHeadlineFallback.css";
 
-// Mirrors HERO_HEADLINE_RUNS below as real DOM text — real content inside
-// the <h1>, not canvas-rasterized or hidden behind a role="img" trick.
-// Sizing/color are handled by HeroHeadlineFallback.css, not inline styles
-// here: WarpText always shrinks this exact headline to fit one line at
-// ~86% of its container's width (verified — the shrink path is active at
-// every realistic viewport), so matching that needs a container-query-
-// relative font-size, which plain inline styles can't express. Colors are
-// pinned to WarpText's own literal defaults (`#1e1b4b`/`#fafafa`) rather
-// than `var(--foreground)`, which is a different color from WarpText's
-// default in light mode. Still no hooks here deliberately: this renders
-// before hydration can run any hook, and CSS custom properties/classes
-// (driven by ThemeScript's synchronous `.dark`/`.light` class, not a
-// useSyncExternalStore server-snapshot guess) are what resolve correctly
-// on the very first paint without a hydration-time flash.
+// Mirrors HERO_HEADLINE_RUNS as real DOM text, not canvas-rasterized. No
+// hooks: this renders before hydration, and sizing/color come from
+// HeroHeadlineFallback.css (driven by ThemeScript's synchronous class) so
+// the first paint is correct with no hydration-time flash.
 function HeroHeadlineFallback() {
   return (
     <span
@@ -68,14 +58,9 @@ function HeroHeadlineFallback() {
   );
 }
 
-// Keeps `ogl` and the shader's WebGL setup out of the initial Home bundle
-// and off the critical path to the hero heading — same pattern as
-// HeroShaderBackground's dynamic ShaderScene import. This one matters for
-// LCP specifically: the heading is real, load-bearing content, and
-// HeroHeadlineFallback is real static text with matching typography, so
-// the browser paints it immediately with no dependency on hydration, WebGL
-// init, or `document.fonts.ready`. The animated version layers in once the
-// dynamic import resolves.
+// Keeps `ogl` and the shader's WebGL setup off the critical path to the
+// hero heading — matters for LCP, since HeroHeadlineFallback paints
+// immediately with no dependency on hydration or WebGL init.
 const WarpText = dynamic(() => import("./components/home/WarpText"), {
   ssr: false,
   loading: () => <HeroHeadlineFallback />,
@@ -86,12 +71,10 @@ function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-// `baseWidth` renders straight into an inline style, so a naive
-// useState(lazyInitializer) would compute 520 on the server and something
-// narrower on the client — but hydration doesn't force-patch a mismatched
-// inline style, so it would silently stick past hydration. useSyncExternalStore
-// fixes this: the server snapshot (520) hydrates first, then React
-// reconciles to the real value as an ordinary update — no mismatch.
+// `baseWidth` renders into an inline style — a plain useState lazy
+// initializer would compute a server value that silently sticks past
+// hydration. useSyncExternalStore hydrates the server snapshot first, then
+// reconciles to the real value as an ordinary update.
 function subscribeToResize(callback: () => void) {
   window.addEventListener("resize", callback);
   return () => window.removeEventListener("resize", callback);
@@ -103,24 +86,15 @@ function getServerCarouselWidth() {
   return 340;
 }
 
-// Darker variants of Aurora's own hues (AuroraBackground.tsx uses
-// indigo-500/violet-500/pink-400 — no blue). Deliberately one step darker
-// (the 600-weight) than the hero blobs themselves: at the blobs' own
-// lightness the glow read as a pale wash, especially in light mode. Same
-// hue family, richer tone, in both themes (the glow doesn't switch per
-// theme, so darkening it here fixes both at once).
+// One step darker (600-weight) than the hero blobs — at the blobs' own
+// lightness the glow read as a pale wash, especially in light mode.
 const GLOW_COLORS = ["#4f46e5", "#db2777", "#7c3aed"];
 const GLOW_HSL = "262 83 58"; // violet-600, for BorderGlow's outer edge-light halo
 
-// The hero headline, split so "Lumora" renders in the brand's wordmark
-// font (`font-wordmark`, resolves to Pacifico) instead of WarpText's base
-// display font — same treatment used everywhere else the brand name
-// appears as itself. The trailing period stays in the base font since
-// Pacifico's descender/period shape reads badly right after the word.
-// Pacifico only ships weight 400, explicitly overridden here rather than
-// inheriting WarpText's bold default. A module-level constant, not built
-// inline in JSX, so WarpText's props-sync effect doesn't refire on every
-// Home render for a value that never changes.
+// "Lumora" renders in the brand's wordmark font instead of WarpText's base
+// display font; the trailing period stays in the base font since
+// Pacifico's period shape reads badly right after the word. A module-level
+// constant so WarpText's props-sync effect doesn't refire on every render.
 const HERO_HEADLINE_RUNS: WarpTextRun[] = [
   { text: "Study Smarter with " },
   { text: "Lumora", fontFamily: "var(--font-wordmark)", fontWeight: 400 },
@@ -168,11 +142,8 @@ const STEPS: CarouselItem[] = [
 ];
 
 export default function Home() {
-  // TEST VARIANT (see SpecularButton usage below): the hero CTA's fill,
-  // outline, and shine color are overridden per-theme here rather than
-  // using SpecularButton's own default (opaque --primary fill) — ogl's
-  // Color needs a literal value, not a CSS var, so this is the one piece
-  // that can't just be "var(--foreground)" the way textColor is.
+  // The hero CTA's fill/outline/shine colors are overridden per-theme
+  // below, since ogl's Color needs a literal value, not a CSS var.
   const isDark = useIsDarkTheme();
   const heroRef = useRef<HTMLDivElement>(null);
   const heroEyebrowRef = useRef<HTMLSpanElement>(null);
@@ -188,10 +159,8 @@ export default function Home() {
     getServerCarouselWidth,
   );
 
-  // ScrollTrigger is only needed for the feature-card animation below, which
-  // fires well after first paint — loaded in the background from mount so
-  // it's ready by the time a user scrolls that far, without holding up the
-  // hero (which needs plain `gsap` synchronously and stays a static import).
+  // Loaded in the background so it's ready by the time a user scrolls to
+  // the feature cards, without holding up the hero's own static gsap import.
   const [scrollTriggerReady, setScrollTriggerReady] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -205,8 +174,7 @@ export default function Home() {
     };
   }, []);
 
-  // One-time cascading entrance for the hero (eyebrow -> heading ->
-  // description -> CTA), same pattern as the Generate page's empty state.
+  // One-time cascading entrance for the hero.
   useGSAP(
     () => {
       if (prefersReducedMotion()) return;
@@ -230,9 +198,8 @@ export default function Home() {
     { scope: heroRef, dependencies: [] },
   );
 
-  // Feature cards stagger in the first time the section crosses into view.
-  // Waits on scrollTriggerReady (see above) — if the user scrolls here
-  // before it resolves, the cards just render without the stagger.
+  // Stagger in the first time the section crosses into view. If the user
+  // scrolls here before scrollTriggerReady resolves, cards render without it.
   useGSAP(
     () => {
       if (prefersReducedMotion() || !featuresRef.current || !scrollTriggerReady) return;
@@ -256,14 +223,8 @@ export default function Home() {
   );
 
   return (
-    // `overflow-x-clip` (not -hidden — clip never creates a scroll
-    // container, so it can't disable `position: sticky` for anything)
-    // contains BorderGlow's outer-glow bleed: `.edge-light` deliberately
-    // extends past its card/button via a negative inset to render the
-    // halo, which pushes a few pixels past the true viewport edge for any
-    // card sitting flush against it. `<main>` is a sibling of the root
-    // layout's sticky header, not an ancestor of it, so this can't affect
-    // the header's own stickiness either way.
+    // overflow-x-clip, not -hidden (which would disable position: sticky),
+    // contains BorderGlow's outer-glow bleed past the viewport edge.
     <main className="flex flex-1 flex-col overflow-x-clip pb-24">
         {/* Hero — opens fullscreen and settles into a contained card as
             the user scrolls past it; see HeroScrollShell for the
@@ -309,13 +270,7 @@ export default function Home() {
             </p>
 
             <div ref={heroCtaRef}>
-              {/*
-                TEST VARIANT, may be reverted later: fill matches the
-                surrounding page (fully transparent, tintOpacity 0) instead
-                of SpecularButton's default opaque --primary pill — the
-                button reads purely by its outline + moving shine, white/
-                light in dark mode, black/dark in light mode.
-              */}
+              {/* Transparent fill (tintOpacity 0) instead of SpecularButton's default pill — reads by outline + moving shine alone. */}
               <SpecularButton
                 href="/generate"
                 size="lg"

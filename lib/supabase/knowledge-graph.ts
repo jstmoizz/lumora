@@ -1,16 +1,11 @@
 /**
- * Read-side data access for Explore's knowledge graph, plus the one
- * route-handler write helper (`upsertKnowledgeNodeActivity`) — same split as
- * `lib/supabase/conversations.ts`: a write that happens inside
- * `app/api/chat/route.ts` (which already has its own `supabase`/`userId` in
- * scope from persisting the chat message) lives here as a plain function
- * rather than in a separate "use server" file, since it isn't meant to be
- * client-invokable on its own. Client-invoked mutations (delete, reset) are
- * in `lib/supabase/knowledge-graph-actions.ts` instead.
+ * Read-side data access for Explore's knowledge graph, plus one
+ * route-handler write helper (`upsertKnowledgeNodeActivity`) not meant to
+ * be client-invokable on its own. Client-invoked mutations (delete, reset)
+ * are in `lib/supabase/knowledge-graph-actions.ts` instead.
  *
- * Every query goes through the RLS-scoped server client — "only the signed
- * -in user's own rows" is enforced by Postgres itself
- * (`supabase/schema.sql`'s `knowledge_nodes` policies), not application logic.
+ * Every query goes through the RLS-scoped server client — access is
+ * enforced by Postgres itself, not application logic.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -40,8 +35,7 @@ function rowToNode(
 }
 
 /** The signed-in user's whole knowledge graph (Lumora Core is virtual and
- * never included — see app/explore/data.ts's CENTRAL_NODE). Empty array —
- * never a throw — when there's no signed-in user or the query fails. */
+ * never included). Empty array — never a throw — on no user or a failed query. */
 export async function getKnowledgeGraph(): Promise<KnowledgeGraphNode[]> {
   const user = await getServerUser();
   if (!user) return [];
@@ -64,35 +58,52 @@ export async function getKnowledgeGraph(): Promise<KnowledgeGraphNode[]> {
   return data.map(rowToNode);
 }
 
-// "manual" — added directly via the addKnowledgeTopic tool, with no quiz or
-// flashcard set attached — never bumps quiz_count/flashcard_count, only
-// activity_count/last_studied_at (see the branches below).
+/** The signed-in user's manually-dragged node positions, keyed by node id —
+ * only dragged nodes have an entry; everything else uses the automatic
+ * layout. Empty object — never a throw — on no user, a failed query, or a
+ * missing table (an older database not yet migrated). */
+export async function getKnowledgeNodePositions(): Promise<
+  Record<string, [number, number, number]>
+> {
+  const user = await getServerUser();
+  if (!user) return {};
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("knowledge_node_positions")
+    .select("node_id, position_x, position_y, position_z")
+    .eq("user_id", user.id);
+
+  if (error || !data) {
+    if (error) {
+      console.error("[knowledge-graph] failed to load node positions:", error.message);
+    }
+    return {};
+  }
+
+  const positions: Record<string, [number, number, number]> = {};
+  for (const row of data) {
+    positions[row.node_id] = [row.position_x, row.position_y, row.position_z];
+  }
+  return positions;
+}
+
+// "manual" — added via the addKnowledgeTopic tool with no quiz/flashcard
+// set attached — bumps activity_count/last_studied_at only.
 export type KnowledgeActivityKind = "quiz" | "flashcards" | "manual";
 
 interface UpsertKnowledgeNodeActivityInput {
   label: string;
   kind: KnowledgeActivityKind;
   relatedTopics?: string[];
-  // The broader field `label` belongs under (e.g. label "Binary Search
-  // Trees", category "Data Structures and Algorithms") — see
-  // findOrCreateCategoryNode below for how this gets resolved into a
-  // parent, auto-creating the category node itself the first time it's
-  // needed rather than requiring the user to have studied it directly first.
+  // The broader field `label` belongs under — resolved into a parent by
+  // findOrCreateCategoryNode below, auto-creating it if needed.
   category?: string;
-  // Shown in TopicPanel when present. createQuiz/createFlashcards never
-  // supply one; addKnowledgeTopic can. On an existing node, a new non-empty
-  // summary replaces the old one; omitting it leaves whatever's already
-  // there untouched (never blanked out by a call that didn't supply one).
+  // Shown in TopicPanel when present. A new non-empty summary replaces the
+  // old one; omitting it leaves the existing summary untouched.
   summary?: string;
 }
 
-/**
- * Called from `app/api/chat/route.ts`'s `onEnd` for every `createQuiz`/
- * `createFlashcards`/`addKnowledgeTopic` tool output in a finished turn.
- * Never throws — logs and returns on any failure, exactly like the rest of
- * `onEnd`'s persistence calls, so a knowledge-graph write never affects the
- * chat response already streamed to the client.
- */
 type ExistingNodeRow = {
   id: string;
   topic_key: string;
@@ -104,16 +115,10 @@ type ExistingNodeRow = {
 };
 
 /**
- * Resolves `category` into a parent node id, creating that node first if it
- * doesn't exist yet — this is what lets a subtopic (e.g. "Binary Search
- * Trees") nest under its broader field (e.g. "Data Structures and
- * Algorithms") even the very first time it's studied, without the user
- * needing to have studied the broader field directly first. The created
- * category node starts at activity_count 0 (it wasn't itself studied, just
- * inferred) — its own count grows normally if the user later studies it
- * directly. Returns `null` if creating it fails; the caller falls back to
- * its other parent-detection logic in that case, never blocking the actual
- * topic from being saved.
+ * Resolves `category` into a parent node id, creating it first if needed —
+ * lets a subtopic nest under its broader field even the first time it's
+ * studied. Returns `null` on failure, so the caller can fall back instead
+ * of blocking the topic from being saved.
  */
 async function findOrCreateCategoryNode(
   supabase: SupabaseClient<Database>,
@@ -151,6 +156,9 @@ async function findOrCreateCategoryNode(
   return data.id;
 }
 
+// Called from app/api/chat/route.ts's onEnd for each createQuiz/
+// createFlashcards/addKnowledgeTopic tool output. Never throws — a failed
+// write must never affect the chat response already streamed to the client.
 export async function upsertKnowledgeNodeActivity(
   supabase: SupabaseClient<Database>,
   userId: string,
@@ -197,12 +205,8 @@ export async function upsertKnowledgeNodeActivity(
     return;
   }
 
-  // New topic: prefer the model's own explicit category (auto-creating that
-  // node if it doesn't exist yet — see findOrCreateCategoryNode), since
-  // that's a deliberate categorization rather than an incidental mention.
-  // Falls back to whichever existing node first suggested this one (a
-  // case-insensitive match in that node's related_labels), or leaves it
-  // top-level (attached to Core) if neither applies.
+  // New topic: prefer the model's explicit category, falling back to
+  // whichever existing node first suggested this one, or top-level.
   let parentId: string | null = null;
   const categoryKey = category ? normalizeTopicKey(category) : null;
   if (categoryKey && categoryKey !== topicKey) {
