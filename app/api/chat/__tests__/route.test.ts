@@ -213,38 +213,62 @@ interface FakeOnEndEvent {
   finishReason?: "stop" | "length" | "error" | undefined;
 }
 
-// Stands in for streamText(...).toUIMessageStreamResponse(options) — runs
-// the route's own onEnd callback with a test-controlled outcome.
-function setupStreamText(onEndEvent?: FakeOnEndEvent) {
-  streamTextMock.mockReturnValue({
-    toUIMessageStreamResponse: vi.fn(
-      async (options: {
-        onEnd?: (event: {
-          responseMessage: LumoraUIMessage;
-          isAborted: boolean;
-          isContinuation: boolean;
-          messages: LumoraUIMessage[];
-          finishReason?: string;
-        }) => Promise<void> | void;
-      }) => {
-        if (onEndEvent) {
-          // `??` would treat an intentionally-passed `finishReason:
-          // undefined` the same as "not provided" — the fallback must only
-          // apply when the key itself is absent.
-          const finishReason =
-            "finishReason" in onEndEvent ? onEndEvent.finishReason : "stop";
-          await options.onEnd?.({
-            responseMessage: onEndEvent.responseMessage,
-            isAborted: onEndEvent.isAborted ?? false,
-            isContinuation: false,
-            messages: [],
-            finishReason,
-          });
-        }
-        return new Response("ok");
+type FakeToolResult = { type: "tool-result"; toolName: string; output: unknown };
+type FakeOnStepEnd = (step: { toolResults: FakeToolResult[] }) => Promise<void> | void;
+type FakeOnEnd = (event: {
+  responseMessage: LumoraUIMessage;
+  isAborted: boolean;
+  isContinuation: boolean;
+  messages: LumoraUIMessage[];
+  finishReason?: string;
+}) => Promise<void> | void;
+
+// Mirrors the shape of a real streamText tool-result: a "tool-createQuiz"
+// UI part with an available output becomes a { toolName: "createQuiz",
+// output } step result — the same translation route.ts's real onStepEnd
+// receives from the AI SDK.
+function toolResultsFromParts(parts: LumoraUIMessage["parts"]): FakeToolResult[] {
+  return parts.flatMap((part) => {
+    if (!part.type.startsWith("tool-") || !("state" in part) || part.state !== "output-available") {
+      return [];
+    }
+    return [
+      {
+        type: "tool-result" as const,
+        toolName: part.type.slice("tool-".length),
+        output: (part as { output: unknown }).output,
       },
-    ),
+    ];
   });
+}
+
+// Stands in for streamText(options) and the returned
+// .toUIMessageStreamResponse(options) — runs the route's own onStepEnd
+// (with the tool results from responseMessage.parts) and then onEnd, in
+// that order, mirroring the real SDK's sequencing.
+function setupStreamText(onEndEvent?: FakeOnEndEvent) {
+  streamTextMock.mockImplementation((streamTextOptions: { onStepEnd?: FakeOnStepEnd }) => ({
+    toUIMessageStreamResponse: vi.fn(async (options: { onEnd?: FakeOnEnd }) => {
+      if (onEndEvent) {
+        // `??` would treat an intentionally-passed `finishReason:
+        // undefined` the same as "not provided" — the fallback must only
+        // apply when the key itself is absent.
+        const finishReason =
+          "finishReason" in onEndEvent ? onEndEvent.finishReason : "stop";
+        await streamTextOptions.onStepEnd?.({
+          toolResults: toolResultsFromParts(onEndEvent.responseMessage.parts),
+        });
+        await options.onEnd?.({
+          responseMessage: onEndEvent.responseMessage,
+          isAborted: onEndEvent.isAborted ?? false,
+          isContinuation: false,
+          messages: [],
+          finishReason,
+        });
+      }
+      return new Response("ok");
+    }),
+  }));
 }
 
 // Simulates a provider/model failure reaching streamText's onError.
@@ -1352,5 +1376,74 @@ describe("knowledge graph integration", () => {
         summary: "A global conflict from 1939 to 1945.",
       },
     );
+  });
+
+  // The regression this guards against: the knowledge-node write used to
+  // live in onEnd, which only runs once the whole turn — including the
+  // second, acknowledgment-only model step — has finished. Invoking
+  // onStepEnd here without ever calling onEnd proves the write no longer
+  // depends on that second step completing at all, with no timers involved.
+  test("the knowledge-node write happens from onStepEnd and does not wait for onEnd (the second model step)", async () => {
+    const spies = setupSupabaseMock();
+    let capturedOnStepEnd: FakeOnStepEnd | undefined;
+    let capturedOnEnd: FakeOnEnd | undefined;
+
+    streamTextMock.mockImplementation((streamTextOptions: { onStepEnd?: FakeOnStepEnd }) => {
+      capturedOnStepEnd = streamTextOptions.onStepEnd;
+      return {
+        toUIMessageStreamResponse: vi.fn((options: { onEnd?: FakeOnEnd }) => {
+          capturedOnEnd = options.onEnd;
+          return new Response("ok");
+        }),
+      };
+    });
+
+    await POST(
+      makeRequest({ messages: [userMessage("Add World War II to my knowledge graph")] }),
+    );
+
+    expect(capturedOnStepEnd).toBeDefined();
+    expect(capturedOnEnd).toBeDefined();
+    expect(upsertKnowledgeNodeActivityMock).not.toHaveBeenCalled();
+
+    // Step 1 (the tool-containing step) finishes.
+    await capturedOnStepEnd!({
+      toolResults: [
+        {
+          type: "tool-result",
+          toolName: "addKnowledgeTopic",
+          output: { topic: "World War II", relatedTopics: ["World War I"], category: "History" },
+        },
+      ],
+    });
+
+    // The node is already written — well before onEnd (step 2's completion)
+    // has ever been called.
+    expect(upsertKnowledgeNodeActivityMock).toHaveBeenCalledTimes(1);
+    expect(upsertKnowledgeNodeActivityMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "user-1",
+      { label: "World War II", kind: "manual", relatedTopics: ["World War I"], category: "History" },
+    );
+    expect(
+      spies.messagesInsertSpy.mock.calls.filter(([payload]) => payload.role === "assistant"),
+    ).toHaveLength(0);
+
+    // Step 2 finishes and the turn settles.
+    await capturedOnEnd!({
+      responseMessage: assistantMessageWithParts([
+        { type: "text", text: "Added World War II to your knowledge graph.", state: "done" },
+      ]),
+      isAborted: false,
+      isContinuation: false,
+      messages: [],
+      finishReason: "stop",
+    });
+
+    expect(spies.messagesInsertSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "assistant" }),
+    );
+    // Still exactly once — onEnd must not persist the node a second time.
+    expect(upsertKnowledgeNodeActivityMock).toHaveBeenCalledTimes(1);
   });
 });

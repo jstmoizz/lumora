@@ -5,6 +5,7 @@ import {
   isTextUIPart,
   stepCountIs,
   streamText,
+  type StepResult,
 } from "ai";
 import {
   GENERATION_CONFIG,
@@ -273,10 +274,54 @@ export async function POST(req: Request) {
 
   const model = resolveModel(mode, imageValidation.hasImage);
 
+  // Each createQuiz/createFlashcards/addKnowledgeTopic call becomes a node
+  // in Explore. Persisted from onStepEnd (below), as soon as the
+  // tool-containing step finishes — not from onEnd, which only runs after
+  // the second, acknowledgment-only model step also completes. A failed
+  // write here must never affect the already-streamed chat response.
+  async function persistKnowledgeGraphToolResults(
+    toolResults: StepResult<typeof lumoraTools>["toolResults"],
+  ) {
+    for (const toolResult of toolResults) {
+      try {
+        if (toolResult.toolName === "createQuiz" && !toolResult.dynamic) {
+          await upsertKnowledgeNodeActivity(supabase, userId, {
+            label: toolResult.output.topic,
+            kind: "quiz",
+            relatedTopics: toolResult.output.relatedTopics,
+            category: toolResult.output.category,
+          });
+        } else if (toolResult.toolName === "createFlashcards" && !toolResult.dynamic) {
+          await upsertKnowledgeNodeActivity(supabase, userId, {
+            label: toolResult.output.topic,
+            kind: "flashcards",
+            relatedTopics: toolResult.output.relatedTopics,
+            category: toolResult.output.category,
+          });
+        } else if (toolResult.toolName === "addKnowledgeTopic" && !toolResult.dynamic) {
+          await upsertKnowledgeNodeActivity(supabase, userId, {
+            label: toolResult.output.topic,
+            kind: "manual",
+            relatedTopics: toolResult.output.relatedTopics,
+            category: toolResult.output.category,
+            summary: toolResult.output.summary,
+          });
+        }
+      } catch (knowledgeGraphError) {
+        console.error(
+          "[api/chat] failed to update knowledge graph:",
+          knowledgeGraphError,
+        );
+      }
+    }
+  }
+
   // Runs once the turn is done (success, error, or abort) — shared between
   // the normal streamText path and the image extraction-only path, which
   // need identical persistence behavior. Runs after the stream, not in
-  // place of it, so the client keeps seeing tokens live.
+  // place of it, so the client keeps seeing tokens live. Knowledge-graph
+  // writes already happened in onStepEnd — this only persists the final
+  // assistant message and bumps the conversation's timestamp.
   async function persistAssistantTurn({
     responseMessage,
     isAborted,
@@ -302,48 +347,6 @@ export async function POST(req: Request) {
         messageError.message,
       );
       return;
-    }
-
-    // Each quiz/flashcard/addKnowledgeTopic call this turn becomes a node
-    // in Explore. A failed write here must never affect the already-
-    // streamed chat response.
-    for (const part of responseMessage.parts) {
-      try {
-        if (part.type === "tool-createQuiz" && part.state === "output-available") {
-          await upsertKnowledgeNodeActivity(supabase, userId, {
-            label: part.output.topic,
-            kind: "quiz",
-            relatedTopics: part.output.relatedTopics,
-            category: part.output.category,
-          });
-        } else if (
-          part.type === "tool-createFlashcards" &&
-          part.state === "output-available"
-        ) {
-          await upsertKnowledgeNodeActivity(supabase, userId, {
-            label: part.output.topic,
-            kind: "flashcards",
-            relatedTopics: part.output.relatedTopics,
-            category: part.output.category,
-          });
-        } else if (
-          part.type === "tool-addKnowledgeTopic" &&
-          part.state === "output-available"
-        ) {
-          await upsertKnowledgeNodeActivity(supabase, userId, {
-            label: part.output.topic,
-            kind: "manual",
-            relatedTopics: part.output.relatedTopics,
-            category: part.output.category,
-            summary: part.output.summary,
-          });
-        }
-      } catch (knowledgeGraphError) {
-        console.error(
-          "[api/chat] failed to update knowledge graph:",
-          knowledgeGraphError,
-        );
-      }
     }
 
     const { error: updateError } = await supabase
@@ -432,6 +435,10 @@ export async function POST(req: Request) {
     // tool call with no room to comment on the result. Two steps lets it
     // call createQuiz/createFlashcards and then acknowledge it briefly.
     stopWhen: stepCountIs(2),
+    // Fires after each step, including the tool-containing one — persists
+    // the knowledge-graph write before the second (acknowledgment) step
+    // even starts, instead of waiting for the whole turn to finish.
+    onStepEnd: (step) => persistKnowledgeGraphToolResults(step.toolResults),
     // Groq can return a whole response in one or two network chunks — this
     // re-chunks it into a steady word-by-word stream. Ours, not the AI
     // SDK's smoothStream, since that also paces reasoning-delta chunks,

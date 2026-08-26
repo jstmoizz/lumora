@@ -104,32 +104,32 @@ interface UpsertKnowledgeNodeActivityInput {
   summary?: string;
 }
 
-type ExistingNodeRow = {
-  id: string;
-  topic_key: string;
-  related_labels: string[];
-  activity_count: number;
-  quiz_count: number;
-  flashcard_count: number;
-  summary: string | null;
-};
-
 /**
  * Resolves `category` into a parent node id, creating it first if needed —
  * lets a subtopic nest under its broader field even the first time it's
  * studied. Returns `null` on failure, so the caller can fall back instead
- * of blocking the topic from being saved.
+ * of blocking the topic from being saved. Looks the category up by its own
+ * topic_key rather than scanning the whole graph.
  */
 async function findOrCreateCategoryNode(
   supabase: SupabaseClient<Database>,
   userId: string,
   category: string,
-  existingNodes: ExistingNodeRow[],
 ): Promise<string | null> {
   const categoryKey = normalizeTopicKey(category);
   if (!categoryKey) return null;
 
-  const existing = existingNodes.find((node) => node.topic_key === categoryKey);
+  const { data: existing, error: lookupError } = await supabase
+    .from("knowledge_nodes")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("topic_key", categoryKey)
+    .maybeSingle();
+
+  if (lookupError) {
+    console.error("[knowledge-graph] failed to look up category node:", lookupError.message);
+    return null;
+  }
   if (existing) return existing.id;
 
   const { data, error } = await supabase
@@ -156,7 +156,34 @@ async function findOrCreateCategoryNode(
   return data.id;
 }
 
-// Called from app/api/chat/route.ts's onEnd for each createQuiz/
+// The related_labels fallback (below) can't be scoped to one row — it's
+// matching normalizeTopicKey() against every existing node's labels, which
+// Postgres has no column to filter on directly. Only reached for a brand-new
+// topic with no (or unresolved) category, so it's not on every write.
+async function findRelatedParent(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  topicKey: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("knowledge_nodes")
+    .select("id, related_labels")
+    .eq("user_id", userId);
+
+  if (error || !data) {
+    if (error) {
+      console.error("[knowledge-graph] failed to look up a related parent:", error.message);
+    }
+    return null;
+  }
+
+  const relatedParent = data.find((node) =>
+    node.related_labels.some((related) => normalizeTopicKey(related) === topicKey),
+  );
+  return relatedParent?.id ?? null;
+}
+
+// Called from app/api/chat/route.ts's onStepEnd for each createQuiz/
 // createFlashcards/addKnowledgeTopic tool output. Never throws — a failed
 // write must never affect the chat response already streamed to the client.
 export async function upsertKnowledgeNodeActivity(
@@ -167,19 +194,20 @@ export async function upsertKnowledgeNodeActivity(
   const topicKey = normalizeTopicKey(label);
   if (!topicKey) return;
 
-  const { data: existingNodes, error: listError } = await supabase
+  // Scoped to the one topic being touched, not the whole graph — the common
+  // case (studying a topic again) never needs more than this single row.
+  const { data: existing, error: lookupError } = await supabase
     .from("knowledge_nodes")
-    .select("id, topic_key, related_labels, activity_count, quiz_count, flashcard_count, summary")
-    .eq("user_id", userId);
+    .select("id, related_labels, activity_count, quiz_count, flashcard_count, summary")
+    .eq("user_id", userId)
+    .eq("topic_key", topicKey)
+    .maybeSingle();
 
-  if (listError || !existingNodes) {
-    if (listError) {
-      console.error("[knowledge-graph] failed to read existing nodes:", listError.message);
-    }
+  if (lookupError) {
+    console.error("[knowledge-graph] failed to read existing node:", lookupError.message);
     return;
   }
 
-  const existing = existingNodes.find((node) => node.topic_key === topicKey);
   const newRelated = (relatedTopics ?? []).map((t) => t.trim()).filter(Boolean);
   const trimmedSummary = summary?.trim();
 
@@ -210,13 +238,10 @@ export async function upsertKnowledgeNodeActivity(
   let parentId: string | null = null;
   const categoryKey = category ? normalizeTopicKey(category) : null;
   if (categoryKey && categoryKey !== topicKey) {
-    parentId = await findOrCreateCategoryNode(supabase, userId, category!, existingNodes);
+    parentId = await findOrCreateCategoryNode(supabase, userId, category!);
   }
   if (parentId === null) {
-    const relatedParent = existingNodes.find((node) =>
-      node.related_labels.some((related) => normalizeTopicKey(related) === topicKey),
-    );
-    parentId = relatedParent?.id ?? null;
+    parentId = await findRelatedParent(supabase, userId, topicKey);
   }
 
   const { error: insertError } = await supabase.from("knowledge_nodes").insert({

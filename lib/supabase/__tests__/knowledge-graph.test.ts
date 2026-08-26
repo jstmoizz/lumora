@@ -208,6 +208,11 @@ describe("upsertKnowledgeNodeActivity", () => {
     return promise;
   }
 
+  // A minimal stand-in for Supabase's real query builder: `.eq()` narrows
+  // and chains, and the resulting object is both awaitable directly (the
+  // related-parent fallback's full-table scan) and terminable with
+  // `.maybeSingle()` (the targeted topic/category lookups) — the two query
+  // shapes upsertKnowledgeNodeActivity now actually issues.
   function makeSupabase({
     existingNodes = [] as unknown[],
     listError = null as unknown,
@@ -222,10 +227,35 @@ describe("upsertKnowledgeNodeActivity", () => {
     const insertMock = vi.fn<(payload: Record<string, unknown>) => ReturnType<typeof makeInsertResult>>(
       () => makeInsertResult({ error: insertError, newId: newNodeId }),
     );
-    const listEqMock = vi.fn(() => Promise.resolve({ data: existingNodes, error: listError }));
-    const selectMock = vi.fn(() => ({ eq: listEqMock }));
+
+    const eqMock = vi.fn();
+    const selectMock = vi.fn(() => {
+      const filters: Record<string, unknown> = {};
+      const nodes = existingNodes as Array<{ topic_key: string; id: string }>;
+      const chain = {
+        eq: vi.fn((column: string, value: unknown) => {
+          eqMock(column, value);
+          filters[column] = value;
+          return chain;
+        }),
+        maybeSingle: vi.fn(async () => {
+          if (listError) return { data: null, error: listError };
+          const match = nodes.find((node) => node.topic_key === filters.topic_key) ?? null;
+          return { data: match, error: null };
+        }),
+        then: (
+          onFulfilled: (value: { data: unknown; error: unknown }) => unknown,
+          onRejected?: (reason: unknown) => unknown,
+        ) =>
+          Promise.resolve(
+            listError ? { data: null, error: listError } : { data: existingNodes, error: null },
+          ).then(onFulfilled, onRejected),
+      };
+      return chain;
+    });
+
     const from = vi.fn(() => ({ select: selectMock, update: updateMock, insert: insertMock }));
-    return { supabase: { from } as never, from, updateMock, updateEqMock, insertMock, selectMock };
+    return { supabase: { from } as never, from, updateMock, updateEqMock, insertMock, selectMock, eqMock };
   }
 
   test("does nothing when the label is empty after trimming", async () => {
@@ -536,5 +566,57 @@ describe("upsertKnowledgeNodeActivity", () => {
     expect(updateMock).toHaveBeenCalledWith(
       expect.objectContaining({ summary: "The original summary." }),
     );
+  });
+
+  describe("query scoping", () => {
+    test("looks up an existing topic by its own topic_key, not by fetching every node", async () => {
+      const { supabase, eqMock } = makeSupabase({
+        existingNodes: [
+          { id: "ml-id", topic_key: "machine learning", related_labels: [], activity_count: 1, quiz_count: 1, flashcard_count: 0 },
+        ],
+      });
+
+      await upsertKnowledgeNodeActivity(supabase, "user-1", { label: "Machine Learning", kind: "quiz" });
+
+      expect(eqMock).toHaveBeenCalledWith("topic_key", "machine learning");
+    });
+
+    test("updating an existing topic needs exactly one query — no related-parent fallback scan", async () => {
+      const { supabase, selectMock } = makeSupabase({
+        existingNodes: [
+          { id: "ml-id", topic_key: "machine learning", related_labels: [], activity_count: 1, quiz_count: 1, flashcard_count: 0 },
+        ],
+      });
+
+      await upsertKnowledgeNodeActivity(supabase, "user-1", { label: "machine learning", kind: "quiz" });
+
+      expect(selectMock).toHaveBeenCalledTimes(1);
+    });
+
+    test("a resolved category also skips the related-parent fallback scan", async () => {
+      const { supabase, selectMock } = makeSupabase({
+        existingNodes: [
+          { id: "dsa-id", topic_key: "data structures and algorithms", related_labels: [] },
+        ],
+      });
+
+      await upsertKnowledgeNodeActivity(supabase, "user-1", {
+        label: "Binary Search Trees",
+        kind: "quiz",
+        category: "data structures and algorithms",
+      });
+
+      // One lookup for the topic itself, one for the category — never a
+      // bare full-table scan, since the category already resolved a parent.
+      expect(selectMock).toHaveBeenCalledTimes(2);
+    });
+
+    test("every lookup is scoped to the authenticated user", async () => {
+      const { supabase, eqMock } = makeSupabase({ existingNodes: [] });
+
+      await upsertKnowledgeNodeActivity(supabase, "user-1", { label: "Machine Learning", kind: "quiz" });
+
+      expect(eqMock).toHaveBeenCalledWith("user_id", "user-1");
+    });
   });
 });
