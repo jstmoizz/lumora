@@ -290,5 +290,5 @@ Firefox/WebKit browser binaries were not available in the environment this pass 
 | Explore (select, keyboard-select, drag, persisted position, fallback) | Tested (Playwright) | Not tested in this environment | Not tested in this environment | Tested (manual) |
 | Mobile layout / touch | Not tested in this environment | Not tested in this environment | Not tested in this environment | Tested (manual) |
 
-Mobile Safari was verified manually on a real device by the developer, covering the areas above.
+Mobile Safari was verified manually by me, covering the areas above.
 Desktop Safari and Firefox were not — never treat those "Not tested" cells as passing.
