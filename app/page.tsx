@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
@@ -17,11 +16,12 @@ import {
 import { Button } from "@/components/ui/button";
 import SpecularButton from "./components/SpecularButton";
 import { useIsDarkTheme } from "./components/useIsDarkTheme";
+import { useReducedMotion } from "./components/useReducedMotion";
 import BorderGlow from "./components/home/BorderGlow";
 import Carousel, { type CarouselItem } from "./components/home/Carousel";
 import HeroScrollShell from "./components/home/HeroScrollShell";
 import HeroShaderBackground from "./components/home/HeroShaderBackground";
-import type { WarpTextRun } from "./components/home/WarpText";
+import WarpText, { type WarpTextRun } from "./components/home/WarpText";
 import "./components/home/HeroHeadlineFallback.css";
 
 // Mirrors HERO_HEADLINE_RUNS as real DOM text, not canvas-rasterized. No
@@ -57,14 +57,6 @@ function HeroHeadlineFallback() {
     </span>
   );
 }
-
-// Keeps `ogl` and the shader's WebGL setup off the critical path to the
-// hero heading — matters for LCP, since HeroHeadlineFallback paints
-// immediately with no dependency on hydration or WebGL init.
-const WarpText = dynamic(() => import("./components/home/WarpText"), {
-  ssr: false,
-  loading: () => <HeroHeadlineFallback />,
-});
 
 function prefersReducedMotion() {
   if (typeof window === "undefined") return true;
@@ -145,6 +137,38 @@ export default function Home() {
   // The hero CTA's fill/outline/shine colors are overridden per-theme
   // below, since ogl's Color needs a literal value, not a CSS var.
   const isDark = useIsDarkTheme();
+  const reducedMotion = useReducedMotion();
+  // WarpText is a static import and is usually ready fast; HeroShaderBackground's
+  // ShaderScene is next/dynamic (kept out of the initial bundle — see that
+  // file) and can mount well after WarpText on some devices/connections.
+  // `warpReady` only becomes true once BOTH have reported in, so the
+  // curtain below never lifts onto a still-loading background (which would
+  // show the plain AuroraBackground fallback, then visibly pop into the
+  // real shader a moment later).
+  const [warpTextReady, setWarpTextReady] = useState(false);
+  const [backgroundReady, setBackgroundReady] = useState(false);
+  const warpReady = warpTextReady && backgroundReady;
+  // Safety net only: if WebGL never initializes (unsupported browser, driver
+  // failure, etc.) onReady never fires, so fall back to the plain text
+  // instead of leaving the curtain up forever. Comfortably longer than
+  // either piece's real init time.
+  const [warpTimedOut, setWarpTimedOut] = useState(false);
+  useEffect(() => {
+    if (warpReady) return undefined;
+    const timer = window.setTimeout(() => setWarpTimedOut(true), 4000);
+    return () => window.clearTimeout(timer);
+  }, [warpReady]);
+  // Set if WarpText's WebGL context is lost after already being ready (a
+  // GPU driver crash/reset — rare, but real; see WarpText's own comment on
+  // its onContextLost prop). WarpText hides its own now-dead canvas, but it
+  // has no text of its own to fall back to, so this brings the plain
+  // fallback back regardless of `warpReady` having already gone true once.
+  const [warpBroken, setWarpBroken] = useState(false);
+  // The plain-text fallback is only ever the visible layer for reduced-motion
+  // users (shown immediately, no curtain), as the timeout safety net above,
+  // or if WarpText's context was lost after the fact — otherwise the
+  // curtain hides this whole area until WarpText is ready.
+  const fallbackVisible = warpBroken || (!warpReady && (reducedMotion || warpTimedOut));
   const heroRef = useRef<HTMLDivElement>(null);
   const heroEyebrowRef = useRef<HTMLSpanElement>(null);
   const heroHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -234,7 +258,9 @@ export default function Home() {
             ref={heroRef}
             className="relative flex h-full flex-col items-center justify-center gap-6 overflow-hidden px-6 py-28 text-center sm:py-36"
           >
-            <HeroShaderBackground />
+            <HeroShaderBackground
+              onBackgroundReady={() => setBackgroundReady(true)}
+            />
 
             <span
               ref={heroEyebrowRef}
@@ -244,21 +270,57 @@ export default function Home() {
             </span>
 
             <h1 ref={heroHeadingRef} className="w-full max-w-3xl">
-              <WarpText
-                text={HERO_HEADLINE_RUNS}
-                fontSize="clamp(2.75rem, 7vw, 4.75rem)"
-                fontWeight={700}
-                letterSpacing="-0.02em"
-                lineHeight={1.05}
-                warpStrength={0.05}
-                warpScale={1.6}
-                speed={0.35}
-                pointerInfluence={0.35}
-                pointerStrength={0.28}
-                refraction={0.01}
-                ripple
-                style={{ minHeight: "clamp(140px, 16vw, 220px)" }}
-              />
+              {/*
+                WarpText is a plain static import (like SpecularButton
+                below), not a next/dynamic({ssr:false}) chunk — `ogl`
+                imports fine in Node (verified directly), and WarpText's own
+                render has no browser-API dependency, only its effects do,
+                which never run server-side regardless. A separate chunk
+                meant an extra network round-trip (fetch, on top of the main
+                bundle) purely to defer ~183KB off the initial payload; going
+                static trades a bigger homepage bundle for cutting that
+                round-trip out of the time-to-first-frame entirely.
+
+                Two layers share this box: HeroHeadlineFallback (real DOM
+                text, only visible for reduced motion or the WebGL-timeout
+                fallback — see `fallbackVisible`) and WarpText itself, fading
+                in once it reports a real frame drawn (onReady). On the
+                normal path, neither is visible at first — a plain,
+                background-colored curtain over the whole hero (see the
+                `hero-loading-curtain` div below) hides this area, and the
+                shader behind it, until WarpText is ready, then fades away
+                to reveal the finished hero in one step. Exactly one of
+                {fallback, WarpText} is ever exposed to the accessibility
+                tree at a time (the other gets aria-hidden) so a screen
+                reader never hears the headline announced twice.
+              */}
+              <span className="hero-headline-stack">
+                <span
+                  aria-hidden={!fallbackVisible}
+                  className={`hero-headline-fallback-wrap${fallbackVisible ? " hero-headline-fallback-wrap--visible" : ""}`}
+                >
+                  <HeroHeadlineFallback />
+                </span>
+                <span aria-hidden={fallbackVisible}>
+                  <WarpText
+                    text={HERO_HEADLINE_RUNS}
+                    fontSize="clamp(2.75rem, 7vw, 4.75rem)"
+                    fontWeight={700}
+                    letterSpacing="-0.02em"
+                    lineHeight={1.05}
+                    warpStrength={0.05}
+                    warpScale={1.6}
+                    speed={0.35}
+                    pointerInfluence={0.35}
+                    pointerStrength={0.28}
+                    refraction={0.01}
+                    ripple
+                    onReady={() => setWarpTextReady(true)}
+                    onContextLost={() => setWarpBroken(true)}
+                    className={`hero-headline-warp${warpReady && !warpBroken ? " hero-headline-warp--ready" : ""}`}
+                  />
+                </span>
+              </span>
             </h1>
 
             <p
@@ -284,6 +346,42 @@ export default function Home() {
                 <ArrowRightIcon aria-hidden="true" className="size-4" />
               </SpecularButton>
             </div>
+
+            {/*
+              Plain, background-colored curtain over the whole hero (text
+              and shader both) — reads as black in dark mode, white in
+              light mode, no color/animation of its own. Hides the hero
+              entirely until WarpText is ready, then fades out in one step
+              so the finished hero (shader + text together) appears at
+              once, instead of a static-text pop or a partially-formed
+              background. Skipped outright under reduced motion, which
+              shows the finished hero immediately.
+
+              position/background/opacity are inlined rather than left to
+              the `hero-loading-curtain` CSS class — under `next dev`,
+              Turbopack injects CSS asynchronously instead of a
+              render-blocking <link>, so for a brief window after first
+              paint this div would otherwise have no background and no
+              positioning at all, letting the (also not-yet-hidden) plain
+              fallback text underneath show through. Inline styles are part
+              of the HTML itself, so they're correct from the very first
+              paint regardless of when CSS finishes loading. Only the fade
+              transition itself is left in the CSS class.
+            */}
+            {!reducedMotion && (
+              <div
+                aria-hidden="true"
+                className="hero-loading-curtain"
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  zIndex: 20,
+                  background: "var(--background)",
+                  opacity: warpReady || warpTimedOut ? 0 : 1,
+                  pointerEvents: "none",
+                }}
+              />
+            )}
           </section>
         </HeroScrollShell>
 

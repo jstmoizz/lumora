@@ -44,12 +44,19 @@ interface Engine {
   material: ShaderMaterial;
 }
 
+interface Props {
+  // Fired once, right after this mount effect finishes setting up the
+  // renderer/scene — see HeroShaderBackground's own comment on why page.tsx
+  // needs this signal.
+  onMounted?: () => void;
+}
+
 // Module-level so mutating the material's uniform doesn't trip react-hooks/immutability.
 function setIsLightUniform(material: ShaderMaterial, isDark: boolean): void {
   material.uniforms.u_isLight.value = isDark ? 0 : 1;
 }
 
-export default function ShaderScene() {
+export default function ShaderScene({ onMounted }: Props) {
   const isDark = useIsDarkTheme();
   const tabVisible = useTabVisible();
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -208,6 +215,7 @@ export default function ShaderScene() {
     }
 
     engineRef.current = { start, stop, material };
+    onMounted?.();
 
     return () => {
       stop();

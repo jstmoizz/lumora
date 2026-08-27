@@ -291,11 +291,29 @@ const SpecularButton = ({
     let running = false;
     let elementVisible = true;
     let pageVisible = !document.hidden;
+    let contextLost = false;
 
     const lineC = new Color();
     const baseC = new Color();
 
+    const onContextLostEvent = (event: Event): void => {
+      event.preventDefault();
+      contextLost = true;
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      // Left un-handled, this canvas would otherwise keep trying to render
+      // to a dead context (or freeze on its last frame) — either way,
+      // browsers can render that as a broken-image glyph once the
+      // underlying GPU surface is actually gone (seen intermittently on
+      // laptops with switchable graphics). The button/link underneath is
+      // real DOM, not canvas, so hiding this purely decorative shine layer
+      // leaves it fully visible and usable.
+      gl.canvas.style.display = "none";
+    };
+    gl.canvas.addEventListener("webglcontextlost", onContextLostEvent, false);
+
     const update = (now: number) => {
+      if (contextLost) return;
       raf = requestAnimationFrame(update);
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
@@ -364,6 +382,7 @@ const SpecularButton = ({
       ro.disconnect();
       window.removeEventListener("pointermove", onPointerMove);
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      gl.canvas.removeEventListener("webglcontextlost", onContextLostEvent);
       if (gl.canvas.parentNode === fx) fx.removeChild(gl.canvas);
       gl.getExtension("WEBGL_lose_context")?.loseContext();
     };

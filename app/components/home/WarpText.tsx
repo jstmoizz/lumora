@@ -38,6 +38,19 @@ export interface Props {
   lineHeight?: string | number;
   className?: string;
   style?: CSSProperties;
+  // Fires once, after the first real WebGL frame has actually been drawn —
+  // not on mount. Lets a caller stacking this over a text fallback (Home's
+  // hero) hold off revealing the canvas until there's real content in it,
+  // instead of an empty transparent div popping in ahead of its first paint.
+  onReady?: () => void;
+  // Fires if the WebGL context is lost after already being ready (a GPU
+  // driver crash/reset — rare, but seen on laptops with switchable
+  // graphics; browsers sometimes render the affected canvas as a broken
+  // image once this happens). Lets a caller that already revealed this
+  // canvas (via onReady) fall back to its own plain-text fallback again,
+  // since this component hides its own canvas but has no text of its own
+  // to fall back to.
+  onContextLost?: () => void;
 }
 
 interface RuntimeProps {
@@ -356,6 +369,8 @@ const WarpText = ({
   lineHeight = 0.9,
   className = "",
   style,
+  onReady,
+  onContextLost,
 }: Props) => {
   const isDark = useIsDarkTheme();
   // Near-white in dark mode, dark indigo-slate in light mode — see the
@@ -363,6 +378,11 @@ const WarpText = ({
   const resolvedColor = color ?? (isDark ? "#fafafa" : "#1e1b4b");
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // Read inside the mount effect (which only runs once), so it always
+  // calls whatever the latest `onReady`/`onContextLost` prop is rather than
+  // closing over the value from whenever that effect happened to run.
+  const onReadyRef = useRef(onReady);
+  const onContextLostRef = useRef(onContextLost);
   const propsRef = useRef<RuntimeProps>({
     text,
     color: resolvedColor,
@@ -420,6 +440,16 @@ const WarpText = ({
     ripple,
   ]);
 
+  // Deliberately its own effect, not folded into the one above — `onReady`
+  // changing shouldn't re-trigger a rasterize() the way a visual prop would.
+  useEffect(() => {
+    onReadyRef.current = onReady;
+  }, [onReady]);
+
+  useEffect(() => {
+    onContextLostRef.current = onContextLost;
+  }, [onContextLost]);
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container || typeof window === "undefined") return undefined;
@@ -437,6 +467,7 @@ const WarpText = ({
     let pageVisible = !document.hidden;
     let reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     let rasterVersion = 0;
+    let hasReadied = false;
 
     const pointer = { x: 0.5, y: 0.5, tx: 0.5, ty: 0.5, active: 0, activeTarget: 0 };
     const startTime = performance.now();
@@ -526,6 +557,11 @@ const WarpText = ({
       texture.image = textCanvas;
       texture.needsUpdate = true;
       renderOnce();
+
+      if (!hasReadied) {
+        hasReadied = true;
+        onReadyRef.current?.();
+      }
     };
 
     const resize = () => {
@@ -558,6 +594,14 @@ const WarpText = ({
       contextLost = true;
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
+      // A lost context otherwise leaves this canvas frozen on its last
+      // frame in the DOM — some browsers render that as a broken-image
+      // glyph once the underlying GPU surface is actually gone (seen on
+      // laptops with switchable graphics). Hiding it directly, rather than
+      // waiting on a re-render, means it disappears the instant the loss is
+      // detected regardless of whether the caller re-renders at all.
+      canvas.style.display = "none";
+      onContextLostRef.current?.();
     };
 
     const onVisibility = (): void => {

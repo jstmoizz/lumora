@@ -40,3 +40,78 @@
 .dark .hero-headline-fallback-text {
   color: #fafafa; /* dark mode — matches WarpText's own default color prop */
 }
+
+/*
+ * The hero heading stacks HeroHeadlineFallback (always rendered, in normal
+ * flow — it's what gives this box its height) with WarpText positioned
+ * exactly on top of it, invisible until WarpText reports a real frame drawn
+ * (onReady in page.tsx). Same text/size/color underneath either way, so the
+ * crossfade is seamless rather than a "pop" between two different-looking
+ * things — and if WarpText's WebGL init fails outright, the fallback simply
+ * stays visible instead of the heading going blank.
+ */
+.hero-headline-stack {
+  position: relative;
+  display: block;
+}
+
+.hero-headline-fallback-wrap {
+  display: block;
+  /* Hidden by default — only shown for reduced-motion users (immediately)
+     or as a last-resort fallback if WarpText never becomes ready (see
+     `fallbackVisible` in page.tsx). Otherwise the hero-loading-curtain
+     below covers this whole area, so sighted users never see this plain
+     text at all. */
+  opacity: 0;
+  transition: opacity 450ms ease;
+}
+
+.hero-headline-fallback-wrap--visible {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-headline-fallback-wrap {
+    transition: none;
+  }
+}
+
+/*
+ * Combined-class selector, not `.hero-headline-warp` alone — WarpText.css's
+ * own `.warp-text` sets `position: relative`, and there's no guarantee
+ * that stylesheet loads (or wins on specificity) before this one just
+ * because of import order. Two classes on one selector beats one.
+ */
+.warp-text.hero-headline-warp {
+  position: absolute;
+  inset: 0;
+  /* WarpText.css's own `.warp-text` sets `min-height: 220px`, which beats
+     `inset: 0` whenever this stack is shorter than that (it is — the stack's
+     own height comes from HeroHeadlineFallback's shorter natural height at
+     most viewports). Left in place, WarpText's canvas ends up taller than
+     the fallback's box and centers its text lower inside it — the two
+     looked like separately stacked lines instead of one overlaid pair. */
+  min-height: 0;
+  opacity: 0;
+  transition: opacity 450ms ease;
+}
+
+.hero-headline-warp.hero-headline-warp--ready {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .warp-text.hero-headline-warp {
+    transition: none;
+  }
+}
+
+/*
+ * Curtain fade timing only — position/background/opacity are inlined in
+ * page.tsx (see its comment on the curtain div for why: they need to be
+ * correct from the very first paint, with no dependency on this CSS
+ * actually having loaded yet).
+ */
+.hero-loading-curtain {
+  transition: opacity 450ms ease;
+}
