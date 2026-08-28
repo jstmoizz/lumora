@@ -20,7 +20,7 @@ import {
   readActiveConversationId,
   writeActiveConversationId,
 } from "./activeConversationStorage";
-import ChatInterface from "./ChatInterface";
+import ChatInterface, { type ChatInterfaceHandle } from "./ChatInterface";
 import MobilePanelDrawer from "./MobilePanelDrawer";
 import PracticePanel from "./PracticePanel";
 import RecentChatsPanel from "./RecentChatsPanel";
@@ -78,6 +78,7 @@ function GenerateSession({
   const [flashcardSets, setFlashcardSets] = useState<CreateFlashcardsOutput[]>(
     [],
   );
+  const chatRef = useRef<ChatInterfaceHandle>(null);
 
   const handleQuizGenerated = useCallback((quiz: CreateQuizOutput) => {
     // Dedupes by quizId defensively, rather than assuming this is never
@@ -95,10 +96,19 @@ function GenerateSession({
     [],
   );
 
+  // QuizPanel calls this once a finished quiz has at least one wrong or
+  // unanswered question — pushes the summary straight into this session's
+  // own chat via ChatInterface's imperative handle, so the AI explains the
+  // mistakes as the next turn.
+  const handleExplainMistakes = useCallback((text: string) => {
+    chatRef.current?.sendMessage(text);
+  }, []);
+
   return (
     <>
       <div className="flex min-h-0 flex-1 flex-col items-center">
         <ChatInterface
+          ref={chatRef}
           initialConversationId={initialConversationId}
           initialMessages={initialMessages}
           initialTopic={initialTopic}
@@ -113,7 +123,11 @@ function GenerateSession({
         aria-label="Resources"
         className="hidden min-h-0 lg:flex lg:flex-col lg:overflow-y-auto lg:rounded-2xl lg:border lg:border-border lg:bg-card lg:p-4"
       >
-        <PracticePanel quizzes={quizzes} flashcardSets={flashcardSets} />
+        <PracticePanel
+          quizzes={quizzes}
+          flashcardSets={flashcardSets}
+          onExplainMistakes={handleExplainMistakes}
+        />
       </aside>
 
       <MobilePanelDrawer
@@ -123,7 +137,11 @@ function GenerateSession({
         side="right"
       >
         <AccentScope accent={accent}>
-          <PracticePanel quizzes={quizzes} flashcardSets={flashcardSets} />
+          <PracticePanel
+            quizzes={quizzes}
+            flashcardSets={flashcardSets}
+            onExplainMistakes={handleExplainMistakes}
+          />
         </AccentScope>
       </MobilePanelDrawer>
     </>

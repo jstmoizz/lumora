@@ -8,6 +8,8 @@ import QuizPanel from "./QuizPanel";
 interface PracticePanelProps {
   quizzes: CreateQuizOutput[];
   flashcardSets: CreateFlashcardsOutput[];
+  /** Passed straight through to QuizPanel — see its own comment. */
+  onExplainMistakes?: (text: string) => void;
 }
 
 // Generate's Resources panel (internally still "Practice" — only the
@@ -22,6 +24,7 @@ interface PracticePanelProps {
 export default function PracticePanel({
   quizzes,
   flashcardSets,
+  onExplainMistakes,
 }: PracticePanelProps) {
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
@@ -75,7 +78,7 @@ export default function PracticePanel({
           forceMount
           className="min-h-0 data-[state=inactive]:hidden"
         >
-          <QuizPanel quizzes={quizzes} />
+          <QuizPanel quizzes={quizzes} onExplainMistakes={onExplainMistakes} />
         </TabsContent>
         <TabsContent
           value="flashcards"

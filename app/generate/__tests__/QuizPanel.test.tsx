@@ -1,4 +1,4 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { fireEvent } from "@testing-library/react";
 import QuizPanel from "../QuizPanel";
@@ -151,6 +151,82 @@ describe("QuizPanel completion state", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Review answers" }));
     expect(screen.getByText("1 / 3")).toBeInTheDocument();
+  });
+});
+
+describe("QuizPanel explain-mistakes handoff", () => {
+  test("finishing with wrong and unanswered questions sends one summary naming the topic and each miss", () => {
+    const onExplainMistakes = vi.fn();
+    render(
+      <QuizPanel quizzes={[multiQuestionQuiz()]} onExplainMistakes={onExplainMistakes} />,
+    );
+
+    // Question 1 correct, question 2 wrong, question 3 left unanswered —
+    // same sequence as the completion test above.
+    fireEvent.click(screen.getByRole("button", { name: "Chlorophyll" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+    fireEvent.click(screen.getByRole("button", { name: "Oxygen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish quiz" }));
+
+    expect(onExplainMistakes).toHaveBeenCalledTimes(1);
+    const message = onExplainMistakes.mock.calls[0][0] as string;
+    expect(message).toContain("Photosynthesis");
+    expect(message).toContain("2 of 3 wrong");
+    expect(message).toContain("Which gas do plants absorb for photosynthesis?");
+    expect(message).toContain('I answered "Oxygen"');
+    expect(message).toContain("Where does photosynthesis mainly take place in a plant cell?");
+    expect(message).toContain("I left this unanswered");
+    // The question answered correctly shouldn't appear as a miss.
+    expect(message).not.toContain("What pigment captures light in photosynthesis?");
+  });
+
+  test("a perfect score never calls onExplainMistakes", () => {
+    const onExplainMistakes = vi.fn();
+    render(
+      <QuizPanel quizzes={[multiQuestionQuiz()]} onExplainMistakes={onExplainMistakes} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Chlorophyll" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+    fireEvent.click(screen.getByRole("button", { name: "Carbon dioxide" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chloroplast" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish quiz" }));
+
+    expect(onExplainMistakes).not.toHaveBeenCalled();
+  });
+
+  test("reviewing answers and finishing again does not resend the explanation", () => {
+    const onExplainMistakes = vi.fn();
+    render(
+      <QuizPanel quizzes={[multiQuestionQuiz()]} onExplainMistakes={onExplainMistakes} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Chlorophyll" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+    fireEvent.click(screen.getByRole("button", { name: "Oxygen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish quiz" }));
+    expect(onExplainMistakes).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Review answers" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish quiz" }));
+
+    expect(onExplainMistakes).toHaveBeenCalledTimes(1);
+  });
+
+  test("no crash and no call when onExplainMistakes isn't provided", () => {
+    render(<QuizPanel quizzes={[multiQuestionQuiz()]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Melanin" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish quiz" }));
+
+    expect(screen.getByText("Quiz complete")).toBeInTheDocument();
   });
 });
 

@@ -1,7 +1,8 @@
+import { createRef } from "react";
 import { describe, test, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { act, render, screen, within, fireEvent } from "@testing-library/react";
 import { useChat } from "@ai-sdk/react";
-import ChatInterface from "../ChatInterface";
+import ChatInterface, { type ChatInterfaceHandle } from "../ChatInterface";
 import { makeUseChatReturn, type MockUseChatReturn } from "./useChatMock";
 import {
   assistantExtractionMessage,
@@ -136,6 +137,43 @@ describe("composer send gating", () => {
       { text: "Second question" },
       { body: { mode: "auto" } },
     );
+  });
+});
+
+// QuizPanel's "explain my mistakes" handoff (via GenerateWorkspace) sends
+// through this imperative handle rather than the composer — see
+// ChatInterfaceHandle's own comment.
+describe("imperative sendMessage handle", () => {
+  test("sends through the same path as the composer", () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(makeUseChatReturn({ sendMessage }));
+    const ref = createRef<ChatInterfaceHandle>();
+    render(<ChatInterface ref={ref} />);
+
+    act(() => {
+      ref.current?.sendMessage("I got question 2 wrong.");
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith(
+      { text: "I got question 2 wrong." },
+      { body: { mode: "auto" } },
+    );
+  });
+
+  test("does nothing while a turn is already in flight", () => {
+    const sendMessage = vi.fn();
+    mockUseChat.mockReturnValue(
+      makeUseChatReturn({ sendMessage, status: "streaming" }),
+    );
+    const ref = createRef<ChatInterfaceHandle>();
+    render(<ChatInterface ref={ref} />);
+
+    act(() => {
+      ref.current?.sendMessage("I got question 2 wrong.");
+    });
+
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 });
 

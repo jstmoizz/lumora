@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  forwardRef,
   useEffect,
+  useImperativeHandle,
   useRef,
   useState,
   useSyncExternalStore,
@@ -277,15 +279,7 @@ function ModeSelector({
   );
 }
 
-export default function ChatInterface({
-  initialConversationId,
-  initialMessages,
-  initialTopic,
-  onConversationIdKnown,
-  onTurnSettled,
-  onQuizGenerated,
-  onFlashcardsGenerated,
-}: {
+interface ChatInterfaceProps {
   /** Set when arriving from History via /generate?conversationId=... */
   initialConversationId?: string;
   initialMessages?: LumoraUIMessage[];
@@ -303,7 +297,29 @@ export default function ChatInterface({
   onQuizGenerated?: (quiz: CreateQuizOutput) => void;
   /** Same as onQuizGenerated, for createFlashcards and the Flashcards tab. */
   onFlashcardsGenerated?: (flashcards: CreateFlashcardsOutput) => void;
-}) {
+}
+
+// Exposed so a sibling outside this component's own composer — currently
+// QuizPanel's "explain my mistakes" turn, sent from Resources, a sibling
+// subtree — can push a message into this exact conversation the same way
+// the composer itself would, without lifting `useChat` out of here.
+export interface ChatInterfaceHandle {
+  sendMessage: (text: string) => void;
+}
+
+const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(
+  function ChatInterface(
+    {
+      initialConversationId,
+      initialMessages,
+      initialTopic,
+      onConversationIdKnown,
+      onTurnSettled,
+      onQuizGenerated,
+      onFlashcardsGenerated,
+    },
+    ref,
+  ) {
   const [input, setInput] = useState(() =>
     initialTopic ? `Teach me about ${initialTopic}` : "",
   );
@@ -755,6 +771,29 @@ export default function ChatInterface({
     }
   }
 
+  // Lets a caller outside this component (QuizPanel's "explain my
+  // mistakes" turn, via GenerateWorkspace) send into this exact
+  // conversation the same way the composer would. Same guard and
+  // async/await + try/finally shape as handleExampleClick, rather than
+  // `.finally()` chaining directly off sendChatMessage's return value —
+  // useChat's real sendMessage always returns a promise, but nothing here
+  // should assume that. No deps array on the hook itself so this always
+  // closes over the current status/sendChatMessage rather than a stale one.
+  useImperativeHandle(ref, () => ({
+    sendMessage: (text: string) => {
+      if (isSubmittingRef.current || status !== "ready") return;
+      isSubmittingRef.current = true;
+      setPendingIntent(null);
+      (async () => {
+        try {
+          await sendChatMessage({ text });
+        } finally {
+          isSubmittingRef.current = false;
+        }
+      })();
+    },
+  }));
+
   // Drops the failed assistant message and resends via the SDK's own
   // regenerate. A quiz/flashcards handoff retry must force mode: "auto" the
   // same way its original send did — the composer's mode state was never
@@ -1137,4 +1176,7 @@ export default function ChatInterface({
       )}
     </div>
   );
-}
+  },
+);
+
+export default ChatInterface;

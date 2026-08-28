@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CheckCircle2Icon,
   ChevronLeftIcon,
@@ -10,19 +10,22 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { CreateQuizOutput } from "@/lib/ai/tools";
+import type { CreateQuizOutput, CreateQuizQuestion } from "@/lib/ai/tools";
 import Disclosure from "./Disclosure";
 import { useAutoCollapseList } from "./useAutoCollapseList";
 
 interface QuizPanelProps {
   quizzes: CreateQuizOutput[];
+  /** See ActiveQuiz's own comment — fired once per quiz, the first time it's
+   * finished with at least one wrong or unanswered question. */
+  onExplainMistakes?: (text: string) => void;
 }
 
 // The only place the interactive quiz (navigation, answers, scoring)
 // renders — the in-chat tool-call UI only shows a non-interactive status
 // (see PracticeToolPart.tsx). Each quiz gets its own Disclosure row; only
 // the most recent starts expanded (see useAutoCollapseList.ts).
-export default function QuizPanel({ quizzes }: QuizPanelProps) {
+export default function QuizPanel({ quizzes, onExplainMistakes }: QuizPanelProps) {
   const { isOpen, setOpen } = useAutoCollapseList(quizzes[0]?.quizId);
 
   return (
@@ -50,13 +53,40 @@ export default function QuizPanel({ quizzes }: QuizPanelProps) {
               label={quiz.topic}
               meta={`${quiz.questions.length} question${quiz.questions.length === 1 ? "" : "s"}`}
             >
-              <ActiveQuiz quiz={quiz} />
+              <ActiveQuiz quiz={quiz} onExplainMistakes={onExplainMistakes} />
             </Disclosure>
           ))}
         </div>
       )}
     </div>
   );
+}
+
+// Kept short, like ChatInterface's own extractionActionText — the full quiz
+// (every question, option, and correct answer) is already in this
+// conversation's history as the createQuiz tool's output, so the AI doesn't
+// need it repeated here, just which questions were missed and what was
+// picked instead.
+function buildMistakesMessage(
+  quiz: CreateQuizOutput,
+  missed: CreateQuizQuestion[],
+  selections: Record<string, number>,
+): string {
+  const lines = missed.map((question, i) => {
+    const picked = selections[question.id];
+    const pickedText =
+      picked === undefined
+        ? "I left this unanswered"
+        : `I answered "${question.options[picked]}"`;
+    return `${i + 1}. "${question.question}" — ${pickedText}.`;
+  });
+
+  return [
+    `I just finished the quiz on ${quiz.topic} and got ${missed.length} of ${quiz.questions.length} wrong:`,
+    ...lines,
+    "",
+    "Can you explain what I got wrong on these and help me understand them better?",
+  ].join("\n");
 }
 
 // Live generation can't produce a zero-question quiz (the schema requires
@@ -83,12 +113,34 @@ function EmptyQuizFallback() {
   );
 }
 
-function ActiveQuiz({ quiz }: { quiz: CreateQuizOutput }) {
+function ActiveQuiz({
+  quiz,
+  onExplainMistakes,
+}: {
+  quiz: CreateQuizOutput;
+  onExplainMistakes?: (text: string) => void;
+}) {
   const [index, setIndex] = useState(0);
   // Selected option per question, keyed by question id. Local-only — no
   // persistence, no backend scoring.
   const [selections, setSelections] = useState<Record<string, number>>({});
   const [finished, setFinished] = useState(false);
+  // Guards against sending a second time if the user reviews answers and
+  // hits Finish again on the same quiz.
+  const hasSentExplanationRef = useRef(false);
+
+  // The first time this quiz is finished with at least one wrong or
+  // unanswered question, push a summary into the chat so the AI explains
+  // the mistakes as the next turn — see buildMistakesMessage above.
+  useEffect(() => {
+    if (!finished || hasSentExplanationRef.current) return;
+    const missed = quiz.questions.filter(
+      (question) => selections[question.id] !== question.correctIndex,
+    );
+    if (missed.length === 0) return;
+    hasSentExplanationRef.current = true;
+    onExplainMistakes?.(buildMistakesMessage(quiz, missed, selections));
+  }, [finished, quiz, selections, onExplainMistakes]);
 
   const total = quiz.questions.length;
 
