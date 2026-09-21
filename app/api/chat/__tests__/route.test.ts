@@ -111,6 +111,8 @@ vi.mock("@/lib/supabase/knowledge-graph", () => ({
 vi.mock("@/lib/ai/config", () => ({
   textModel: "mock-text-model",
   visionModel: "mock-vision-model",
+  geminiModel: "mock-gemini-model",
+  isE2eMockAiEnabled: () => false,
   resolveModel: (mode: string, hasImage: boolean) => {
     if (mode === "vision") return "mock-vision-model";
     if (mode === "fast") return "mock-text-model";
@@ -252,63 +254,153 @@ function toolResultsFromParts(parts: LumoraUIMessage["parts"]): FakeToolResult[]
   });
 }
 
-// Stands in for streamText(options) and the returned
-// .toUIMessageStreamResponse(options) — runs the route's own onStepEnd
-// (with the tool results from responseMessage.parts) and then onEnd, in
-// that order, mirroring the real SDK's sequencing.
-function setupStreamText(onEndEvent?: FakeOnEndEvent) {
-  streamTextMock.mockImplementation((streamTextOptions: { onStepEnd?: FakeOnStepEnd }) => ({
-    toUIMessageStreamResponse: vi.fn(async (options: { onEnd?: FakeOnEnd }) => {
-      if (onEndEvent) {
-        // `??` would treat an intentionally-passed `finishReason:
-        // undefined` the same as "not provided" — the fallback must only
-        // apply when the key itself is absent.
-        const finishReason =
-          "finishReason" in onEndEvent ? onEndEvent.finishReason : "stop";
-        await streamTextOptions.onStepEnd?.({
-          toolResults: toolResultsFromParts(onEndEvent.responseMessage.parts),
-        });
-        await options.onEnd?.({
-          responseMessage: onEndEvent.responseMessage,
-          isAborted: onEndEvent.isAborted ?? false,
-          isContinuation: false,
-          messages: [],
-          finishReason,
-        });
-      }
-      return new Response("ok");
-    }),
-  }));
+// Minimal stand-in for the writer passed to createUIMessageStream's
+// execute() — supports both write() (the image-extraction path) and
+// merge() (the main chat path's Gemini/Groq streaming).
+interface FakeWriter {
+  write: (chunk: unknown) => void;
+  merge: (stream: ReadableStream<unknown>) => void;
 }
 
-// Simulates a provider/model failure reaching streamText's onError.
-// Captures the route's onError return value (the safe AIErrorCode) in the
-// mocked Response body so the test can assert on it directly.
+// Since GOOGLE_API_KEY is unset in the test environment, canAttemptGemini
+// is always false here — every setupStreamText/setupStreamTextError call
+// exercises the Groq fallback branch only (streamText -> writer.merge).
+// Stands in for streamText(options) and the createUIMessageStream/
+// createUIMessageStreamResponse pair around it — runs the route's own
+// onStepEnd (with the tool results from responseMessage.parts) before
+// onEnd, mirroring the real SDK's sequencing: onStepEnd is awaited inside
+// the fake stream's `start()`, so draining it via writer.merge (awaited
+// before onEnd fires) guarantees the same ordering as production.
+function setupStreamText(onEndEvent?: FakeOnEndEvent) {
+  streamTextMock.mockImplementation((streamTextOptions: { onStepEnd?: FakeOnStepEnd }) => ({
+    stream: new ReadableStream({
+      async start(controller) {
+        if (onEndEvent) {
+          await streamTextOptions.onStepEnd?.({
+            toolResults: toolResultsFromParts(onEndEvent.responseMessage.parts),
+          });
+        }
+        controller.close();
+      },
+    }),
+    usage: Promise.resolve({ totalTokens: 0 }),
+  }));
+
+  createUIMessageStreamMock.mockImplementation(
+    (streamOptions: {
+      execute: (args: { writer: FakeWriter }) => Promise<void>;
+      onEnd?: FakeOnEnd;
+    }) =>
+      (async () => {
+        const merges: Promise<void>[] = [];
+        const writer: FakeWriter = {
+          write: () => {},
+          merge: (stream) => {
+            merges.push(
+              (async () => {
+                const reader = stream.getReader();
+                while (!(await reader.read()).done) {
+                  /* drain */
+                }
+              })(),
+            );
+          },
+        };
+        await streamOptions.execute({ writer });
+        await Promise.all(merges);
+        if (onEndEvent) {
+          // `??` would treat an intentionally-passed `finishReason:
+          // undefined` the same as "not provided" — the fallback must only
+          // apply when the key itself is absent.
+          const finishReason =
+            "finishReason" in onEndEvent ? onEndEvent.finishReason : "stop";
+          await streamOptions.onEnd?.({
+            responseMessage: onEndEvent.responseMessage,
+            isAborted: onEndEvent.isAborted ?? false,
+            isContinuation: false,
+            messages: [],
+            finishReason,
+          });
+        }
+        return new Response("ok");
+      })(),
+  );
+
+  createUIMessageStreamResponseMock.mockImplementation(
+    async ({ stream }: { stream: unknown }) => stream,
+  );
+}
+
+// Simulates a provider/model failure. Mirrors what real streamText does
+// with a 429/5xx: the failure surfaces as an `error` *part* in the stream
+// (not a thrown rejection), followed by a `finish` part with reason
+// "error". The route's real toUIMessageStream (not mocked) converts that to
+// a classified error chunk via its `onError`; this harness reads the
+// resulting errorText back out of the drained chunks.
 function setupStreamTextError(error: unknown) {
   streamTextMock.mockReturnValue({
-    toUIMessageStreamResponse: vi.fn(
-      async (options: {
-        onEnd?: (event: {
-          responseMessage: LumoraUIMessage;
-          isAborted: boolean;
-          isContinuation: boolean;
-          messages: LumoraUIMessage[];
-          finishReason?: string;
-        }) => Promise<void> | void;
-        onError?: (error: unknown) => string;
-      }) => {
-        const errorText = options.onError?.(error);
-        await options.onEnd?.({
+    stream: new ReadableStream({
+      start(controller) {
+        controller.enqueue({ type: "start" });
+        controller.enqueue({ type: "start-step" });
+        controller.enqueue({ type: "error", error });
+        controller.enqueue({ type: "finish", finishReason: "error" });
+        controller.close();
+      },
+    }),
+    usage: Promise.resolve({ totalTokens: 0 }),
+  });
+
+  createUIMessageStreamMock.mockImplementation(
+    (streamOptions: {
+      execute: (args: { writer: FakeWriter }) => Promise<void>;
+      onEnd?: FakeOnEnd;
+      onError?: (error: unknown) => string;
+    }) =>
+      (async () => {
+        const chunks: Array<{ type: string; errorText?: unknown }> = [];
+        const merges: Promise<void>[] = [];
+        const writer: FakeWriter = {
+          write: (chunk) => chunks.push(chunk as { type: string }),
+          merge: (stream) => {
+            merges.push(
+              (async () => {
+                try {
+                  const reader = stream.getReader();
+                  while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value as { type: string });
+                  }
+                } catch (mergeError) {
+                  // A thrown (rather than error-part) failure — real
+                  // createUIMessageStream catches this in merge() too.
+                  chunks.push({ type: "error", errorText: streamOptions.onError?.(mergeError) });
+                }
+              })(),
+            );
+          },
+        };
+        await streamOptions.execute({ writer });
+        await Promise.all(merges);
+        await streamOptions.onEnd?.({
           responseMessage: { id: "assistant-1", role: "assistant", parts: [] },
           isAborted: false,
           isContinuation: false,
           messages: [],
-          finishReason: undefined,
+          // Real streamText emits a finish part with reason "error" after a
+          // provider failure — persistAssistantTurn must skip this, not
+          // persist an empty message.
+          finishReason: "error",
         });
+        const errorText = chunks.find((chunk) => chunk.type === "error")?.errorText;
         return new Response(JSON.stringify({ errorText }));
-      },
-    ),
-  });
+      })(),
+  );
+
+  createUIMessageStreamResponseMock.mockImplementation(
+    async ({ stream }: { stream: unknown }) => stream,
+  );
 }
 
 const SAMPLE_EXTRACTION = {
@@ -358,18 +450,29 @@ function setupImageExtraction(
           id?: string;
           data?: unknown;
           errorText?: unknown;
+          finishReason?: string;
         }> = [];
         const writer = {
           write: (chunk: unknown) => {
             chunks.push(
-              chunk as { type: string; delta?: string; id?: string; data?: unknown },
+              chunk as {
+                type: string;
+                delta?: string;
+                id?: string;
+                data?: unknown;
+                finishReason?: string;
+              },
             );
           },
         };
         let responseMessage: LumoraUIMessage = { id: "assistant-1", role: "assistant", parts: [] };
-        let finishReason: string | undefined = "stop";
+        // Derived from the finish chunk execute() writes, exactly like real
+        // createUIMessageStream — so a `finish` with no finishReason (which
+        // persistAssistantTurn treats as a failed turn) is caught here too.
+        let finishReason: string | undefined;
         try {
           await streamOptions.execute({ writer });
+          finishReason = chunks.find((chunk) => chunk.type === "finish")?.finishReason;
           const text = chunks
             .filter((chunk) => chunk.type === "text-delta")
             .map((chunk) => chunk.delta ?? "")
@@ -1457,12 +1560,39 @@ describe("knowledge graph integration", () => {
     streamTextMock.mockImplementation((streamTextOptions: { onStepEnd?: FakeOnStepEnd }) => {
       capturedOnStepEnd = streamTextOptions.onStepEnd;
       return {
-        toUIMessageStreamResponse: vi.fn((options: { onEnd?: FakeOnEnd }) => {
-          capturedOnEnd = options.onEnd;
-          return new Response("ok");
+        stream: new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
         }),
+        usage: Promise.resolve({ totalTokens: 0 }),
       };
     });
+
+    createUIMessageStreamMock.mockImplementation(
+      (streamOptions: { execute: (args: { writer: FakeWriter }) => Promise<void>; onEnd?: FakeOnEnd }) => {
+        capturedOnEnd = streamOptions.onEnd;
+        return (async () => {
+          const writer: FakeWriter = {
+            write: () => {},
+            merge: (stream) => {
+              void (async () => {
+                const reader = stream.getReader();
+                while (!(await reader.read()).done) {
+                  /* drain */
+                }
+              })();
+            },
+          };
+          await streamOptions.execute({ writer });
+          return new Response("ok");
+        })();
+      },
+    );
+
+    createUIMessageStreamResponseMock.mockImplementation(
+      async ({ stream }: { stream: unknown }) => stream,
+    );
 
     await POST(
       makeRequest({ messages: [userMessage("Add World War II to my knowledge graph")] }),

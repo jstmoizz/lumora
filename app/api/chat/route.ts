@@ -5,17 +5,22 @@ import {
   isTextUIPart,
   stepCountIs,
   streamText,
+  toUIMessageStream,
+  type ModelMessage,
   type StepResult,
+  type TextStreamPart,
 } from "ai";
 import {
   GENERATION_CONFIG,
   SYSTEM_PROMPT,
+  geminiModel,
   isE2eMockAiEnabled,
   resolveModel,
   visionModel,
 } from "@/lib/ai/config";
 import { classifyAIError } from "@/lib/ai/errors";
 import { extractImageContent, type ImageExtraction } from "@/lib/ai/extraction";
+import { geminiTokenBudget } from "@/lib/ai/gemini-budget";
 import {
   CHAT_MODES,
   DEFAULT_CHAT_MODE,
@@ -313,6 +318,14 @@ export async function POST(req: Request) {
 
   const model = resolveModel(mode, imageValidation.hasImage);
 
+  // Gemini is the primary provider; Groq (resolved above as `model`) is the
+  // automatic, invisible fallback used whenever Gemini can't be attempted or
+  // fails before producing output (see the streamText call near the bottom
+  // of this function). The budget check is advisory/per-user — see
+  // lib/ai/gemini-budget.ts.
+  const canAttemptGemini =
+    !isE2eMockAiEnabled() && !!process.env.GOOGLE_API_KEY && geminiTokenBudget.check(userId).ok;
+
   // Each createQuiz/createFlashcards/addKnowledgeTopic call becomes a node
   // in Explore. Persisted from onStepEnd (below), as soon as the
   // tool-containing step finishes — not from onEnd, which only runs after
@@ -370,9 +383,10 @@ export async function POST(req: Request) {
     isAborted: boolean;
     finishReason?: string;
   }) {
-    // No `finish` event (the model call failed) or the user hit Stop —
-    // never write a partial/fake assistant message.
-    if (isAborted || finishReason == null) return;
+    // No `finish` event (the model call never started), a provider error
+    // mid-stream (`finishReason: "error"`), or the user hit Stop — never
+    // write a partial/fake assistant message.
+    if (isAborted || finishReason == null || finishReason === "error") return;
 
     const { error: messageError } = await supabase.from("messages").insert({
       conversation_id: conversationId,
@@ -407,7 +421,12 @@ export async function POST(req: Request) {
   // decides what happens next. Those actions are just a normal follow-up
   // message; the streamText branch below already handles it, picking up
   // the extraction from this turn's text part as ordinary history.
-  if (model === visionModel && imageValidation.hasImage) {
+  //
+  // Only reached on the Groq fallback tier: Gemini is multimodal, so when
+  // it can be attempted, an image turn goes through the normal tool-enabled
+  // flow below instead (Gemini sees the image inline, conversationally,
+  // rather than through this dedicated extraction-card UX).
+  if (!canAttemptGemini && model === visionModel && imageValidation.hasImage) {
     const imagePart = newUserMessage.parts.find(isFilePart);
     // imageValidation.hasImage already guarantees this exists.
     if (!imagePart) {
@@ -436,7 +455,10 @@ export async function POST(req: Request) {
         writer.write({ type: "text-end", id: "extraction-text" });
 
         writer.write({ type: "finish-step" });
-        writer.write({ type: "finish" });
+        // `finishReason` is required — persistAssistantTurn skips any turn
+        // whose finish reason is null (a failed/aborted turn), so without it
+        // a successful extraction would never be saved.
+        writer.write({ type: "finish", finishReason: "stop" });
       },
       onError: (error) => {
         // Logged server-side only — the client sees just the safe
@@ -450,25 +472,40 @@ export async function POST(req: Request) {
     return createUIMessageStreamResponse({ stream });
   }
 
-  // Only the turn routed to the vision model may send image content —
-  // otherwise an image from earlier in the conversation would reach a
-  // model that can't accept it.
-  const messagesForModel =
+  // Gemini (multimodal, primary) always gets the image inline when present.
+  // The Groq fallback tier only accepts images on its dedicated vision
+  // model — otherwise an image from earlier in the conversation would reach
+  // a model that can't accept it, so it's stripped there.
+  const fallbackMessagesForModel =
     model === visionModel
       ? messages
       : messages.map((message) => ({ ...message, parts: withoutImageParts(message.parts) }));
 
-  let modelMessages;
+  let geminiModelMessages: ModelMessage[];
+  let fallbackModelMessages: ModelMessage[];
   try {
-    modelMessages = await convertToModelMessages(messagesForModel);
+    geminiModelMessages = await convertToModelMessages(messages);
+    fallbackModelMessages =
+      fallbackMessagesForModel === messages
+        ? geminiModelMessages
+        : await convertToModelMessages(fallbackMessagesForModel);
   } catch {
     return Response.json({ error: "Invalid message format." }, { status: 400 });
   }
 
-  const result = streamText({
-    model,
+  // Reduces any streamed provider failure (error part or thrown) to a safe
+  // AIErrorCode — the only thing allowed across the wire. Shared by both
+  // toUIMessageStream conversions and createUIMessageStream's own onError.
+  const classifyStreamError = (error: unknown) => {
+    console.error("[api/chat] streamText error:", error);
+    return classifyAIError(error);
+  };
+
+  // Settings shared by both the Gemini attempt and the Groq fallback, so
+  // the two paths can never drift apart. `model`/`messages` are supplied
+  // per-attempt below.
+  const sharedStreamConfig = {
     instructions: SYSTEM_PROMPT,
-    messages: modelMessages,
     tools: lumoraTools,
     // Default is a single step, which would end the turn right after a
     // tool call with no room to comment on the result. Two steps lets it
@@ -477,25 +514,144 @@ export async function POST(req: Request) {
     // Fires after each step, including the tool-containing one — persists
     // the knowledge-graph write before the second (acknowledgment) step
     // even starts, instead of waiting for the whole turn to finish.
-    onStepEnd: (step) => persistKnowledgeGraphToolResults(step.toolResults),
-    // Groq can return a whole response in one or two network chunks — this
-    // re-chunks it into a steady word-by-word stream. Ours, not the AI
+    onStepEnd: (step: StepResult<typeof lumoraTools>) =>
+      persistKnowledgeGraphToolResults(step.toolResults),
+    // A provider can return a whole response in one or two network chunks —
+    // this re-chunks it into a steady word-by-word stream. Ours, not the AI
     // SDK's smoothStream, since that also paces reasoning-delta chunks,
     // which ChatInterface.tsx never renders anyway.
-    experimental_transform: smoothTextStream({ chunking: "word", delayInMs: 20 }),
+    experimental_transform: smoothTextStream<typeof lumoraTools>({ chunking: "word", delayInMs: 20 }),
     ...GENERATION_CONFIG,
+  };
+
+  // Peeks Gemini's raw stream far enough to tell whether it's actually
+  // producing output before committing to it as the response. streamText()
+  // doesn't throw synchronously on a provider 429/5xx — that only surfaces
+  // once the stream is consumed — so a plain try/catch around the call
+  // can't detect this; reading past the initial "start"/"start-step" parts
+  // can. Returns null (meaning: fall back to Groq) if Gemini fails before
+  // any real content part arrives. A failure *after* that point (mid-
+  // generation, once the client has already seen partial output) is not
+  // retried here — it surfaces through the normal onError path below,
+  // since silently discarding text the user already saw would be more
+  // confusing than a plain error.
+  async function attemptGeminiStream() {
+    const result = streamText({
+      model: geminiModel,
+      messages: geminiModelMessages,
+      // Groq is the retry — don't spend the request's time budget retrying
+      // the primary, just fall through. And bound how long a Gemini
+      // connection can accept-but-not-respond before we give up on it.
+      maxRetries: 0,
+      timeout: { firstChunkMs: 15_000 },
+      ...sharedStreamConfig,
+    });
+    const reader = result.stream.getReader();
+    const buffered: TextStreamPart<typeof lumoraTools>[] = [];
+    let failed = false;
+
+    while (true) {
+      let next;
+      try {
+        next = await reader.read();
+      } catch {
+        failed = true;
+        break;
+      }
+      if (next.done) {
+        failed = true;
+        break;
+      }
+      buffered.push(next.value);
+      // "error" = provider failure part; "abort" = the first-chunk timeout
+      // fired (Gemini accepted the request but isn't streaming). Either way,
+      // fall back to Groq rather than commit to a dead stream.
+      if (next.value.type === "error" || next.value.type === "abort") {
+        failed = true;
+        break;
+      }
+      if (next.value.type !== "start" && next.value.type !== "start-step") break;
+    }
+
+    if (failed) {
+      Promise.resolve(reader.cancel()).catch(() => {});
+      return null;
+    }
+
+    const rebuiltStream = new ReadableStream<TextStreamPart<typeof lumoraTools>>({
+      async start(controller) {
+        for (const part of buffered) controller.enqueue(part);
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          controller.enqueue(value);
+        }
+        controller.close();
+      },
+      // The client disconnected mid-stream — release the Gemini connection
+      // instead of draining it to completion in the background.
+      cancel(reason) {
+        Promise.resolve(reader.cancel(reason)).catch(() => {});
+      },
+    });
+
+    Promise.resolve(result.usage)
+      .then((usage) => {
+        if (typeof usage.totalTokens === "number") {
+          geminiTokenBudget.record(userId, usage.totalTokens);
+        }
+      })
+      .catch(() => {});
+
+    return toUIMessageStream<typeof lumoraTools, LumoraUIMessage>({
+      stream: rebuiltStream,
+      tools: lumoraTools,
+      sendStart: false,
+      // Same safe classification the fallback path and createUIMessageStream
+      // use — a mid-stream Gemini error part must not leak raw provider text.
+      onError: classifyStreamError,
+    });
+  }
+
+  const stream = createUIMessageStream<LumoraUIMessage>({
+    execute: async ({ writer }) => {
+      // Attaches the conversation id the instant the stream starts, so the
+      // client can read it from message.metadata mid-stream. Metadata set
+      // on `start` merges into `finish`, so this doesn't need repeating.
+      writer.write({ type: "start", messageMetadata: { conversationId } });
+
+      if (canAttemptGemini) {
+        try {
+          const geminiUiStream = await attemptGeminiStream();
+          if (geminiUiStream) {
+            writer.merge(geminiUiStream);
+            return;
+          }
+        } catch (geminiError) {
+          // attemptGeminiStream is built to return null on any Gemini
+          // failure; a throw here would be unexpected, but Groq is the
+          // safety net regardless.
+          console.error("[api/chat] Gemini attempt threw, falling back to Groq:", geminiError);
+        }
+      }
+
+      const fallbackResult = streamText({
+        model,
+        messages: fallbackModelMessages,
+        ...sharedStreamConfig,
+      });
+      writer.merge(
+        toUIMessageStream<typeof lumoraTools, LumoraUIMessage>({
+          stream: fallbackResult.stream,
+          tools: lumoraTools,
+          sendStart: false,
+          onError: classifyStreamError,
+        }),
+      );
+    },
+    onError: classifyStreamError,
+    onEnd: persistAssistantTurn,
   });
 
-  return result.toUIMessageStreamResponse<LumoraUIMessage>({
-    // Attaches the conversation id the instant the stream starts, so the
-    // client can read it from message.metadata mid-stream. Metadata set on
-    // `start` merges into `finish`, so this doesn't need repeating.
-    messageMetadata: ({ part }) =>
-      part.type === "start" ? { conversationId } : undefined,
-    onEnd: persistAssistantTurn,
-    onError(error) {
-      console.error("[api/chat] streamText error:", error);
-      return classifyAIError(error);
-    },
-  });
+  return createUIMessageStreamResponse({ stream });
 }

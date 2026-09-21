@@ -106,7 +106,8 @@ Here's how to get this running on your machine:
 | `NEXT_PUBLIC_SUPABASE_URL` | Yes | Public (browser-safe) | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Public (browser-safe) | Supabase anonymous key — safe to expose; RLS is the actual access control |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | **Server-only secret** | Bypasses RLS entirely; used only by `lib/supabase/admin.ts` |
-| `GROQ_API_KEY` | Yes | **Server-only secret** | Groq API access for chat/vision generation |
+| `GOOGLE_API_KEY` | Optional | **Server-only secret** | Gemini API access from Google AI Studio — primary chat provider; falls back to Groq if absent or if the call fails |
+| `GROQ_API_KEY` | Yes | **Server-only secret** | Groq API access for chat/vision generation — fallback provider (also used for the dedicated image-extraction path) |
 | `ADMIN_EMAIL` | Optional | **Server-only secret** | Email of the account granted the `admin` role |
 
 `NEXT_PUBLIC_`-prefixed variables are bundled into client-side JavaScript by Next.js — that's fine
@@ -203,8 +204,8 @@ topics all feed the same graph, nested under broader categories where the model 
   server-side session only — never from anything the client sends — and rejects unauthenticated
   requests with 401.
 - **Row Level Security**: every user-owned table is scoped by `user_id`, enforced by Postgres.
-- **Server-only secrets**: `SUPABASE_SERVICE_ROLE_KEY` and `GROQ_API_KEY` are only read in
-  server-side modules, never in anything a client component imports.
+- **Server-only secrets**: `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_API_KEY`, and `GROQ_API_KEY` are
+  only read in server-side modules, never in anything a client component imports.
 - **Input caps on `/api/chat`**: the request is rejected with `400` before any DB or AI work if
   the `messages` array exceeds 100 entries or any single message's text exceeds 8,000 characters
   (`lib/ai/model.ts`). Image attachments are separately capped at one per message, 3 MB, and
@@ -219,6 +220,19 @@ topics all feed the same graph, nested under broader categories where the model 
   deployment from trivial abuse but isn't meant to replace distributed rate limiting at larger
   scale.** A multi-instance deployment would need a shared store (e.g. Redis/Upstash) for the
   limit to hold across instances — out of scope for this project.
+- **Gemini primary, Groq fallback**: `/api/chat` tries Gemini (`gemini-2.5-flash`, via Google AI
+  Studio) first; if it's not configured, its daily token budget is exhausted, or the call fails
+  before producing output (a 429/5xx), the request silently falls back to Groq — the user never
+  sees the switch. A failure *mid-generation*, after tokens have already streamed to the client,
+  is not retried and surfaces as a normal error instead.
+- **Daily per-user Gemini token budget** (`lib/ai/gemini-budget.ts`): a 200,000 token/user/day cap,
+  the same in-memory sliding-window style as the rate limiter above (advisory/after-the-fact, since
+  token counts are only known once a call finishes — it gates the *next* Gemini attempt, not the
+  one in flight). Exceeding it doesn't error; it just routes subsequent requests straight to Groq,
+  a separately-metered provider that this budget never restricts.
+
+  **Also process-local, for the same reason as the rate limiter** — resets on redeploy/restart,
+  which is an accepted trade-off for a single-instance deployment, not a bug.
 - **Streaming timeout**: `/api/chat` sets `export const maxDuration = 60`, giving a streamed
   response with tool calls a realistic ceiling without leaving a function to run indefinitely.
 - **Vision-extraction limits**: the extraction schema bounds `summary`, `extractedContent`, and
@@ -260,6 +274,12 @@ npx playwright test    # End-to-end tests (Chromium)
 - **Chose in-memory rate limiting instead of Redis/Upstash** — this is a single-instance capstone
   deployment; adding an external dependency purely for rate limiting would be infrastructure the
   project doesn't otherwise need. See the caveat under [Security](#security--production-hygiene).
+- **Chose an automatic, invisible Groq fallback over a user-facing provider picker** for Gemini —
+  cost/quota resilience shouldn't require the user to make a decision they have no way to evaluate
+  meaningfully.
+- **Chose an in-memory, per-user daily token budget over a persisted usage table** for Gemini —
+  consistent with the rate limiter's existing in-memory philosophy for this deployment; see the
+  caveat under [Security](#security--production-hygiene).
 
 ## AI-Assisted Development
 

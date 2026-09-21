@@ -563,7 +563,7 @@ export default function SettingsClient({
             description="Information about the model powering your study sessions."
           >
             <div className="flex flex-col divide-y divide-border">
-              <InfoRow label="Provider" value="Groq" />
+              <InfoRow label="Provider" value="Gemini (with automatic fallback)" />
               <InfoRow label="Model" value="Auto-routed (fast + vision)" />
             </div>
           </SettingsSection>

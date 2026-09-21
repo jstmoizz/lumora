@@ -3,6 +3,7 @@
  * prompt, and generation settings, imported by app/api/chat/route.ts.
  */
 
+import { createGoogle } from "@ai-sdk/google";
 import { groq } from "@ai-sdk/groq";
 import { createE2eMockLanguageModel, isE2eMockAiEnabled } from "./mockModel";
 import type { ChatMode } from "./model";
@@ -11,15 +12,32 @@ import type { ChatMode } from "./model";
 // they can't end up client-visible.
 const TEXT_MODEL_ID = "openai/gpt-oss-20b";
 const VISION_MODEL_ID = "qwen/qwen3.6-27b";
+const GEMINI_MODEL_ID = "gemini-2.5-flash";
 
 // `groq()` reads GROQ_API_KEY automatically — never read or stored here.
+// These are the fallback tier, used only when Gemini can't be attempted
+// (see app/api/chat/route.ts). Groq has no single multimodal model, so
+// this tier keeps a separate text/vision split.
 export const textModel = groq(TEXT_MODEL_ID);
 export const visionModel = groq(VISION_MODEL_ID);
+
+// @ai-sdk/google's default env var is GOOGLE_GENERATIVE_AI_API_KEY — this
+// repo's env var is GOOGLE_API_KEY (see .env.example), so the key is read
+// and passed explicitly rather than relying on the SDK's own default name.
+const google = createGoogle({ apiKey: process.env.GOOGLE_API_KEY });
+
+// gemini-2.5-flash is natively multimodal, so one model covers text and
+// vision — unlike Groq's fallback tier above, no separate vision model is
+// needed here. This is the primary provider; see resolveModel below and
+// the fallback orchestration in app/api/chat/route.ts.
+export const geminiModel = google(GEMINI_MODEL_ID);
 
 export { isE2eMockAiEnabled };
 
 // Fast never routes to vision — a fast+image request is rejected earlier
 // in the route and never reaches this function with hasImage set.
+// This only resolves the Groq fallback tier's model — see geminiModel above
+// for the primary provider, which doesn't need a text/vision split.
 function resolveRealModel(mode: ChatMode, hasImage: boolean) {
   if (mode === "vision") return visionModel;
   if (mode === "fast") return textModel;
