@@ -1,19 +1,121 @@
-# Lumora
+<p align="center">
+  <b>Chat to learn a topic. Lumora turns the conversation into quizzes, flashcards, and a 3D map of what you know.</b>
+</p>
 
-Built Lumora as an AI-powered study companion. You chat with it to learn a topic, and it can
-turn that conversation into a quiz, a set of flashcards, or a tracked entry in your personal
-**Knowledge Space** — an interactive 3D graph that grows as you study and remembers how you like
-it arranged.
+<div align="center">
 
-## Production
+  <img src="https://img.shields.io/badge/Status-Live-c4b5fd?style=for-the-badge&labelColor=4338ca" alt="Status" />
+  <img src="https://img.shields.io/badge/Stack-Next.js-c4b5fd?style=for-the-badge&labelColor=4338ca" alt="Stack" />
+  <img src="https://img.shields.io/badge/Database-Supabase-c4b5fd?style=for-the-badge&labelColor=4338ca" alt="Database" />
+  <img src="https://img.shields.io/badge/Hosting-Vercel-c4b5fd?style=for-the-badge&labelColor=4338ca" alt="Hosting" />
 
-Deployed this on [Vercel](https://vercel.com): **https://lumora-z1.vercel.app**
+</div>
+
+<br>
+
+Lumora is an AI-powered study companion. You chat with it to learn a topic, and it can turn that
+conversation into a quiz, a set of flashcards, or a tracked entry in your personal **Knowledge
+Space** — an interactive 3D graph that grows as you study and remembers how you like it arranged.
+
+## <img src="https://api.iconify.design/lucide/rocket.svg?color=%236366f1" width="20" height="20">&nbsp; Production
+
+Deployed on [Vercel](https://vercel.com): **https://lumora-z1.vercel.app**
 
 Verified the app locally with the checks under [Testing](#testing) (TypeScript, lint, unit tests,
 build, Playwright) before every deploy; a full production smoke test against the live URL above
 hasn't been run yet.
 
-## Features
+## <img src="https://api.iconify.design/lucide/network.svg?color=%236366f1" width="20" height="20">&nbsp; Architecture
+
+```mermaid
+---
+config:
+  layout: elk
+  theme: base
+  themeVariables:
+    background: "#0b0a10"
+    primaryTextColor: "#ffffff"
+    lineColor: "#7c3aed"
+    clusterBkg: "#13111a"
+    clusterBorder: "#4338ca"
+    edgeLabelBackground: "#13111a"
+    fontFamily: "Geist Mono, monospace"
+---
+flowchart LR
+    USER["Browser"]
+
+    subgraph CLIENT["Next.js App Router"]
+        direction TB
+        GEN(["/generate"])
+        EXP(["/explore"])
+        HIST(["/history"])
+    end
+
+    subgraph API["API routes / Server Actions"]
+        direction TB
+        CHAT(["POST /api/chat"])
+    end
+
+    subgraph AI["Vercel AI SDK"]
+        direction LR
+        GEMINI["Gemini (primary)"]
+        GROQ["Groq (fallback)"]
+        TOOLS[("Tool calls
+        createQuiz / createFlashcards / addKnowledgeTopic")]
+    end
+
+    subgraph DATA["Supabase"]
+        direction LR
+        AUTHDB[("Auth")]
+        PG[("Postgres + RLS")]
+    end
+
+    USER --> GEN & EXP & HIST
+    GEN --> CHAT
+    CHAT -.-> AUTHDB
+    CHAT --> GEMINI
+    GEMINI -. fallback .-> GROQ
+    GEMINI --> TOOLS
+    GROQ --> TOOLS
+    TOOLS --> PG
+    PG --> EXP
+    PG --> HIST
+
+    classDef interface fill:#13111a,stroke:#4338ca,color:#ffffff,stroke-width:2px
+    classDef runtime fill:#7c3aed,stroke:#7c3aed,color:#ffffff,stroke-width:2px
+    classDef storage fill:transparent,stroke:#db2777,color:#ffffff,stroke-width:2px
+
+    class USER interface
+    class GEN,EXP,HIST,CHAT,GEMINI,GROQ runtime
+    class TOOLS,AUTHDB,PG storage
+
+    style CLIENT fill:#13111a,stroke:#4338ca,color:#ffffff
+    style API fill:#13111a,stroke:#4338ca,color:#ffffff
+    style AI fill:#13111a,stroke:#4338ca,color:#ffffff
+    style DATA fill:#13111a,stroke:#4338ca,color:#ffffff
+
+    linkStyle default stroke:#7c3aed,stroke-width:2px
+```
+
+### Chat → Knowledge Graph flow
+
+```
+User message
+  → authenticated POST /api/chat
+  → model call via streamText (tool calling enabled)
+  → a tool (createQuiz / createFlashcards / addKnowledgeTopic) is called
+  → tool output persisted to the knowledge graph immediately (onStepEnd)
+  → model's short follow-up acknowledgment streams to the client
+  → full assistant message persisted once the turn ends
+```
+
+The knowledge-graph write happens as soon as the tool-calling step finishes (`onStepEnd`), not
+after the whole turn completes. The AI SDK's default is a single step, which would end the turn
+immediately after a tool call with no room for the model to comment — `stopWhen: stepCountIs(2)`
+gives it one more step to acknowledge briefly, and the graph write doesn't wait around for that
+second step to also finish.
+
+## <img src="https://api.iconify.design/lucide/sparkles.svg?color=%236366f1" width="20" height="20">&nbsp; Features
 
 - **AI chat (`/generate`)** — a streaming conversational assistant built on Groq + the Vercel AI
   SDK, with multi-turn history, Stop-generation, and Markdown rendering that's safe mid-stream.
@@ -45,7 +147,7 @@ hasn't been run yet.
 that reports whether the app rendered and whether `GROQ_API_KEY` is configured — it doesn't
 contact any external service.
 
-## Tech stack
+## <img src="https://api.iconify.design/lucide/layers.svg?color=%236366f1" width="20" height="20">&nbsp; Tech stack
 
 Built with:
 
@@ -66,7 +168,7 @@ Built with:
 - [Playwright](https://playwright.dev) — end-to-end tests
 - [Vercel](https://vercel.com) — hosting/deployment
 
-## Local setup
+## <img src="https://api.iconify.design/lucide/terminal.svg?color=%236366f1" width="20" height="20">&nbsp; Quickstart
 
 Here's how to get this running on your machine:
 
@@ -99,7 +201,7 @@ Here's how to get this running on your machine:
    The app runs at **http://localhost:3000**. Sign up for an account at `/signup` to reach
    `/generate` and `/explore`.
 
-## Environment variables
+## <img src="https://api.iconify.design/lucide/key-round.svg?color=%236366f1" width="20" height="20">&nbsp; Environment variables
 
 | Variable | Required | Visibility | Purpose |
 |---|---|---|---|
@@ -116,7 +218,7 @@ not secrecy of those two values. **`SUPABASE_SERVICE_ROLE_KEY` is never prefixed
 `NEXT_PUBLIC_` or imported from a client component** — doing so would ship full database-bypass
 access to every visitor's browser.
 
-## Database
+## <img src="https://api.iconify.design/lucide/database.svg?color=%236366f1" width="20" height="20">&nbsp; Database
 
 Supabase handles both authentication and persistence. `auth.users` (managed by Supabase Auth) is
 the identity table; `public.users` is a profile row kept in sync by a trigger. Row Level Security
@@ -132,37 +234,7 @@ position never touches (or risks corrupting) the node's own study data.
 `supabase/schema.sql` is the single source of truth for the schema — run it once against a fresh
 project to set everything up (see [Local setup](#local-setup)).
 
-## Architecture
-
-```
-Browser
-  ↓
-Next.js App Router (React Server + Client Components)
-  ↓
-API routes / Server Actions
-  ↓
-Supabase (auth + Postgres + RLS)   Groq (via Vercel AI SDK)
-```
-
-### Chat → Knowledge Graph flow
-
-```
-User message
-  → authenticated POST /api/chat
-  → model call via streamText (tool calling enabled)
-  → a tool (createQuiz / createFlashcards / addKnowledgeTopic) is called
-  → tool output persisted to the knowledge graph immediately (onStepEnd)
-  → model's short follow-up acknowledgment streams to the client
-  → full assistant message persisted once the turn ends
-```
-
-The knowledge-graph write happens as soon as the tool-calling step finishes (`onStepEnd`), not
-after the whole turn completes. The AI SDK's default is a single step, which would end the turn
-immediately after a tool call with no room for the model to comment — `stopWhen: stepCountIs(2)`
-gives it one more step to acknowledge briefly, and the graph write doesn't wait around for that
-second step to also finish.
-
-## 3D Knowledge Space (`/explore`)
+## <img src="https://api.iconify.design/lucide/orbit.svg?color=%236366f1" width="20" height="20">&nbsp; 3D Knowledge Space (`/explore`)
 
 An interactive 3D visualization (React Three Fiber / Three.js) of the topics you've studied and
 how they relate. Each studied topic becomes a node; quizzes, flashcards, and manually-added
@@ -179,7 +251,7 @@ topics all feed the same graph, nested under broader categories where the model 
 - **Mobile** — one-finger orbit and pinch-zoom, a responsive (not full-height) canvas panel, and a
   thinned-out ambient background on coarse-pointer devices.
 
-## AI architecture
+## <img src="https://api.iconify.design/lucide/bot.svg?color=%236366f1" width="20" height="20">&nbsp; AI architecture
 
 - **Provider**: Groq, accessed through the Vercel AI SDK's `streamText`/`generateText`.
 - **Model routing**: `lib/ai/config.ts` resolves a text or vision model based on the selected mode
@@ -198,7 +270,7 @@ topics all feed the same graph, nested under broader categories where the model 
   size/type, bounded output-token limits on every AI call, and bounded field lengths on every tool
   and the vision-extraction schema — see [Security / production hygiene](#security--production-hygiene).
 
-## Security / production hygiene
+## <img src="https://api.iconify.design/lucide/shield.svg?color=%236366f1" width="20" height="20">&nbsp; Security / production hygiene
 
 - **Authentication**: Supabase Auth handles identity; `requireUser()` resolves it from the
   server-side session only — never from anything the client sends — and rejects unauthenticated
@@ -243,7 +315,7 @@ topics all feed the same graph, nested under broader categories where the model 
 - **Safe AI error handling**: see [AI architecture](#ai-architecture) above — provider/model
   details never reach the client.
 
-## Testing
+## <img src="https://api.iconify.design/lucide/flask-conical.svg?color=%236366f1" width="20" height="20">&nbsp; Testing
 
 These are the commands to run to verify the app:
 
@@ -255,7 +327,7 @@ npm run build          # Production build
 npx playwright test    # End-to-end tests (Chromium)
 ```
 
-## Important design decisions
+## <img src="https://api.iconify.design/lucide/compass.svg?color=%236366f1" width="20" height="20">&nbsp; Important design decisions
 
 - **Chose Supabase + RLS** over a hand-rolled auth/authorization layer — access control is
   enforced by Postgres itself, not application code that could have a bug in it.
@@ -281,7 +353,7 @@ npx playwright test    # End-to-end tests (Chromium)
   consistent with the rate limiter's existing in-memory philosophy for this deployment; see the
   caveat under [Security](#security--production-hygiene).
 
-## AI-Assisted Development
+## <img src="https://api.iconify.design/lucide/wand-2.svg?color=%236366f1" width="20" height="20">&nbsp; AI-Assisted Development
 
 AI tools were used throughout this project's development, with every step reviewed personally —
 generated code was read, tested, and verified rather than accepted as-is.
@@ -308,7 +380,7 @@ generated code was read, tested, and verified rather than accepted as-is.
   build, and the Playwright suite, and cross-checked against the existing test suite to confirm
   nothing regresses.
 
-## Cross-browser verification
+## <img src="https://api.iconify.design/lucide/monitor-check.svg?color=%236366f1" width="20" height="20">&nbsp; Cross-browser verification
 
 Automated E2E coverage (Playwright) runs on **Chromium** only — see
 [`playwright.config.ts`](playwright.config.ts); no Firefox/WebKit projects are configured, and
@@ -323,3 +395,7 @@ Firefox/WebKit browser binaries aren't installed in the usual dev environment.
 
 Mobile Safari was tested manually on a real device, covering the areas above. Desktop Safari and
 Firefox weren't — treat those "Not tested" cells as genuinely unverified, not passing.
+
+<p align="center">
+  <sub>Made with &nbsp;<sub><img src="https://api.iconify.design/lucide/heart.svg?color=%236366f1" width="14" height="14"></sub>&nbsp; by <a href="https://github.com/jstmoizz">jstmoizz</a></sub>
+</p>
