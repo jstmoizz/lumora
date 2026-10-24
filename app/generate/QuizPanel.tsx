@@ -6,26 +6,50 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CircleAlertIcon,
+  RotateCcwIcon,
   SparklesIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { CreateQuizOutput, CreateQuizQuestion } from "@/lib/ai/tools";
+import type {
+  QuizAttemptInput,
+  QuizAttemptSummaries,
+  QuizAttemptSummary,
+} from "@/lib/quizAttempts";
 import Disclosure from "./Disclosure";
 import { useAutoCollapseList } from "./useAutoCollapseList";
 
-interface QuizPanelProps {
+export interface QuizPanelProps {
   quizzes: CreateQuizOutput[];
   /** See ActiveQuiz's own comment — fired once per quiz, the first time it's
    * finished with at least one wrong or unanswered question. */
   onExplainMistakes?: (text: string) => void;
+  /** Saved results per quizId — shown as a best score next to each quiz. */
+  attemptSummaries?: QuizAttemptSummaries;
+  /** Fired exactly once per finished attempt (a whole quiz or a missed-only
+   * retake). Resolves to whether the result was saved. */
+  onAttemptFinished?: (
+    attempt: Omit<QuizAttemptInput, "conversationId">,
+  ) => Promise<boolean>;
+}
+
+function formatQuizMeta(questionCount: number, summary?: QuizAttemptSummary): string {
+  const count = `${questionCount} question${questionCount === 1 ? "" : "s"}`;
+  if (!summary?.bestFull) return count;
+  return `${count} · Best ${summary.bestFull.correct}/${summary.bestFull.total}`;
 }
 
 // The only place the interactive quiz (navigation, answers, scoring)
 // renders — the in-chat tool-call UI only shows a non-interactive status
 // (see PracticeToolPart.tsx). Each quiz gets its own Disclosure row; only
 // the most recent starts expanded (see useAutoCollapseList.ts).
-export default function QuizPanel({ quizzes, onExplainMistakes }: QuizPanelProps) {
+export default function QuizPanel({
+  quizzes,
+  onExplainMistakes,
+  attemptSummaries,
+  onAttemptFinished,
+}: QuizPanelProps) {
   const { isOpen, setOpen } = useAutoCollapseList(quizzes[0]?.quizId);
 
   return (
@@ -51,9 +75,14 @@ export default function QuizPanel({ quizzes, onExplainMistakes }: QuizPanelProps
               open={isOpen(quiz.quizId)}
               onOpenChange={(open) => setOpen(quiz.quizId, open)}
               label={quiz.topic}
-              meta={`${quiz.questions.length} question${quiz.questions.length === 1 ? "" : "s"}`}
+              meta={formatQuizMeta(quiz.questions.length, attemptSummaries?.[quiz.quizId])}
             >
-              <ActiveQuiz quiz={quiz} onExplainMistakes={onExplainMistakes} />
+              <ActiveQuiz
+                quiz={quiz}
+                onExplainMistakes={onExplainMistakes}
+                summary={attemptSummaries?.[quiz.quizId]}
+                onAttemptFinished={onAttemptFinished}
+              />
             </Disclosure>
           ))}
         </div>
@@ -116,50 +145,68 @@ function EmptyQuizFallback() {
 function ActiveQuiz({
   quiz,
   onExplainMistakes,
+  summary,
+  onAttemptFinished,
 }: {
   quiz: CreateQuizOutput;
   onExplainMistakes?: (text: string) => void;
+  summary?: QuizAttemptSummary;
+  onAttemptFinished?: QuizPanelProps["onAttemptFinished"];
 }) {
   const [index, setIndex] = useState(0);
-  // Selected option per question, keyed by question id. Local-only — no
-  // persistence, no backend scoring.
+  // Selected option per question, keyed by question id. Reset on every
+  // retake — scoring is still client-side; only the result is saved.
   const [selections, setSelections] = useState<Record<string, number>>({});
   const [finished, setFinished] = useState(false);
+  // `null` = the whole quiz; otherwise a retake of just these question ids
+  // (the ones the previous attempt got wrong).
+  const [retakeQuestionIds, setRetakeQuestionIds] = useState<string[] | null>(null);
+  const [saveFailed, setSaveFailed] = useState(false);
   // Guards against sending a second time if the user reviews answers and
   // hits Finish again on the same quiz.
   const hasSentExplanationRef = useRef(false);
+  // Same guard for saving: Review answers -> Finish again is the same
+  // attempt, not a new one. Cleared only when a retake starts.
+  const hasReportedAttemptRef = useRef(false);
+
+  const questions = retakeQuestionIds
+    ? quiz.questions.filter((question) => retakeQuestionIds.includes(question.id))
+    : quiz.questions;
+  const mode = retakeQuestionIds ? "missed" : "full";
 
   // The first time this quiz is finished with at least one wrong or
   // unanswered question, push a summary into the chat so the AI explains
-  // the mistakes as the next turn — see buildMistakesMessage above.
+  // the mistakes as the next turn — see buildMistakesMessage above. Only
+  // ever for the first, whole-quiz attempt; retakes don't re-ask.
   useEffect(() => {
-    if (!finished || hasSentExplanationRef.current) return;
+    if (!finished || hasSentExplanationRef.current || retakeQuestionIds) return;
     const missed = quiz.questions.filter(
       (question) => selections[question.id] !== question.correctIndex,
     );
     if (missed.length === 0) return;
     hasSentExplanationRef.current = true;
     onExplainMistakes?.(buildMistakesMessage(quiz, missed, selections));
-  }, [finished, quiz, selections, onExplainMistakes]);
+  }, [finished, quiz, selections, onExplainMistakes, retakeQuestionIds]);
 
-  const total = quiz.questions.length;
+  const total = questions.length;
 
-  // Guards every access below `quiz.questions[index]` at once — with zero
+  // Guards every access below `questions[index]` at once — with zero
   // questions there's no valid index at all (0 is already out of bounds).
   if (total === 0) {
     return <EmptyQuizFallback />;
   }
 
-  const question = quiz.questions[index];
+  const question = questions[index];
   const selected = selections[question.id];
   const hasAnswered = selected !== undefined;
   const answeredCorrectly = selected === question.correctIndex;
   const isLastQuestion = index === total - 1;
 
-  const correctCount = quiz.questions.filter(
-    (q) => selections[q.id] === q.correctIndex,
-  ).length;
-  const answeredCount = Object.keys(selections).length;
+  const missedQuestions = questions.filter(
+    (q) => selections[q.id] !== q.correctIndex,
+  );
+  const correctCount = total - missedQuestions.length;
+  const answeredCount = questions.filter((q) => selections[q.id] !== undefined).length;
 
   function selectOption(optionIndex: number) {
     setSelections((prev) => ({ ...prev, [question.id]: optionIndex }));
@@ -169,12 +216,37 @@ function ActiveQuiz({
     setIndex((current) => Math.max(0, current - 1));
   }
 
+  function reportAttempt() {
+    if (hasReportedAttemptRef.current || !onAttemptFinished) return;
+    hasReportedAttemptRef.current = true;
+    onAttemptFinished({
+      quizId: quiz.quizId,
+      topic: quiz.topic,
+      mode,
+      correctCount,
+      totalCount: total,
+      missedQuestionIds: missedQuestions.map((q) => q.id),
+    })
+      .then((saved) => setSaveFailed(!saved))
+      .catch(() => setSaveFailed(true));
+  }
+
   function goToNext() {
     if (isLastQuestion) {
       setFinished(true);
+      reportAttempt();
       return;
     }
     setIndex((current) => Math.min(total - 1, current + 1));
+  }
+
+  function startAttempt(questionIds: string[] | null) {
+    setRetakeQuestionIds(questionIds);
+    setSelections({});
+    setIndex(0);
+    setFinished(false);
+    setSaveFailed(false);
+    hasReportedAttemptRef.current = false;
   }
 
   if (finished) {
@@ -188,7 +260,7 @@ function ActiveQuiz({
         </div>
         <div className="flex flex-col gap-1">
           <p className="text-sm font-semibold text-foreground">
-            Quiz complete
+            {mode === "missed" ? "Retake complete" : "Quiz complete"}
           </p>
           <p className="text-xs text-muted-foreground">
             {correctCount} / {total} correct
@@ -196,18 +268,50 @@ function ActiveQuiz({
               ? ` — ${total - answeredCount} unanswered`
               : ""}
           </p>
+          {summary?.bestFull && (
+            <p className="text-xs text-muted-foreground">
+              Best: {summary.bestFull.correct} / {summary.bestFull.total}
+              {` · ${summary.attempts} attempt${summary.attempts === 1 ? "" : "s"}`}
+            </p>
+          )}
+          {saveFailed && (
+            <p role="status" className="text-xs text-muted-foreground">
+              Couldn&apos;t save this score.
+            </p>
+          )}
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            setIndex(0);
-            setFinished(false);
-          }}
-        >
-          Review answers
-        </Button>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setIndex(0);
+              setFinished(false);
+            }}
+          >
+            Review answers
+          </Button>
+          {missedQuestions.length > 0 && (
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => startAttempt(missedQuestions.map((q) => q.id))}
+              className="gap-1 bg-[var(--generate-accent-solid)] text-[var(--generate-accent-foreground)] hover:bg-[var(--generate-accent-solid)] hover:opacity-90"
+            >
+              <RotateCcwIcon aria-hidden="true" className="size-3.5" />
+              Retake missed ({missedQuestions.length})
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => startAttempt(null)}
+          >
+            Retake quiz
+          </Button>
+        </div>
       </div>
     );
   }
@@ -216,7 +320,7 @@ function ActiveQuiz({
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-2">
         <p className="min-w-0 truncate text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          {quiz.topic}
+          {mode === "missed" ? `${quiz.topic} · Missed questions` : quiz.topic}
         </p>
         <p className="shrink-0 text-xs font-medium text-muted-foreground">
           {index + 1} / {total}

@@ -1,12 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import { HistoryIcon } from "lucide-react";
+import { HistoryIcon, SearchIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import ConversationRowActions from "@/app/components/conversations/ConversationRowActions";
+import RenameConversationForm from "@/app/components/conversations/RenameConversationForm";
+import ConfirmDialog from "@/app/explore/components/ConfirmDialog";
+import {
+  readActiveConversationId,
+  writeActiveConversationId,
+} from "@/app/generate/activeConversationStorage";
 import { formatRelativeTime } from "@/lib/formatRelativeTime";
+import { normalizeConversationTitle } from "@/lib/conversationTitle";
+import {
+  deleteConversation,
+  renameConversation,
+} from "@/lib/supabase/conversation-actions";
 import type { ConversationSummary } from "@/lib/supabase/conversations";
 import HistoryParticlesBackground from "./HistoryParticlesBackground";
 
@@ -15,40 +28,77 @@ function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
+const RENAME_FAILED = "Couldn't rename this conversation. Please try again.";
+const DELETE_FAILED = "Couldn't delete this conversation. Please try again.";
+
 function ConversationRow({
   conversation,
+  isRenaming,
+  onStartRename,
+  onCancelRename,
+  onRename,
+  onDelete,
 }: {
   conversation: ConversationSummary;
+  isRenaming: boolean;
+  onStartRename: () => void;
+  onCancelRename: () => void;
+  onRename: (title: string) => Promise<string | null>;
+  onDelete: () => void;
 }) {
-  return (
-    <Link
-      href={`/generate?conversationId=${conversation.id}`}
-      className="group flex items-center justify-between gap-4 rounded-lg border border-transparent px-4 py-3 transition-colors duration-150 ease-out hover:border-border hover:bg-card"
-    >
-      <span className="flex min-w-0 items-center gap-3">
-        <span
-          aria-hidden="true"
-          className="size-1 shrink-0 rounded-full bg-border transition-colors duration-150 ease-out group-hover:bg-primary"
+  const titleId = `history-title-${conversation.id}`;
+
+  if (isRenaming) {
+    return (
+      <div className="rounded-lg border border-border bg-card px-4 py-3">
+        <RenameConversationForm
+          initialTitle={conversation.title}
+          onSave={onRename}
+          onCancel={onCancelRename}
         />
-        <span className="min-w-0 truncate text-sm font-medium text-foreground">
-          {conversation.title}
-        </span>
-      </span>
-      {/*
-        The formatted string depends on the current time, not just
-        `conversation.updatedAt` — a client/server render a few seconds
-        apart can legitimately disagree ("2 minutes ago" vs "3 minutes
-        ago"). That's expected here, not a real mismatch to fix, so it's
-        suppressed rather than worked around the way app/generate's random
-        example prompts are.
-      */}
-      <span
-        suppressHydrationWarning
-        className="shrink-0 text-xs text-muted-foreground"
+      </div>
+    );
+  }
+
+  return (
+    <div className="group flex items-center gap-1 rounded-lg border border-transparent pr-2 transition-colors duration-150 ease-out focus-within:border-border hover:border-border hover:bg-card">
+      <Link
+        href={`/generate?conversationId=${conversation.id}`}
+        className="flex min-w-0 flex-1 items-center justify-between gap-4 rounded-lg px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       >
-        {formatRelativeTime(conversation.updatedAt)}
-      </span>
-    </Link>
+        <span className="flex min-w-0 items-center gap-3">
+          <span
+            aria-hidden="true"
+            className="size-1 shrink-0 rounded-full bg-border transition-colors duration-150 ease-out group-hover:bg-primary"
+          />
+          <span
+            id={titleId}
+            className="min-w-0 truncate text-sm font-medium text-foreground"
+          >
+            {conversation.title}
+          </span>
+        </span>
+        {/*
+          The formatted string depends on the current time, not just
+          `conversation.updatedAt` — a client/server render a few seconds
+          apart can legitimately disagree ("2 minutes ago" vs "3 minutes
+          ago"). That's expected here, not a real mismatch to fix, so it's
+          suppressed rather than worked around the way app/generate's random
+          example prompts are.
+        */}
+        <span
+          suppressHydrationWarning
+          className="shrink-0 text-xs text-muted-foreground"
+        >
+          {formatRelativeTime(conversation.updatedAt)}
+        </span>
+      </Link>
+      <ConversationRowActions
+        titleId={titleId}
+        onRename={onStartRename}
+        onDelete={onDelete}
+      />
+    </div>
   );
 }
 
@@ -66,7 +116,58 @@ export default function HistoryClient({
   const ctaRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const isEmpty = conversations.length === 0;
+  // Seeded from the server render, then kept in sync locally after a
+  // rename/delete — no refetch needed for changes this page made itself.
+  const [items, setItems] = useState(conversations);
+  const [query, setQuery] = useState("");
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<ConversationSummary | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const isEmpty = items.length === 0;
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleItems = normalizedQuery
+    ? items.filter((item) => item.title.toLowerCase().includes(normalizedQuery))
+    : items;
+
+  async function handleRename(id: string, title: string): Promise<string | null> {
+    try {
+      const result = await renameConversation(id, title);
+      if (!result.ok) return result.error ?? RENAME_FAILED;
+    } catch {
+      return RENAME_FAILED;
+    }
+    const normalized = normalizeConversationTitle(title);
+    setItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, title: normalized } : item)),
+    );
+    setRenamingId(null);
+    setActionError(null);
+    return null;
+  }
+
+  async function handleConfirmDelete(conversation: ConversationSummary) {
+    setIsDeleting(true);
+    setActionError(null);
+    try {
+      const result = await deleteConversation(conversation.id);
+      if (!result.ok) {
+        setActionError(DELETE_FAILED);
+        return;
+      }
+      setItems((prev) => prev.filter((item) => item.id !== conversation.id));
+      // Generate restores this tab's last-active conversation on its next
+      // visit — don't point it at one that no longer exists.
+      if (readActiveConversationId() === conversation.id) {
+        writeActiveConversationId(null);
+      }
+    } catch {
+      setActionError(DELETE_FAILED);
+    } finally {
+      setIsDeleting(false);
+    }
+  }
 
   // One-time cascading entrance: page title -> subtitle -> (empty-state
   // icon/heading/description/CTA, or the conversation list). Same short
@@ -178,19 +279,79 @@ export default function HistoryClient({
           </div>
         </div>
       ) : (
-        <div
-          ref={listRef}
-          role="list"
-          aria-label="Study sessions"
-          className="mt-10 flex w-full max-w-2xl flex-col gap-2"
-        >
-          {conversations.map((conversation) => (
-            <div role="listitem" key={conversation.id}>
-              <ConversationRow conversation={conversation} />
+        <div className="mt-10 flex w-full max-w-2xl flex-col gap-3">
+          <div className="relative">
+            <SearchIcon
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search conversations"
+              aria-label="Search conversations"
+              className="h-10 pl-9 text-sm"
+            />
+          </div>
+
+          {actionError && (
+            <p role="alert" className="text-xs text-destructive">
+              {actionError}
+            </p>
+          )}
+
+          {visibleItems.length === 0 ? (
+            <p role="status" className="py-8 text-center text-sm text-muted-foreground">
+              No conversations match &ldquo;{query.trim()}&rdquo;.
+            </p>
+          ) : (
+            <div
+              ref={listRef}
+              role="list"
+              aria-label="Study sessions"
+              className="flex flex-col gap-2"
+            >
+              {visibleItems.map((conversation) => (
+                <div role="listitem" key={conversation.id}>
+                  <ConversationRow
+                    conversation={conversation}
+                    isRenaming={renamingId === conversation.id}
+                    onStartRename={() => {
+                      setActionError(null);
+                      setRenamingId(conversation.id);
+                    }}
+                    onCancelRename={() => setRenamingId(null)}
+                    onRename={(title) => handleRename(conversation.id, title)}
+                    onDelete={() => {
+                      setActionError(null);
+                      setPendingDelete(conversation);
+                    }}
+                  />
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+        title="Delete this conversation?"
+        description={
+          pendingDelete
+            ? `"${pendingDelete.title}" and everything in it — messages, quizzes, and saved scores — will be permanently deleted. This can't be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        confirmDisabled={isDeleting}
+        onConfirm={() => {
+          if (pendingDelete) void handleConfirmDelete(pendingDelete);
+        }}
+      />
     </main>
   );
 }

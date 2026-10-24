@@ -37,6 +37,11 @@ export const E2E_WORKSPACE_TEST_PASSWORD =
 export const E2E_LOGOUT_TEST_EMAIL = "lumora-e2e-logout-test@example.com";
 export const E2E_LOGOUT_TEST_PASSWORD = "Lumora-E2E-Logout-Test-Password-1!";
 
+// Dedicated account for history-manage.spec.ts, which renames and deletes
+// conversations — keeps those mutations away from every other spec's data.
+export const E2E_MANAGE_TEST_EMAIL = "lumora-e2e-manage-test@example.com";
+export const E2E_MANAGE_TEST_PASSWORD = "Lumora-E2E-Manage-Test-Password-1!";
+
 export const AUTH_STATE_PATH = resolve(__dirname, ".auth", "user.json");
 
 // Playwright's own process doesn't inherit `.env.local` the way the
@@ -103,6 +108,7 @@ export default async function globalSetup(config: FullConfig) {
   await ensureUserExists(E2E_HISTORY_TEST_EMAIL, E2E_HISTORY_TEST_PASSWORD);
   await ensureUserExists(E2E_WORKSPACE_TEST_EMAIL, E2E_WORKSPACE_TEST_PASSWORD);
   await ensureUserExists(E2E_LOGOUT_TEST_EMAIL, E2E_LOGOUT_TEST_PASSWORD);
+  await ensureUserExists(E2E_MANAGE_TEST_EMAIL, E2E_MANAGE_TEST_PASSWORD);
 
   const baseURL =
     config.projects[0]?.use?.baseURL ?? "http://localhost:3100";

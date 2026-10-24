@@ -16,6 +16,20 @@ import type {
   LumoraUIMessage,
 } from "@/lib/ai/tools";
 import type { ConversationSummary } from "@/lib/supabase/conversations";
+import { normalizeConversationTitle } from "@/lib/conversationTitle";
+import {
+  deleteConversation,
+  renameConversation,
+} from "@/lib/supabase/conversation-actions";
+import {
+  addAttemptToSummaries,
+  type QuizAttemptInput,
+  type QuizAttemptSummaries,
+} from "@/lib/quizAttempts";
+import {
+  getQuizAttemptSummaries,
+  saveQuizAttempt,
+} from "@/lib/supabase/quiz-attempt-actions";
 import {
   readActiveConversationId,
   writeActiveConversationId,
@@ -80,6 +94,57 @@ function GenerateSession({
   );
   const chatRef = useRef<ChatInterfaceHandle>(null);
 
+  // A ref, not state: a brand-new chat only learns its id after the first
+  // turn, and the save callback below must always see the latest one
+  // without being recreated.
+  const conversationIdRef = useRef(initialConversationId);
+  const [attemptSummaries, setAttemptSummaries] = useState<QuizAttemptSummaries>({});
+  // Attempts finished in this session, so a slow initial load can't
+  // overwrite one that landed before it.
+  const localAttemptsRef = useRef<Omit<QuizAttemptInput, "conversationId">[]>([]);
+
+  useEffect(() => {
+    if (!initialConversationId) return;
+    let cancelled = false;
+    getQuizAttemptSummaries(initialConversationId)
+      .then((saved) => {
+        if (cancelled) return;
+        setAttemptSummaries(localAttemptsRef.current.reduce(addAttemptToSummaries, saved));
+      })
+      .catch(() => {
+        // Best-effort: without saved scores the quizzes still work, just
+        // without a "Best" line.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialConversationId]);
+
+  const handleAttemptFinished = useCallback(
+    async (attempt: Omit<QuizAttemptInput, "conversationId">) => {
+      localAttemptsRef.current.push(attempt);
+      setAttemptSummaries((prev) => addAttemptToSummaries(prev, attempt));
+      try {
+        const { ok } = await saveQuizAttempt({
+          ...attempt,
+          conversationId: conversationIdRef.current,
+        });
+        return ok;
+      } catch {
+        return false;
+      }
+    },
+    [],
+  );
+
+  const handleConversationIdKnown = useCallback(
+    (id: string) => {
+      conversationIdRef.current = id;
+      onConversationIdKnown(id);
+    },
+    [onConversationIdKnown],
+  );
+
   const handleQuizGenerated = useCallback((quiz: CreateQuizOutput) => {
     // Dedupes by quizId defensively, rather than assuming this is never
     // called twice for the same quiz.
@@ -112,7 +177,7 @@ function GenerateSession({
           initialConversationId={initialConversationId}
           initialMessages={initialMessages}
           initialTopic={initialTopic}
-          onConversationIdKnown={onConversationIdKnown}
+          onConversationIdKnown={handleConversationIdKnown}
           onTurnSettled={onTurnSettled}
           onQuizGenerated={handleQuizGenerated}
           onFlashcardsGenerated={handleFlashcardsGenerated}
@@ -127,6 +192,8 @@ function GenerateSession({
           quizzes={quizzes}
           flashcardSets={flashcardSets}
           onExplainMistakes={handleExplainMistakes}
+          attemptSummaries={attemptSummaries}
+          onAttemptFinished={handleAttemptFinished}
         />
       </aside>
 
@@ -141,6 +208,8 @@ function GenerateSession({
             quizzes={quizzes}
             flashcardSets={flashcardSets}
             onExplainMistakes={handleExplainMistakes}
+            attemptSummaries={attemptSummaries}
+            onAttemptFinished={handleAttemptFinished}
           />
         </AccentScope>
       </MobilePanelDrawer>
@@ -316,6 +385,41 @@ export default function GenerateWorkspace({
     [router, refreshConversations],
   );
 
+  const handleRenameConversation = useCallback(
+    async (id: string, title: string): Promise<string | null> => {
+      const failed = "Couldn't rename this conversation. Please try again.";
+      try {
+        const result = await renameConversation(id, title);
+        if (!result.ok) return result.error ?? failed;
+      } catch {
+        return failed;
+      }
+      const normalized = normalizeConversationTitle(title);
+      setConversations((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, title: normalized } : item)),
+      );
+      return null;
+    },
+    [],
+  );
+
+  const handleDeleteConversation = useCallback(
+    async (id: string): Promise<boolean> => {
+      try {
+        const result = await deleteConversation(id);
+        if (!result.ok) return false;
+      } catch {
+        return false;
+      }
+      setConversations((prev) => prev.filter((item) => item.id !== id));
+      // Deleting the conversation on screen leaves nothing to show — start
+      // fresh, exactly as if New Chat had been clicked.
+      if (id === activeConversationId) handleNewChat();
+      return true;
+    },
+    [activeConversationId, handleNewChat],
+  );
+
   const handleTurnSettled = useCallback(() => {
     void refreshConversations();
   }, [refreshConversations]);
@@ -364,6 +468,8 @@ export default function GenerateWorkspace({
           selectionError={selectionError}
           onSelect={handleSelectConversation}
           onNewChat={handleNewChat}
+          onRename={handleRenameConversation}
+          onDelete={handleDeleteConversation}
         />
       </aside>
 
@@ -413,6 +519,8 @@ export default function GenerateWorkspace({
             selectionError={selectionError}
             onSelect={handleSelectConversation}
             onNewChat={handleNewChat}
+            onRename={handleRenameConversation}
+            onDelete={handleDeleteConversation}
           />
         </AccentScope>
       </MobilePanelDrawer>

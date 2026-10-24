@@ -13,6 +13,7 @@ describe("supabase/schema.sql", () => {
       "public.user_settings",
       "public.knowledge_nodes",
       "public.knowledge_node_positions",
+      "public.quiz_attempts",
     ]) {
       expect(sql).toContain(`create table ${table}`);
     }
@@ -31,6 +32,7 @@ describe("supabase/schema.sql", () => {
       "public.user_settings",
       "public.knowledge_nodes",
       "public.knowledge_node_positions",
+      "public.quiz_attempts",
     ]) {
       expect(sql).toContain(`alter table ${table} enable row level security`);
     }
@@ -75,6 +77,33 @@ describe("supabase/schema.sql", () => {
     expect(withCheck).toMatch(/auth\.uid\(\) = user_id/);
     expect(withCheck).toMatch(/from public\.knowledge_nodes/);
     expect(withCheck).toMatch(/id = node_id/);
+  });
+
+  test("quiz_attempts cascades from its user and conversation, and validates its score", () => {
+    expect(sql).toMatch(
+      /conversation_id uuid references public\.conversations \(id\) on delete cascade/,
+    );
+    expect(sql).toContain("check (mode in ('full', 'missed'))");
+    expect(sql).toContain(
+      "check (total_count > 0 and correct_count >= 0 and correct_count <= total_count)",
+    );
+  });
+
+  test("quiz_attempts can only be inserted against a conversation the caller owns, and is append-only", () => {
+    // Same reasoning as knowledge_node_positions: `auth.uid() = user_id`
+    // alone would let a client attach its attempt to someone else's
+    // conversation id.
+    const insertPolicyMatch = sql.match(
+      /create policy "Users can insert own quiz attempts"[\s\S]*?with check \(([\s\S]*?)\r?\n {2}\);/,
+    );
+    expect(insertPolicyMatch).not.toBeNull();
+    const withCheck = insertPolicyMatch![1];
+    expect(withCheck).toMatch(/auth\.uid\(\) = user_id/);
+    expect(withCheck).toMatch(/from public\.conversations/);
+    expect(withCheck).toMatch(/id = conversation_id/);
+
+    expect(sql).not.toMatch(/on public\.quiz_attempts for update/);
+    expect(sql).not.toMatch(/on public\.quiz_attempts for delete/);
   });
 
   test("never contains a real admin email address", () => {

@@ -2,14 +2,19 @@
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { CreateFlashcardsOutput, CreateQuizOutput } from "@/lib/ai/tools";
+import type { QuizAttemptSummaries } from "@/lib/quizAttempts";
 import FlashcardsPanel from "./FlashcardsPanel";
-import QuizPanel from "./QuizPanel";
+import QuizPanel, { type QuizPanelProps } from "./QuizPanel";
 
 interface PracticePanelProps {
   quizzes: CreateQuizOutput[];
   flashcardSets: CreateFlashcardsOutput[];
   /** Passed straight through to QuizPanel — see its own comment. */
   onExplainMistakes?: (text: string) => void;
+  /** Passed straight through to QuizPanel. */
+  attemptSummaries?: QuizAttemptSummaries;
+  /** Passed straight through to QuizPanel. */
+  onAttemptFinished?: QuizPanelProps["onAttemptFinished"];
 }
 
 // Generate's Resources panel (internally still "Practice" — only the
@@ -25,6 +30,8 @@ export default function PracticePanel({
   quizzes,
   flashcardSets,
   onExplainMistakes,
+  attemptSummaries,
+  onAttemptFinished,
 }: PracticePanelProps) {
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
@@ -78,7 +85,12 @@ export default function PracticePanel({
           forceMount
           className="min-h-0 data-[state=inactive]:hidden"
         >
-          <QuizPanel quizzes={quizzes} onExplainMistakes={onExplainMistakes} />
+          <QuizPanel
+            quizzes={quizzes}
+            onExplainMistakes={onExplainMistakes}
+            attemptSummaries={attemptSummaries}
+            onAttemptFinished={onAttemptFinished}
+          />
         </TabsContent>
         <TabsContent
           value="flashcards"

@@ -259,3 +259,58 @@ create policy "Users can delete own node positions"
 
 create index knowledge_node_positions_user_id_idx
   on public.knowledge_node_positions (user_id);
+
+-- ============================================================================
+-- quiz_attempts — one row per finished quiz attempt in Generate's Resources
+-- panel, so a score outlives the session that earned it. Append-only, like
+-- messages: an attempt is a historical fact, never edited after the fact.
+--
+-- quiz_id is the createQuiz tool's own `quizId` (persisted inside the
+-- conversation's message parts), not a foreign key — quizzes aren't rows
+-- of their own. mode 'missed' is a retake of only the questions a previous
+-- attempt got wrong; 'full' is the whole quiz.
+-- ============================================================================
+
+create table public.quiz_attempts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users (id) on delete cascade,
+  conversation_id uuid references public.conversations (id) on delete cascade,
+  quiz_id text not null,
+  topic text not null,
+  mode text not null check (mode in ('full', 'missed')),
+  correct_count integer not null,
+  total_count integer not null,
+  missed_question_ids text[] not null default '{}',
+  created_at timestamptz not null default now(),
+  check (total_count > 0 and correct_count >= 0 and correct_count <= total_count)
+);
+
+alter table public.quiz_attempts enable row level security;
+
+create policy "Users can view own quiz attempts"
+  on public.quiz_attempts for select
+  using (auth.uid() = user_id);
+
+-- Same shape as knowledge_node_positions' insert policy: checking only
+-- `auth.uid() = user_id` would let a client attach its own attempt to
+-- someone else's conversation id.
+create policy "Users can insert own quiz attempts"
+  on public.quiz_attempts for insert
+  with check (
+    auth.uid() = user_id
+    and (
+      conversation_id is null
+      or exists (
+        select 1
+        from public.conversations
+        where id = conversation_id
+          and user_id = auth.uid()
+      )
+    )
+  );
+
+-- No update/delete policy: attempts are append-only. They disappear only
+-- via their conversation or user being deleted (cascades).
+
+create index quiz_attempts_conversation_id_idx
+  on public.quiz_attempts (conversation_id);

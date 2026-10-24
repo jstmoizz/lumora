@@ -190,6 +190,34 @@ export interface Database {
         };
         Relationships: [];
       };
+      quiz_attempts: {
+        Row: {
+          id: string;
+          user_id: string;
+          conversation_id: string | null;
+          quiz_id: string;
+          topic: string;
+          mode: "full" | "missed";
+          correct_count: number;
+          total_count: number;
+          missed_question_ids: string[];
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          conversation_id?: string | null;
+          quiz_id: string;
+          topic: string;
+          mode: "full" | "missed";
+          correct_count: number;
+          total_count: number;
+          missed_question_ids?: string[];
+          created_at?: string;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
