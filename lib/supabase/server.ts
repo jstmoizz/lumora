@@ -9,6 +9,7 @@
 
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { cache } from "react";
 import type { Database } from "./types";
 
 export async function createClient() {
@@ -42,11 +43,17 @@ export async function createClient() {
  * The currently authenticated user for this request, or `null` if no one's
  * signed in. Thin wrapper around `auth.getUser()`, which re-validates the
  * session against Supabase rather than trusting a possibly-stale cookie.
+ *
+ * Wrapped in `React.cache` so the root layout, the page, and any data
+ * helpers rendering in the same request share one `getUser()` round-trip
+ * instead of each making their own. The memo is scoped to a single
+ * request — never shared across users — and nothing in a render changes
+ * auth state, so every caller would have seen the same user anyway.
  */
-export async function getServerUser() {
+export const getServerUser = cache(async () => {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   return user;
-}
+});
